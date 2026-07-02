@@ -1,0 +1,318 @@
+// FabricFold — schema approved by owner (see docs/handoff README)
+// NOTE: "enum" fields are strings validated by zod at the API boundary so the
+// same schema runs on SQLite (local dev) and Postgres/Supabase (production).
+// Switch = change datasource provider + DATABASE_URL.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ───────────── Org ─────────────
+model College {
+  id       String    @id @default(cuid())
+  name     String
+  address  String    @default("")
+  active   Boolean   @default(true)
+  features Json // per-college flags: svc_wash, svc_iron, svc_dryclean, subscriptions, credits, express, chat
+  students Student[]
+  staff    Staff[]
+  orders   Order[]
+}
+
+model Student {
+  id             String   @id // human FabricFold code (6 digits) — shown on card/QR
+  phone          String   @unique
+  name           String
+  collegeId      String
+  college        College  @relation(fields: [collegeId], references: [id])
+  credits        Decimal  @default(0)
+  lifetimePieces Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  subscription  Subscription?
+  orders        Order[]
+  payments      Payment[]
+  creditUses    CreditUse[]
+  compensations Compensation[]
+  complaints    Complaint[]
+  notifications Notification[]
+}
+
+model Staff {
+  id        String   @id @default(cuid())
+  phone     String   @unique
+  name      String
+  role      Int // 1 Counter · 2 Manager · 3 Admin · 4 Owner (server-enforced)
+  collegeId String?
+  college   College? @relation(fields: [collegeId], references: [id])
+  payslips  Payslip[]
+}
+
+// ───────────── Subscription (cycle-based) ─────────────
+model Subscription {
+  id          String    @id @default(cuid())
+  studentId   String    @unique
+  student     Student   @relation(fields: [studentId], references: [id])
+  active      Boolean   @default(false) // false = pending Manager+ approval
+  plan        String
+  startedAt   DateTime?
+  expiresAt   DateTime?
+  cyclesTotal Int
+  cyclesUsed  Int       @default(0)
+  kgPerCycle  Decimal
+  cycleLog    CycleUse[]
+}
+
+model CycleUse {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
+  orderId        String
+  at             DateTime     @default(now())
+}
+
+// ───────────── Orders ─────────────
+model Order {
+  id             String    @id // human order code (#tag, last 4/6 shown)
+  studentId      String
+  student        Student   @relation(fields: [studentId], references: [id])
+  collegeId      String
+  college        College   @relation(fields: [collegeId], references: [id])
+  service        String // wash | iron | dryclean
+  items          Json // [{label, qty, price}] snapshot at order time
+  declaredPieces Int       @default(0)
+  actualPieces   Int?
+  weightKg       Decimal?
+  express        Boolean   @default(false)
+  surcharge      Decimal   @default(0)
+  status         String    @default("draft") // draft|received|processing|ready|collected|cancelled
+  subtotal       Decimal // GST-INCLUSIVE pricing
+  gst            Decimal // tax component of total at gstPctSnapshot
+  gstPctSnapshot Decimal
+  total          Decimal
+  paid           Boolean   @default(false)
+  paymentMethod  String? // upi | cash | credit | upi+credit | cash+credit | redo
+  creditApplied  Decimal   @default(0)
+  usedCycle      Boolean   @default(false)
+  redoOfId       String?
+  refunded       Boolean   @default(false)
+  refundAmount   Decimal?
+  rating         Int?
+  ratingComment  String?
+  ratedAt        DateTime?
+  cancelledAt    DateTime?
+  createdAt      DateTime  @default(now())
+  receivedAt     DateTime? // SLA: due = receivedAt + (express ? 1 : 2) days
+
+  timeline OrderEvent[]
+  tags     GarmentTag[]
+  payments Payment[]
+  invoice  Invoice?
+
+  @@index([studentId])
+  @@index([collegeId, status])
+}
+
+model OrderEvent {
+  id      String   @id @default(cuid())
+  orderId String
+  order   Order    @relation(fields: [orderId], references: [id])
+  status  String // placed|received|processing|ready|collected|cancelled
+  at      DateTime @default(now())
+}
+
+model GarmentTag {
+  id      String  @id @default(cuid())
+  orderId String
+  order   Order   @relation(fields: [orderId], references: [id])
+  code    String  @unique // <order6>-NN
+  label   String
+  scanned Boolean @default(false)
+}
+
+// ───────────── Money ─────────────
+model Payment {
+  id         String   @id @default(cuid())
+  method     String // cash | upi | credit | cash_out | refund
+  amount     Decimal // negative for cash_out / refund
+  at         DateTime @default(now())
+  orderId    String?
+  order      Order?   @relation(fields: [orderId], references: [id])
+  collegeId  String
+  studentId  String?
+  student    Student? @relation(fields: [studentId], references: [id])
+  note       String?
+  refundVia  String? // upi | cash | credit (when method = refund)
+  gatewayRef String? // Razorpay payment id when auto-captured
+
+  @@index([collegeId, at])
+}
+
+model Invoice {
+  id          String       @id @default(cuid())
+  number      String       @unique // INV-<FY>-0001 (Indian FY, April start)
+  orderId     String       @unique
+  order       Order        @relation(fields: [orderId], references: [id])
+  studentId   String
+  collegeId   String
+  subtotal    Decimal
+  gst         Decimal
+  gstPct      Decimal
+  total       Decimal
+  method      String
+  at          DateTime     @default(now())
+  creditNotes CreditNote[]
+}
+
+model CreditNote {
+  id        String   @id @default(cuid())
+  number    String   @unique // CN-<FY>-0001
+  invoiceId String
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id])
+  orderId   String
+  studentId String
+  collegeId String
+  subtotal  Decimal
+  gst       Decimal
+  total     Decimal
+  at        DateTime @default(now())
+  reason    String
+  by        String // staffId
+  via       String // upi | cash | credit
+}
+
+model FySequence {
+  kind  String // invoice | credit_note | payslip
+  fyTag String // e.g. "2627" or "YYYYMM" for payslips
+  value Int    @default(0)
+
+  @@id([kind, fyTag])
+}
+
+model CreditUse {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id])
+  orderId   String
+  amount    Decimal
+  at        DateTime @default(now())
+}
+
+model Compensation {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id])
+  orderId   String?
+  kind      String // damage | stain | missing | goodwill | manual
+  amount    Decimal
+  method    String // credit | cash (cash = Manager+, posts cash_out)
+  comment   String?
+  by        String // staffId
+  at        DateTime @default(now())
+}
+
+model Expense {
+  id          String   @id @default(cuid())
+  category    String
+  amount      Decimal
+  note        String?
+  method      String // cash | upi
+  by          String // staffId (Manager+)
+  collegeId   String
+  at          DateTime @default(now())
+  receiptKey  String? // storage object key (photo/PDF)
+  receiptMime String?
+}
+
+// ───────────── Payroll (Admin+) ─────────────
+model Payslip {
+  id         String   @id @default(cuid())
+  number     String   @unique // PS-YYYYMM-NNN
+  staffId    String
+  staff      Staff    @relation(fields: [staffId], references: [id])
+  month      String // YYYY-MM
+  basic      Decimal
+  allowances Decimal  @default(0)
+  deductions Decimal  @default(0)
+  net        Decimal
+  expenseId  String?  @unique // auto-posted "Salaries" expense
+  at         DateTime @default(now())
+}
+
+// ───────────── Support / comms ─────────────
+model Complaint {
+  id         String    @id @default(cuid())
+  orderId    String?
+  collegeId  String    @default("")
+  studentId  String
+  student    Student   @relation(fields: [studentId], references: [id])
+  text       String
+  status     String    @default("open") // open | resolved
+  at         DateTime  @default(now())
+  resolvedAt DateTime?
+  messages   ComplaintMessage[]
+}
+
+model ComplaintMessage {
+  id          String    @id @default(cuid())
+  complaintId String
+  complaint   Complaint @relation(fields: [complaintId], references: [id])
+  from        String // student | staff
+  by          String
+  text        String
+  at          DateTime  @default(now())
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id])
+  text      String
+  kind      String   @default("status") // ready | status | credit | ...
+  read      Boolean  @default(false)
+  at        DateTime @default(now())
+}
+
+model AuditLog {
+  id     String   @id @default(cuid())
+  action String
+  detail String
+  by     String // staffId
+  at     DateTime @default(now())
+}
+
+model Otp {
+  id        String    @id @default(cuid())
+  phone     String
+  purpose   String // login | pickup | subscription
+  code      String
+  refId     String?
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  @@index([phone, purpose])
+}
+
+model PushSubscription {
+  id       String @id @default(cuid())
+  userKind String // student | staff
+  userId   String
+  endpoint String @unique
+  p256dh   String
+  auth     String
+}
+
+// ───────────── Config (singleton row, id = "main") ─────────────
+model AppConfig {
+  id       String  @id @default("main")
+  gstPct   Decimal
+  plan     Json // {price, cycles, kgPerCycle}
+  rates    Json // {washIron:{label,items:[[name,price],...]}, ironOnly:..., dryClean:...}
+  payment  Json // {upiId, payeeName, bankName, accountName, accountNo, ifsc, gatewayKey}
+  settings Json // {reportEmail, dailyEmail, sendHour, lastSent, openingFloat}
+}

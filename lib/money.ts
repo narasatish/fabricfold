@@ -1,0 +1,116 @@
+/* Money & GST rules — ported EXACTLY from the prototype (see handoff README).
+   - Prices are GST-INCLUSIVE; `gst` is the tax component of total.
+   - UPI payments auto-create a GST tax invoice; cash only via staff override;
+     credit-only never invoiced.
+   - Invoice/credit-note numbers are per Indian financial year (April start),
+     backed by a transactional sequence (no gaps/duplicates). */
+import { db } from "./db";
+import type { Prisma } from "./generated/prisma/client";
+
+export const EXPRESS_FEE = 100; // flat surcharge per express order
+
+export function financialYearTag(ts?: number | Date) {
+  const dt = ts ? new Date(ts) : new Date();
+  const y = dt.getFullYear();
+  const start = dt.getMonth() >= 3 ? y : y - 1;
+  return String(start).slice(-2) + String((start + 1) % 100).padStart(2, "0");
+}
+
+type Tx = Prisma.TransactionClient;
+
+async function nextSeq(tx: Tx, kind: "invoice" | "credit_note", fyTag: string) {
+  const row = await tx.fySequence.upsert({
+    where: { kind_fyTag: { kind, fyTag } },
+    create: { kind, fyTag, value: 1 },
+    update: { value: { increment: 1 } },
+  });
+  return row.value;
+}
+
+export async function nextInvoiceNo(tx: Tx) {
+  const fy = financialYearTag();
+  const n = await nextSeq(tx, "invoice", fy);
+  return `INV-${fy}-${String(n).padStart(4, "0")}`;
+}
+
+export async function nextCreditNoteNo(tx: Tx) {
+  const fy = financialYearTag();
+  const n = await nextSeq(tx, "credit_note", fy);
+  return `CN-${fy}-${String(n).padStart(4, "0")}`;
+}
+
+/** Should this payment method produce a GST tax invoice?
+    UPI (incl. split "upi+credit") => yes. Cash => only with staff override. Credit-only => never. */
+export function shouldInvoice(method: string, staffInvoiceOverride = false) {
+  if (method.includes("upi")) return true;
+  if (method.includes("cash") && staffInvoiceOverride) return true;
+  return false;
+}
+
+/** Create the GST tax invoice for an order (inside the payment transaction). */
+export async function createInvoice(
+  tx: Tx,
+  o: { id: string; studentId: string; collegeId: string; subtotal: unknown; surcharge: unknown; gst: unknown; gstPctSnapshot: unknown; total: unknown },
+  method: string,
+) {
+  const number = await nextInvoiceNo(tx);
+  return tx.invoice.create({
+    data: {
+      number,
+      orderId: o.id,
+      studentId: o.studentId,
+      collegeId: o.collegeId,
+      subtotal: Number(o.subtotal) + Number(o.surcharge || 0),
+      gst: Number(o.gst),
+      gstPct: Number(o.gstPctSnapshot),
+      total: Number(o.total),
+      method,
+    },
+  });
+}
+
+/** Raise a PROPORTIONAL GST credit note against an invoiced order (refund / cash comp). */
+export async function createCreditNote(
+  tx: Tx,
+  invoice: { id: string; orderId: string; studentId: string; collegeId: string; subtotal: unknown; gst: unknown; total: unknown },
+  amount: number,
+  reason: string,
+  by: string,
+  via: string,
+) {
+  const ratio = Math.min(1, amount / Number(invoice.total));
+  const gst = Math.round(Number(invoice.gst) * ratio * 100) / 100;
+  const subtotal = Math.round((amount - gst) * 100) / 100;
+  const number = await nextCreditNoteNo(tx);
+  return tx.creditNote.create({
+    data: {
+      number,
+      invoiceId: invoice.id,
+      orderId: invoice.orderId,
+      studentId: invoice.studentId,
+      collegeId: invoice.collegeId,
+      subtotal,
+      gst,
+      total: amount,
+      reason,
+      by,
+      via,
+    },
+  });
+}
+
+/** SLA: due = received + (express ? 1 : 2) days. */
+export function orderDueAt(o: { receivedAt: Date | null; express: boolean }) {
+  if (!o.receivedAt) return null;
+  return new Date(o.receivedAt.getTime() + (o.express ? 1 : 2) * 86_400_000);
+}
+export function isOverdue(o: { status: string; receivedAt: Date | null; express: boolean }) {
+  if (o.status !== "received" && o.status !== "processing") return false;
+  const due = orderDueAt(o);
+  return !!due && due.getTime() < Date.now();
+}
+
+/** Loyalty: Bronze <50, Silver 50–149, Gold 150+ (cosmetic). */
+export function loyaltyTier(lifetimePieces: number) {
+  return lifetimePieces >= 150 ? "Gold" : lifetimePieces >= 50 ? "Silver" : "Bronze";
+}

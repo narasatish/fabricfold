@@ -1,36 +1,53 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# FabricFold — Campus Laundry & Dry-Clean Platform
 
-## Getting Started
+Production realtime web app (customer + staff/admin), built from the design
+handoff prototype (`FabricFold.html` — pixel-accurate source of truth for UI,
+copy, dark mode and every business rule).
 
-First, run the development server:
+## Stack
+- **Next.js 16** (App Router) + TypeScript, React 19
+- **Prisma 7** — SQLite in dev, **Supabase Postgres** in production
+- **SSE realtime** (`/api/rt`) — staff actions appear on the customer's open app within a second
+- **Phone-OTP auth** (DEV_OTP console fallback), roles 1–4 enforced server-side
+- **PWA** (installable, offline shell) + **Web Push**
+- **Razorpay webhook** auto-confirmation (manual UPI QR + cash fallbacks)
+- **exceljs** GST-ready exports; **Supabase Storage** for expense receipts
+- **vitest** money-path tests
 
+## Run locally
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npx prisma migrate dev   # creates dev.db
+npm run seed             # demo data (2 colleges, 4 students, staff, orders)
+npm run dev              # http://localhost:3000
+```
+Login: any seeded phone (e.g. customer 9876500011, owner 8019121966) — dev OTP is **123456**.
+
+## Test
+```bash
+npm test   # GST split, invoice numbering, refund credit notes, credit split, drawer math
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Switch to Supabase (production DB + storage)
+1. Create a free project at supabase.com → copy the **connection string** and a **service role key**.
+2. `npm i @prisma/adapter-pg` ; in `prisma/schema.prisma` set `provider = "postgresql"`;
+   in `lib/db.ts` swap `PrismaBetterSqlite3` for `PrismaPg` (same one-line shape).
+3. Set `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` in `.env` / Vercel.
+4. `npx prisma migrate deploy && npm run seed`.
+5. Create a private storage bucket named `receipts`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deploy (Vercel free)
+- Import the repo, set env vars from `.env.example` (incl. `CRON_SECRET`).
+- `vercel.json` schedules the daily 9 PM IST owner report.
+- Point the Razorpay webhook (payment.captured) at `/api/razorpay/webhook`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Business rules (see docs/ handoff README for the full list)
+- Prices GST-inclusive; **UPI ⇒ auto GST invoice**, cash ⇒ only with staff
+  override, credit-only ⇒ never. Per-FY numbering `INV-<FY>-0001` via a
+  transactional sequence (no gaps).
+- Refunds raise **proportional credit notes**; cash compensation posts
+  `cash_out` + credit note.
+- Store credit split-pays bills; every redemption dated.
+- Subscriptions are cycle-based (34 × 7 kg) with a dated cycle log.
+- SLA due = received + (express ? 1 : 2) days; overdue badges + report averages.
+- Cash-drawer: opening float + cash − cash refunds − payouts − cash expenses.

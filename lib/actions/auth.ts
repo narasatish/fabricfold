@@ -43,17 +43,18 @@ export async function verifyOtp(
     orderBy: { expiresAt: "desc" },
   });
   if (!otp || otp.code !== code.trim()) return { ok: false as const, error: "Incorrect or expired OTP" };
-  await db.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
 
   if (mode === "staff") {
     const st = await db.staff.findUnique({ where: { phone } });
     if (!st) return { ok: false as const, error: "Not registered as staff" };
+    await db.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
     await createSession({ mode: "staff", staffId: st.id, role: st.role });
     return { ok: true as const };
   }
 
   let stu = await db.student.findUnique({ where: { phone } });
   if (!stu) {
+    // Don't consume the OTP yet — the registration step re-submits the same code.
     if (!reg?.name || !reg?.collegeId) return { ok: false as const, error: "NEEDS_REGISTRATION" };
     // permanent random 6-digit FabricFold code, unique
     let id = "";
@@ -63,6 +64,7 @@ export async function verifyOtp(
     }
     stu = await db.student.create({ data: { id, phone, name: reg.name.trim(), collegeId: reg.collegeId } });
   }
+  await db.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
   await createSession({ mode: "customer", studentId: stu.id });
   return { ok: true as const };
 }
@@ -70,6 +72,10 @@ export async function verifyOtp(
 export async function logout() {
   await clearSession();
   return { ok: true as const };
+}
+
+export async function listColleges() {
+  return db.college.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } });
 }
 
 export async function updateName(name: string) {

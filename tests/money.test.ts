@@ -33,7 +33,7 @@ beforeAll(async () => {
       payment: {}, settings: { openingFloat: 500 },
     },
   });
-});
+}, 120_000); // prisma db push on a cold npx can exceed the default 10s hook timeout
 
 function mkOrder(id: string, total: number, gst: number) {
   return db.order.create({

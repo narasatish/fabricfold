@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Svg } from "@/components/icons";
 import { useToast } from "@/components/chrome";
-import { requestOtp, verifyOtp } from "@/lib/actions/auth";
+import { requestOtp, verifyOtp, listColleges } from "@/lib/actions/auth";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
@@ -45,8 +45,7 @@ export default function LoginPage() {
 
     if (!r.ok) {
       if (r.error === "NEEDS_REGISTRATION") {
-        // Fetch colleges and show registration
-        // For now, assume colleges are passed or fetched
+        setColleges(await listColleges());
         setStep("register");
         return;
       }
@@ -189,7 +188,9 @@ export default function LoginPage() {
                 onChange={(e) => setCollegeId(e.target.value)}
               >
                 <option value="">Select campus</option>
-                {/* Colleges will be populated by server component wrapper */}
+                {colleges.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
               </select>
             </div>
 

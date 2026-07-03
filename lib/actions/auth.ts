@@ -2,7 +2,7 @@
 /* Phone-OTP auth. DEV_OTP fallback prints the code to the server console;
    swap `sendSms` for Twilio/MSG91 behind the same interface in production. */
 import { db } from "../db";
-import { createSession, clearSession } from "../auth";
+import { createSession, clearSession, requireStudent } from "../auth";
 
 const OTP_TTL = 5 * 60_000;
 
@@ -69,5 +69,13 @@ export async function verifyOtp(
 
 export async function logout() {
   await clearSession();
+  return { ok: true as const };
+}
+
+export async function updateName(name: string) {
+  const stu = await requireStudent();
+  name = name.trim();
+  if (name.length < 2 || name.length > 60) return { ok: false as const, error: "Enter a valid name" };
+  await db.student.update({ where: { id: stu.id }, data: { name } });
   return { ok: true as const };
 }

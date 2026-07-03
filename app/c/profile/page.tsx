@@ -46,8 +46,6 @@ export default async function ProfilePage() {
             </div>
           </div>
 
-          <ProfileClient studentName={student.name} />
-
           <Link href="/c/notifications" className="list-item tap" style={{ width: "100%", textAlign: "left", textDecoration: "none" }}>
             <span style={{ color: "var(--teal)" }}>
               <Svg name="bell" size={20} />
@@ -71,33 +69,8 @@ export default async function ProfilePage() {
             <Svg name="chevR" size={18} />
           </Link>
 
-          <Link href="#" className="list-item tap" style={{ width: "100%", textAlign: "left", textDecoration: "none" }}>
-            <span style={{ color: "var(--teal)" }}>
-              <Svg name="shield" size={20} />
-            </span>
-            <div style={{ flex: 1 }}>
-              <div className="h-sm">Terms, policies & compensation</div>
-            </div>
-            <Svg name="chevR" size={18} />
-          </Link>
-
-          <div className="list-item">
-            <span style={{ color: "var(--teal)" }}>
-              <Svg name="settings" size={20} />
-            </span>
-            <div style={{ flex: 1 }}>
-              <div className="h-sm">Dark mode</div>
-              <div className="muted" style={{ fontSize: "12px" }}>
-                Easier on the eyes at night
-              </div>
-            </div>
-            <div className="switch" onClick={() => (window.location.href = "#")} role="switch" aria-checked="false" />
-          </div>
+          <ProfileClient studentName={student.name} />
         </div>
-
-        <Link href="/api/auth/logout" className="btn sec mt16">
-          <Svg name="logout" size={18} /> Log out
-        </Link>
 
         <div className="center muted mt16" style={{ fontSize: "11px" }}>
           FabricFold · customer app v1

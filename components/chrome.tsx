@@ -83,10 +83,17 @@ export function Sheet({ open, onClose, children }: { open: boolean; onClose: () 
       requestAnimationFrame(() => requestAnimationFrame(() => setShow(true)));
     } else {
       setShow(false);
-      const id = setTimeout(() => setRender(false), 280);
+      const id = setTimeout(() => setRender(false), 400);
       return () => clearTimeout(id);
     }
   }, [open]);
+  // lock background scroll while a sheet is up
+  useEffect(() => {
+    if (!render) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [render]);
   if (!render) return null;
   return (
     <div className={`sheet-bg ${show ? "show" : ""}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -113,7 +120,7 @@ export function Seg<T extends string>({ options, value, onChange }: { options: [
 
 /* ---------- Switch ---------- */
 export function Switch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
-  return <div className={`switch ${on ? "on" : ""}`} onClick={onToggle} role="switch" aria-checked={on} />;
+  return <button type="button" className={`switch ${on ? "on" : ""}`} onClick={onToggle} role="switch" aria-checked={on} />;
 }
 
 /* ---------- Realtime (SSE) ---------- */

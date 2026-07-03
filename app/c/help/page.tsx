@@ -20,10 +20,12 @@ export default async function HelpPage() {
 
       <div className="pad">
         {/* WhatsApp card */}
-        <button
+        <a
+          href="https://wa.me/918019121966"
+          target="_blank"
+          rel="noreferrer"
           className="card-btn"
           style={{ background: "#25D366", color: "#fff", border: "none", marginBottom: "20px" }}
-          onClick={() => window.open("https://wa.me/918019121966")}
         >
           <div className="icon-tile" style={{ background: "rgba(255,255,255,.2)", color: "#fff" }}>
             <Svg name="chat" size={22} />
@@ -37,7 +39,7 @@ export default async function HelpPage() {
             </div>
           </div>
           <Svg name="chevR" size={18} />
-        </button>
+        </a>
 
         {/* Complaint form */}
         <div className="sec-title">Raise a complaint</div>

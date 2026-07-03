@@ -99,6 +99,7 @@ model Order {
   paymentMethod  String? // upi | cash | credit | upi+credit | cash+credit | redo
   creditApplied  Decimal   @default(0)
   usedCycle      Boolean   @default(false)
+  noGst          Boolean   @default(false) // staff chose to bill without GST at accept; never invoiced
   redoOfId       String?
   refunded       Boolean   @default(false)
   refundAmount   Decimal?

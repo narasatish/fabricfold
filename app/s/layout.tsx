@@ -5,6 +5,9 @@ import { TabBar, RealtimeRefresh } from "@/components/chrome";
 import StaffTabBar from "./_components/StaffTabBar";
 import { db } from "@/lib/db";
 
+// Every staff screen is session-scoped — never statically prerender this segment.
+export const dynamic = "force-dynamic";
+
 export default async function StaffLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   if (!session || session.mode !== "staff") {

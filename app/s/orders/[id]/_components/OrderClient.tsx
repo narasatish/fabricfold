@@ -38,6 +38,7 @@ type Order = {
   paymentMethod: string | null;
   creditApplied: number;
   usedCycle: boolean;
+  noGst: boolean;
   refunded: boolean;
   refundAmount: number;
   redoOfId: string | null;
@@ -81,7 +82,7 @@ export default function StaffOrderClient({
   const [showUpiSheet, setShowUpiSheet] = useState(false);
 
   // Sheet state
-  const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, useCycle: false, itemQtys: {} as Record<string, number> });
+  const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, useCycle: false, noGst: false, itemQtys: {} as Record<string, number> });
   const [collectCode, setCollectCode] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "upi">("cash");
   const [applyCredits, setApplyCredits] = useState(false);
@@ -103,6 +104,7 @@ export default function StaffOrderClient({
     const r = await acceptOrder(order.id, {
       weightKg: acceptInput.weightKg || null,
       useCycle: acceptInput.useCycle,
+      noGst: acceptInput.noGst,
       items: adjusted.length ? adjusted : undefined,
     });
     if (!r.ok) {
@@ -322,7 +324,7 @@ export default function StaffOrderClient({
           </div>
         ) : null}
         <div className="kv">
-          <span className="k">GST ({order.gstPct}%)</span>
+          <span className="k">{order.noGst ? "GST — not charged" : `GST (${order.gstPct}%)`}</span>
           <span className="mono">{fmt(Number(order.gst))}</span>
         </div>
         <div className="kv total">
@@ -471,6 +473,15 @@ export default function StaffOrderClient({
               <Switch on={acceptInput.useCycle} onToggle={() => setAcceptInput({ ...acceptInput, useCycle: !acceptInput.useCycle })} />
             </div>
           )}
+          {!acceptInput.useCycle && (
+            <div className="chip-toggle" style={{ marginBottom: "16px" }}>
+              <div>
+                <div className="h-sm">Bill without GST</div>
+                <div className="muted" style={{ fontSize: "12px" }}>Charge {fmt(Number(order.subtotal) + Number(order.surcharge))} — recorded, no GST invoice</div>
+              </div>
+              <Switch on={acceptInput.noGst} onToggle={() => setAcceptInput({ ...acceptInput, noGst: !acceptInput.noGst })} />
+            </div>
+          )}
           <button className="btn mt16" onClick={handleAccept}>
             <Svg name="check" size={18} /> Accept
           </button>
@@ -508,13 +519,18 @@ export default function StaffOrderClient({
         <div className="pad">
           <h2 style={{ marginBottom: "16px" }}>Record payment</h2>
 
-          <div className="chip-toggle" style={{ marginBottom: "12px" }}>
-            <div>
-              <div className="h-sm">GST bill for cash</div>
-              <div className="muted" style={{ fontSize: "12px" }}>Force invoice on cash payment</div>
+          {!order.noGst && (
+            <div className="chip-toggle" style={{ marginBottom: "12px" }}>
+              <div>
+                <div className="h-sm">GST bill for cash</div>
+                <div className="muted" style={{ fontSize: "12px" }}>Force invoice on cash payment</div>
+              </div>
+              <Switch on={staffInvoice} onToggle={() => setStaffInvoice(!staffInvoice)} />
             </div>
-            <Switch on={staffInvoice} onToggle={() => setStaffInvoice(!staffInvoice)} />
-          </div>
+          )}
+          {order.noGst && (
+            <div className="pill" style={{ marginBottom: "12px" }}>No-GST order — payment is recorded without an invoice</div>
+          )}
 
           <div className="chip-toggle" style={{ marginBottom: "16px" }}>
             <div>

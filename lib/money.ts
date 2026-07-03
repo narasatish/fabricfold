@@ -47,6 +47,20 @@ export function shouldInvoice(method: string, staffInvoiceOverride = false) {
   return false;
 }
 
+/** Order-aware invoice rule: a no-GST order is never invoiced, whatever the method. */
+export function shouldInvoiceOrder(o: { noGst?: boolean }, method: string, staffInvoiceOverride = false) {
+  if (o.noGst) return false;
+  return shouldInvoice(method, staffInvoiceOverride);
+}
+
+/** Bill math shared by acceptOrder and tests. Cycle orders carry only the excess charge. */
+export function computeBill(sub: number, surcharge: number, gstPct: number, opts: { usedCycle?: boolean; excessCharge?: number; noGst?: boolean } = {}) {
+  if (opts.usedCycle) return { gst: 0, total: opts.excessCharge || 0 };
+  const taxable = sub + surcharge;
+  const gst = opts.noGst ? 0 : Math.round(taxable * (gstPct / 100));
+  return { gst, total: taxable + gst };
+}
+
 /** Create the GST tax invoice for an order (inside the payment transaction). */
 export async function createInvoice(
   tx: Tx,

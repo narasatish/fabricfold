@@ -5,6 +5,9 @@ import { TabBar, RealtimeRefresh } from "@/components/chrome";
 import CustomerTabBar from "./_components/TabBar";
 import { db } from "@/lib/db";
 
+// Every customer screen is session-scoped — never statically prerender this segment.
+export const dynamic = "force-dynamic";
+
 export default async function CustomerLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   if (!session || session.mode !== "customer") {

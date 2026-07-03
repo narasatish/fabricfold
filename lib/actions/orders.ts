@@ -4,7 +4,7 @@
    prototype does -> realtime broadcast -> notification. */
 import { db } from "../db";
 import { requireStudent, requireStaff } from "../auth";
-import { EXPRESS_FEE, createInvoice, createCreditNote, shouldInvoice } from "../money";
+import { EXPRESS_FEE, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill } from "../money";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit } from "../notify";
 
@@ -60,7 +60,7 @@ export async function placeOrder(input: { service: string; items: { label: strin
 }
 
 /* ---------- Staff: verify & accept (receive) ---------- */
-export async function acceptOrder(orderId: string, input: { weightKg: number | null; useCycle: boolean; items?: { label: string; qty: number }[] }) {
+export async function acceptOrder(orderId: string, input: { weightKg: number | null; useCycle: boolean; noGst?: boolean; items?: { label: string; qty: number }[] }) {
   const st = await requireStaff(1);
   const cfg = await getConfig();
 
@@ -98,12 +98,11 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       }
     }
 
-    // recomputeOrder() — exact prototype math
+    // recomputeOrder() — exact prototype math (+ optional no-GST billing)
     const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
     const surcharge = o.express ? EXPRESS_FEE : 0;
-    let gst = 0, total = 0;
-    if (usedCycle) { gst = 0; total = excessCharge; }
-    else { const taxable = sub + surcharge; gst = Math.round(taxable * (cfg.gstPct / 100)); total = taxable + gst; }
+    const noGst = !!input.noGst && !usedCycle;
+    const { gst, total } = computeBill(sub, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });
 
     // per-garment QR tags — one per piece
     let ti = 0;
@@ -113,9 +112,9 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       where: { id: o.id },
       data: {
         items, declaredPieces, actualPieces: declaredPieces, weightKg: input.weightKg,
-        usedCycle, paid: usedCycle && total === 0 ? true : o.paid,
+        usedCycle, noGst, paid: usedCycle && total === 0 ? true : o.paid,
         paymentMethod: usedCycle && total === 0 ? "cycle" : o.paymentMethod,
-        subtotal: sub, surcharge, gst, gstPctSnapshot: cfg.gstPct, total,
+        subtotal: sub, surcharge, gst, gstPctSnapshot: noGst ? 0 : cfg.gstPct, total,
         status: "received", receivedAt: new Date(),
         timeline: { create: { status: "received" } },
         tags: { create: tags },
@@ -128,6 +127,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
   }
 
   await pushNotif(result.studentId, `Order received — ${result.actualPieces} pieces logged for ${cfg.rates[result.service].label}.`, "status");
+  if (result.noGst) await audit("No-GST billing", `#${result.id.slice(-4)} ₹${Number(result.total)}`, st.id);
   bcast(result);
   void st;
   return { ok: true as const, error: undefined };
@@ -197,7 +197,8 @@ async function payCore(orderId: string, method: "upi" | "cash", creditApplied: n
     const updated = await tx.order.update({ where: { id: o.id }, data: { paid: true, creditApplied, paymentMethod } });
 
     // GST is payment-method driven: UPI => invoice; cash only with staff override; credit-only never.
-    if (shouldInvoice(paymentMethod, opts.staffInvoice)) await createInvoice(tx, updated, paymentMethod);
+    // No-GST orders (staff choice at accept) are never invoiced, whatever the method.
+    if (shouldInvoiceOrder(updated, paymentMethod, opts.staffInvoice)) await createInvoice(tx, updated, paymentMethod);
     return updated;
   });
 }
@@ -222,6 +223,7 @@ export async function recordPay(orderId: string, method: "upi" | "cash", applyCr
   const st = await requireStaff(1);
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId }, include: { student: true } });
   const creditApplied = applyCredits ? Math.min(Number(o.student.credits), Number(o.total)) : 0;
+  if (staffInvoice && o.noGst) return { ok: false as const, error: "This order was billed without GST — no invoice can be issued" };
   try {
     const updated = await payCore(orderId, method, creditApplied, { staffInvoice });
     if (staffInvoice && method === "cash") await audit("GST bill for cash", `#${o.id.slice(-4)}`, st.id);

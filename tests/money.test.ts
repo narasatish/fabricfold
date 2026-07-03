@@ -65,6 +65,46 @@ describe("GST is payment-method driven", () => {
   });
 });
 
+describe("no-GST billing (staff choice at accept)", () => {
+  it("computeBill: GST on → 18% added; GST off → gst 0, total = subtotal + surcharge", () => {
+    expect(money.computeBill(150, 0, 18)).toEqual({ gst: 27, total: 177 });
+    expect(money.computeBill(150, 0, 18, { noGst: true })).toEqual({ gst: 0, total: 150 });
+    expect(money.computeBill(150, 100, 18, { noGst: true })).toEqual({ gst: 0, total: 250 });
+    // cycle orders ignore noGst — they only carry the excess charge
+    expect(money.computeBill(150, 0, 18, { usedCycle: true, excessCharge: 45, noGst: true })).toEqual({ gst: 0, total: 45 });
+  });
+
+  it("a no-GST order is never invoiced — not even via UPI or staff override", () => {
+    expect(money.shouldInvoiceOrder({ noGst: true }, "upi")).toBe(false);
+    expect(money.shouldInvoiceOrder({ noGst: true }, "upi+credit")).toBe(false);
+    expect(money.shouldInvoiceOrder({ noGst: true }, "cash", true)).toBe(false);
+    // normal orders keep the method-driven rule
+    expect(money.shouldInvoiceOrder({ noGst: false }, "upi")).toBe(true);
+    expect(money.shouldInvoiceOrder({ noGst: false }, "cash")).toBe(false);
+    expect(money.shouldInvoiceOrder({ noGst: false }, "cash", true)).toBe(true);
+  });
+
+  it("no-GST payment is still recorded in the ledger but adds nothing to GST totals", async () => {
+    const o = await db.order.create({
+      data: {
+        id: "FF00NOGST", studentId: "111111", collegeId: "col1", service: "washIron",
+        items: [{ label: "Regular garment", rate: 15, qty: 10 }],
+        subtotal: 150, gst: 0, gstPctSnapshot: 0, total: 150, noGst: true,
+      },
+    });
+    const before = await report.computeReport(report.parsePeriod({ p: "all" }));
+    await db.$transaction(async (tx) => {
+      await tx.payment.create({ data: { method: "upi", amount: 150, orderId: o.id, collegeId: "col1", studentId: "111111" } });
+      const updated = await tx.order.update({ where: { id: o.id }, data: { paid: true, paymentMethod: "upi" } });
+      if (money.shouldInvoiceOrder(updated, "upi")) await money.createInvoice(tx, updated, "upi");
+    });
+    const after = await report.computeReport(report.parsePeriod({ p: "all" }));
+    expect(after.upi - before.upi).toBe(150); // revenue recorded
+    expect(after.gstCollected).toBe(before.gstCollected); // no GST impact
+    expect(await db.invoice.findUnique({ where: { orderId: o.id } })).toBeNull(); // no invoice
+  });
+});
+
 describe("invoice numbering — transactional per-FY sequence", () => {
   it("issues INV-<FY>-0001, 0002 ... with no gaps or duplicates", async () => {
     const o1 = await mkOrder("FF000001", 118, 18);

@@ -4,6 +4,7 @@ import { AppShell } from "@/components/chrome";
 import { PwaSetup } from "@/components/pwa";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://fabricfold.in"),
   title: "FabricFold",
   description: "Campus laundry & dry-cleaning",
   manifest: "/manifest.webmanifest",

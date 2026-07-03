@@ -1,189 +1,129 @@
 "use client";
-import { useState, useMemo } from "react";
+/* Reports controls: period picker (URL-driven), expense sheet, email button. */
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
-import { fmt, timeAgo } from "@/lib/format";
-import { Seg } from "@/components/chrome";
-import type { Decimal } from "@prisma/client/runtime/library";
+import { Seg, Sheet, useToast } from "@/components/chrome";
+import { submitExpense } from "@/lib/actions/admin";
 
-type ReportData = {
-  payments: Array<{ method: string; amount: Decimal; createdAt: Date; orderId?: string }>;
-  invoices: Array<{ subtotal: Decimal; gst: Decimal; createdAt: Date }>;
-  creditNotes: Array<{ gst: Decimal; createdAt: Date }>;
-  expenses: Array<{ amount: Decimal; category: string; note: string; method: string; createdAt: Date }>;
-  orders: Array<{ createdAt: Date; receivedAt?: Date; collectedAt?: Date; status: string }>;
-  complaints: Array<{ createdAt: Date; status: string }>;
-  appConfig: any;
-};
+export default function ReportsControls({ period, d, m, y }: { period: "day" | "month" | "year" | "all"; d?: string; m?: string; y?: string }) {
+  const router = useRouter();
+  const today = new Date().toISOString().slice(0, 10);
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const thisYear = String(new Date().getFullYear());
 
-export default function StaffReportsClient(props: ReportData) {
-  const [period, setPeriod] = useState<"day" | "month" | "year" | "all">("day");
-  const [selectedDate, setSelectedDate] = useState(new Date());
-
-  const filteredPayments = useMemo(() => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    if (period === "day") {
-      return props.payments.filter(
-        (p) => new Date(p.createdAt).getTime() >= today.getTime()
-      );
-    }
-    if (period === "month") {
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      return props.payments.filter((p) => {
-        const d = new Date(p.createdAt);
-        return d >= start && d <= end;
-      });
-    }
-    if (period === "year") {
-      const start = new Date(now.getFullYear(), 0, 1);
-      const end = new Date(now.getFullYear(), 11, 31);
-      return props.payments.filter((p) => {
-        const d = new Date(p.createdAt);
-        return d >= start && d <= end;
-      });
-    }
-    return props.payments;
-  }, [period, props.payments]);
-
-  const cashReceived = filteredPayments
-    .filter((p) => p.method === "cash" && Number(p.amount) > 0)
-    .reduce((sum, p) => sum + Number(p.amount), 0);
-
-  const upiReceived = filteredPayments
-    .filter((p) => p.method === "upi" && Number(p.amount) > 0)
-    .reduce((sum, p) => sum + Number(p.amount), 0);
-
-  const creditReceived = filteredPayments
-    .filter((p) => p.method === "credit" && Number(p.amount) > 0)
-    .reduce((sum, p) => sum + Number(p.amount), 0);
-
-  const totalReceived = cashReceived + upiReceived + creditReceived;
+  const nav = (p: string, extra?: Record<string, string>) => {
+    const params = new URLSearchParams({ p, ...(extra || {}) });
+    router.push(`/s/reports?${params.toString()}`);
+  };
 
   return (
-    <div className="pad">
-      {/* Period picker */}
+    <>
       <Seg<"day" | "month" | "year" | "all">
-        options={[
-          ["day", "Day"],
-          ["month", "Month"],
-          ["year", "Year"],
-          ["all", "All"],
-        ]}
+        options={[["day", "Day"], ["month", "Month"], ["year", "Year"], ["all", "All"]]}
         value={period}
-        onChange={setPeriod}
+        onChange={(p) => nav(p, p === "day" ? { d: d || today } : p === "month" ? { m: m || thisMonth } : p === "year" ? { y: y || thisYear } : {})}
       />
-
-      {/* Collections hero */}
-      <div
-        className="card pad mt16"
-        style={{
-          background: "#10201b",
-          color: "#fff",
-          border: "none",
-          boxShadow: "0 8px 24px rgba(0,0,0,.2)",
-        }}
-      >
-        <div className="muted" style={{ fontSize: "11.5px", letterSpacing: ".05em", marginBottom: "8px" }}>
-          TOTAL RECEIVED
-        </div>
-        <div className="big-num">{fmt(totalReceived)}</div>
-
-        <div className="divider" style={{ borderColor: "rgba(255,255,255,.12)", marginTop: "12px", marginBottom: "12px" }} />
-
-        <div className="kv" style={{ color: "rgba(255,255,255,.7)" }}>
-          <span className="k">Cash</span>
-          <span className="mono">{fmt(cashReceived)}</span>
-        </div>
-        <div className="kv" style={{ color: "rgba(255,255,255,.7)" }}>
-          <span className="k">UPI</span>
-          <span className="mono">{fmt(upiReceived)}</span>
-        </div>
-        <div className="kv" style={{ color: "rgba(255,255,255,.7)" }}>
-          <span className="k">Credits redeemed</span>
-          <span className="mono">{fmt(creditReceived)}</span>
-        </div>
-      </div>
-
-      {/* Export buttons */}
-      <div className="row gap8 mt16" style={{ flexWrap: "wrap" }}>
-        <button className="btn xs sec">Full report</button>
-        <button className="btn xs sec">Transactions</button>
-        <button className="btn xs sec">GST invoices</button>
-        <button className="btn xs sec">Expenses</button>
-      </div>
-
-      {/* Quick stats */}
-      <div className="sec-title mt20">Overview</div>
-      <div className="card pad mt10">
-        <div className="kv">
-          <span className="k">Orders completed</span>
-          <span className="mono">{props.orders.filter((o) => o.status === "collected").length}</span>
-        </div>
-        <div className="kv">
-          <span className="k">Avg turnaround</span>
-          <span className="mono">~18h</span>
-        </div>
-      </div>
-
-      {/* Tax & GST */}
-      <div className="sec-title mt20">Tax & GST</div>
-      <div className="card pad mt10">
-        <div className="kv">
-          <span className="k">Taxable invoices (UPI only)</span>
-          <span className="mono">{props.invoices.length}</span>
-        </div>
-        <div className="kv">
-          <span className="k">GST collected</span>
-          <span className="mono">
-            {fmt(props.invoices.reduce((s, i) => s + Number(i.gst), 0))}
-          </span>
-        </div>
-        <div className="kv">
-          <span className="k">Credit note GST</span>
-          <span className="mono">
-            −{fmt(props.creditNotes.reduce((s, c) => s + Number(c.gst), 0))}
-          </span>
-        </div>
-      </div>
-
-      {/* Expenses */}
-      {props.expenses.length > 0 && (
-        <>
-          <div className="sec-title mt20">Expenses</div>
-          <div className="card pad mt10">
-            {props.expenses.slice(0, 5).map((e) => (
-              <div key={e.category} className="kv">
-                <span className="k">{e.category}</span>
-                <span className="mono">{fmt(Number(e.amount))}</span>
-              </div>
-            ))}
-            <div className="kv" style={{ marginTop: "8px", borderTop: "1px dashed var(--line-2)", paddingTop: "8px" }}>
-              <span className="k" style={{ fontWeight: "600" }}>
-                Total expenses
-              </span>
-              <span className="mono" style={{ fontWeight: "600" }}>
-                {fmt(props.expenses.reduce((s, e) => s + Number(e.amount), 0))}
-              </span>
-            </div>
-          </div>
-        </>
+      {period === "day" && (
+        <input className="input mt10" type="date" value={d || today} onChange={(e) => nav("day", { d: e.target.value })} />
       )}
+      {period === "month" && (
+        <input className="input mt10" type="month" value={m || thisMonth} onChange={(e) => nav("month", { m: e.target.value })} />
+      )}
+      {period === "year" && (
+        <input className="input mt10" type="number" defaultValue={y || thisYear} onBlur={(e) => nav("year", { y: e.target.value })} />
+      )}
+    </>
+  );
+}
 
-      {/* Transactions list */}
-      <div className="sec-title mt20">Recent transactions</div>
-      {filteredPayments.slice(0, 10).map((p) => (
-        <div key={p.createdAt.toString()} className="card pad mt10">
-          <div className="kv">
-            <span className="k">{p.method}</span>
-            <span className="mono">{fmt(Number(p.amount))}</span>
-          </div>
-          <div className="muted" style={{ fontSize: "12px", marginTop: "4px" }}>
-            {timeAgo(p.createdAt)}
-          </div>
+export function ExpenseButton() {
+  const router = useRouter();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [ex, setEx] = useState({ category: "Supplies", amount: 0, note: "", method: "cash" as "cash" | "upi" });
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    if (!ex.amount || ex.amount <= 0) return toast("Enter a valid amount", true);
+    setBusy(true);
+    try {
+      let receiptKey: string | null = null, receiptMime: string | null = null;
+      if (file) {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch("/api/upload/receipt", { method: "POST", body: fd });
+        if (!res.ok) return toast("Receipt upload failed: " + (await res.text()), true);
+        const j = await res.json();
+        receiptKey = j.key; receiptMime = j.mime;
+      }
+      const r = await submitExpense({ ...ex, receiptKey, receiptMime });
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast("Expense logged" + (receiptKey ? " · invoice stored" : ""));
+      setOpen(false);
+      setEx({ category: "Supplies", amount: 0, note: "", method: "cash" });
+      setFile(null);
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <button className="btn xs" onClick={() => setOpen(true)}><Svg name="plus" size={14} /> Log expense</button>
+      <Sheet open={open} onClose={() => setOpen(false)}>
+        <div className="h-md" style={{ padding: "0 4px 4px" }}>Log an expense</div>
+        <div className="muted" style={{ padding: "0 4px 14px", fontSize: 13 }}>Recorded against today for net reporting.</div>
+        <div className="field">
+          <label>Category</label>
+          <select className="input" value={ex.category} onChange={(e) => setEx({ ...ex, category: e.target.value })}>
+            {["Supplies", "Utilities", "Rent", "Salaries", "Maintenance", "Other"].map((c) => <option key={c}>{c}</option>)}
+          </select>
         </div>
-      ))}
-    </div>
+        <div className="field">
+          <label>Amount (₹)</label>
+          <input className="input" inputMode="numeric" type="number" placeholder="e.g. 800" value={ex.amount || ""} onChange={(e) => setEx({ ...ex, amount: Number(e.target.value) })} />
+        </div>
+        <div className="field">
+          <label>Paid by</label>
+          <Seg<"cash" | "upi"> options={[["cash", "Cash"], ["upi", "UPI / Bank"]]} value={ex.method} onChange={(mm) => setEx({ ...ex, method: mm })} />
+        </div>
+        <div className="field">
+          <label>Note</label>
+          <input className="input" placeholder="Optional" value={ex.note} onChange={(e) => setEx({ ...ex, note: e.target.value })} />
+        </div>
+        <div className="field">
+          <label>Invoice / receipt (photo or PDF — stored with the expense)</label>
+          <input className="input" type="file" accept="image/*,.pdf" style={{ paddingTop: 12 }} onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        </div>
+        <button className="btn" disabled={busy} onClick={save}>{busy ? "Saving…" : "Save expense"}</button>
+      </Sheet>
+    </>
+  );
+}
+
+export function EmailReportButton() {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const send = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/report/daily", { method: "POST" });
+      if (res.ok) {
+        const j = await res.json();
+        toast("Report sent to " + j.to);
+      } else toast("Could not send (" + res.status + ")", true);
+    } catch {
+      toast("Could not send — queued for retry", true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button className="btn xs sec" disabled={busy} onClick={send}>
+      <Svg name="bell" size={14} /> {busy ? "Sending…" : "Email today's report"}
+    </button>
   );
 }

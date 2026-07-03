@@ -1,34 +1,202 @@
-import { requireStaff } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { TopBar } from "@/components/chrome";
-import StaffReportsClient from "./_components/ReportsClient";
+import { TopBar, RealtimeRefresh } from "@/components/chrome";
+import { parsePeriod, computeReport } from "@/lib/report";
+import { fmt, timeAgo } from "@/lib/format";
+import { Svg } from "@/components/icons";
+import ReportsControls, { ExpenseButton, EmailReportButton } from "./_components/ReportsClient";
 
-export default async function StaffReportsPage() {
-  await requireStaff(2);
+export default async function StaffReportsPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
+  const sp = await searchParams;
+  const s = await getSession();
+  if (!s || s.mode !== "staff") redirect("/login");
+  const staff = await db.staff.findUnique({ where: { id: s.staffId } });
+  if (!staff) redirect("/login");
 
-  // Fetch all data needed for reports
-  const [payments, invoices, creditNotes, expenses, orders, complaints, appConfig] = await Promise.all([
-    db.payment.findMany({ include: { order: true } }),
-    db.invoice.findMany(),
-    db.creditNote.findMany(),
-    db.expense.findMany(),
-    db.order.findMany({ where: { status: "collected" } }),
-    db.complaint.findMany(),
-    db.appConfig.findUnique({ where: { id: "main" } }),
-  ]);
+  const period = parsePeriod(sp);
+  const r = await computeReport(period);
+  const staffList = await db.staff.findMany();
+  const byId = (id: string) => staffList.find((x) => x.id === id)?.name || id;
+  const N = (x: unknown) => Number(x || 0);
+
+  // analytics — 8-week revenue bars, repeat rate, subscriber split
+  const now = Date.now();
+  const weekMs = 7 * 86_400_000;
+  const allPayments = await db.payment.findMany({ where: { at: { gte: new Date(now - 8 * weekMs) } } });
+  const weeks = Array.from({ length: 8 }, (_, i) => {
+    const from = now - (8 - i) * weekMs, to = now - (7 - i) * weekMs;
+    return allPayments.filter((p) => p.at.getTime() >= from && p.at.getTime() < to && N(p.amount) > 0).reduce((s2, p) => s2 + N(p.amount), 0);
+  });
+  const maxWeek = Math.max(1, ...weeks);
+  const allOrders = await db.order.findMany({ select: { studentId: true, usedCycle: true, total: true, paid: true } });
+  const byStudent = new Map<string, number>();
+  allOrders.forEach((o) => byStudent.set(o.studentId, (byStudent.get(o.studentId) || 0) + 1));
+  const repeatRate = byStudent.size ? Math.round((Array.from(byStudent.values()).filter((n) => n >= 2).length / byStudent.size) * 100) : 0;
+  const activeSubs = await db.subscription.count({ where: { active: true } });
+  const subRevenue = allOrders.filter((o) => o.usedCycle).length;
+  const payRevenue = allOrders.filter((o) => !o.usedCycle && o.paid).reduce((s2, o) => s2 + N(o.total), 0);
+  const cfgRow = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
+  const plan = cfgRow.plan as { price: number };
+  const subRevenueApprox = activeSubs * plan.price;
+  const cohortPct = subRevenueApprox + payRevenue > 0 ? Math.round((subRevenueApprox / (subRevenueApprox + payRevenue)) * 100) : 0;
+
+  const qs = (over: Record<string, string>) => {
+    const params = new URLSearchParams({ p: period.kind, ...(sp.d ? { d: sp.d } : {}), ...(sp.m ? { m: sp.m } : {}), ...(sp.y ? { y: sp.y } : {}), ...over });
+    return params.toString();
+  };
+
+  const white = { color: "rgba(255,255,255,.75)" };
 
   return (
     <div className="screen">
-      <TopBar title="Reports" sub="" back={null} />
-      <StaffReportsClient
-        payments={payments}
-        invoices={invoices}
-        creditNotes={creditNotes}
-        expenses={expenses}
-        orders={orders}
-        complaints={complaints}
-        appConfig={appConfig}
-      />
+      <TopBar title="Reports" sub={period.label} />
+      <RealtimeRefresh />
+      <div className="pad">
+        <ReportsControls period={period.kind} d={sp.d} m={sp.m} y={sp.y} />
+
+        {/* Collections hero — fixed dark surface in BOTH themes */}
+        <div className="card pad mt16" style={{ background: "#10201b", color: "#fff", border: "none" }}>
+          <div style={{ fontSize: "11.5px", letterSpacing: ".05em", ...white }}>TOTAL RECEIVED · {period.label.toUpperCase()}</div>
+          <div className="big-num mt8">{fmt(r.total)}</div>
+          <div style={{ height: 1, background: "rgba(255,255,255,.14)", margin: "13px 0" }} />
+          <div className="kv" style={white}><span>Cash</span><span className="mono">{fmt(r.cash)}</span></div>
+          <div className="kv" style={white}><span>UPI / account</span><span className="mono">{fmt(r.upi)}</span></div>
+          <div className="kv" style={white}><span>Credits redeemed</span><span className="mono">{fmt(r.credit)}</span></div>
+          <div className="kv" style={white}><span>Refunds</span><span className="mono">−{fmt(r.refunds)}</span></div>
+          <div className="kv" style={white}><span>Cash payouts</span><span className="mono">−{fmt(r.cashOut)}</span></div>
+        </div>
+
+        {/* Exports */}
+        <div className="sec-title mt20">Excel exports</div>
+        <div className="row gap8 wrap">
+          <a className="btn xs sec" href={`/api/export/xlsx?${qs({ type: "full" })}`}>Full report</a>
+          <a className="btn xs sec" href={`/api/export/xlsx?${qs({ type: "transactions" })}`}>Transactions</a>
+          <a className="btn xs sec" href={`/api/export/xlsx?${qs({ type: "gst" })}`}>GST invoices</a>
+          <a className="btn xs sec" href={`/api/export/xlsx?${qs({ type: "expenses" })}`}>Expenses</a>
+        </div>
+
+        {/* Cash drawer (day view) */}
+        {period.kind === "day" && (
+          <>
+            <div className="sec-title mt20">Cash drawer</div>
+            <div className="card pad">
+              <div className="kv"><span className="k">Opening float</span><span className="mono">{fmt(r.openingFloat)}</span></div>
+              <div className="kv"><span className="k">Cash received</span><span className="mono">{fmt(r.cash)}</span></div>
+              <div className="kv"><span className="k">Cash refunds</span><span className="mono">−{fmt(r.cashRefunds)}</span></div>
+              <div className="kv"><span className="k">Cash payouts</span><span className="mono">−{fmt(r.cashOut)}</span></div>
+              <div className="kv"><span className="k">Cash expenses</span><span className="mono">−{fmt(r.cashExpenses)}</span></div>
+              <div className="kv total"><span>Expected in drawer</span><span className="mono">{fmt(r.expectedDrawer)}</span></div>
+            </div>
+          </>
+        )}
+
+        {/* Tax & GST */}
+        <div className="sec-title mt20">Tax &amp; GST</div>
+        <div className="card pad">
+          <div className="kv"><span className="k">Taxable value (account only)</span><span className="mono">{fmt(r.taxable)}</span></div>
+          <div className="kv"><span className="k">GST collected</span><span className="mono">{fmt(r.gstCollected)}</span></div>
+          <div className="kv"><span className="k">Credit-note GST</span><span className="mono">−{fmt(r.cnGst)}</span></div>
+          <div className="kv total"><span>Net GST payable</span><span className="mono">{fmt(r.netGst)}</span></div>
+          <div className="muted mt8" style={{ fontSize: "12px" }}>Cash &amp; credit receipts ({fmt(r.nonGstBucket)}) are outside GST.</div>
+        </div>
+
+        {/* Operations */}
+        <div className="sec-title mt20">Operations</div>
+        <div className="card pad">
+          <div className="kv"><span className="k">Orders received</span><span className="mono">{r.ordersIn}</span></div>
+          <div className="kv"><span className="k">Orders completed</span><span className="mono">{r.ordersDone}</span></div>
+          <div className="kv"><span className="k">Avg turnaround</span><span className="mono">{r.avgTurnaround.toFixed(1)} h</span></div>
+          <div className="kv"><span className="k">Avg rating</span><span className="mono">{r.avgRating ? r.avgRating.toFixed(1) + " ★" : "—"}</span></div>
+          <div className="kv"><span className="k">Compensation</span><span className="mono">{r.compCount} · {fmt(r.compCredit + r.compCash)}</span></div>
+        </div>
+
+        {/* Analytics */}
+        <div className="sec-title mt20">Analytics</div>
+        <div className="card pad">
+          <div className="label" style={{ marginBottom: 10 }}>Revenue · last 8 weeks</div>
+          <div className="row" style={{ alignItems: "flex-end", gap: 6, height: 76 }}>
+            {weeks.map((w, i) => (
+              <div key={i} className="grow" style={{ background: i === 7 ? "var(--teal)" : "var(--teal-soft)", borderRadius: 6, height: `${Math.max(6, Math.round((w / maxWeek) * 100))}%` }} title={fmt(w)} />
+            ))}
+          </div>
+          <div className="divider" />
+          <div className="kv"><span className="k">Repeat customers</span><span className="mono">{repeatRate}%</span></div>
+          <div className="kv"><span className="k">Active subscribers</span><span className="mono">{activeSubs}</span></div>
+          <div className="label mt12" style={{ marginBottom: 8 }}>Subscriber vs pay-per-use revenue</div>
+          <div style={{ display: "flex", height: 12, borderRadius: 6, overflow: "hidden" }}>
+            <div style={{ width: `${cohortPct}%`, background: "var(--teal)" }} />
+            <div style={{ flex: 1, background: "var(--amber-soft)" }} />
+          </div>
+          <div className="between mt4" style={{ fontSize: "11.5px" }}>
+            <span className="muted">Subscribers {cohortPct}%</span>
+            <span className="muted">Pay-per-use {100 - cohortPct}%</span>
+          </div>
+        </div>
+
+        {/* Expenses & net */}
+        <div className="between mt20" style={{ padding: "0 4px 10px" }}>
+          <span className="sec-title" style={{ padding: 0 }}>Expenses &amp; net</span>
+          {staff.role >= 2 && <ExpenseButton />}
+        </div>
+        <div className="card pad">
+          {r.expenses.length ? (
+            r.expenses.map((e) => (
+              <div key={e.id} className="kv">
+                <span className="k">
+                  {e.category}
+                  {e.note ? <span className="muted" style={{ fontSize: 12 }}> · {e.note}</span> : null}
+                  {e.receiptKey ? <a href={`/api/receipt?key=${encodeURIComponent(e.receiptKey)}`} target="_blank" style={{ color: "var(--teal)", fontSize: 12 }}> · receipt</a> : null}
+                </span>
+                <span className="mono">−{fmt(N(e.amount))}</span>
+              </div>
+            ))
+          ) : (
+            <div className="muted" style={{ fontSize: 13.5 }}>No expenses in this period</div>
+          )}
+          <div className="kv total"><span>Net (collections − expenses)</span><span className="mono">{fmt(r.net)}</span></div>
+        </div>
+
+        {/* Transactions */}
+        <div className="sec-title mt20">Transactions</div>
+        <div className="list">
+          {r.payments.slice(0, 30).map((p) => (
+            <div key={p.id} className="list-item">
+              <div className="icon-tile" style={{ width: 36, height: 36, background: N(p.amount) < 0 ? "var(--red-soft)" : "var(--teal-soft)", color: N(p.amount) < 0 ? "var(--red)" : "var(--teal-dark)" }}>
+                <Svg name={p.method === "cash" || p.method === "cash_out" ? "wallet" : p.method === "credit" ? "gift" : "qr"} size={17} />
+              </div>
+              <div className="grow">
+                <div style={{ fontSize: 14, fontWeight: 550 }}>
+                  {p.method}{p.orderId ? " · #" + p.orderId.slice(-4) : ""}{p.gatewayRef ? " · " + p.gatewayRef : ""}
+                </div>
+                <div className="muted" style={{ fontSize: 12 }}>{p.note || ""} {timeAgo(p.at)}</div>
+              </div>
+              <span className="mono" style={{ fontWeight: 650, color: N(p.amount) < 0 ? "var(--red)" : "var(--ink)" }}>
+                {N(p.amount) < 0 ? "−" : ""}{fmt(Math.abs(N(p.amount)))}
+              </span>
+            </div>
+          ))}
+          {!r.payments.length && <div className="list-item muted">No transactions in this period</div>}
+        </div>
+
+        {/* Complaints + audit + email */}
+        <div className="card pad mt16">
+          <div className="kv"><span className="k">Complaints in period</span><span className="mono">{r.complaints.length}</span></div>
+        </div>
+        <div className="row gap8 mt12">
+          <EmailReportButton />
+          {staff.role >= 3 && (
+            <Link className="btn xs sec" href="/s/audit"><Svg name="shield" size={14} /> Audit log</Link>
+          )}
+        </div>
+        <div style={{ height: 12 }} />
+        {r.compensations.length > 0 && (
+          <div className="muted" style={{ fontSize: 12, padding: "0 4px" }}>
+            Compensation detail: {r.compensations.map((c) => `${c.kind} ${fmt(N(c.amount))} (${c.method}) by ${byId(c.by)}`).join(" · ")}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

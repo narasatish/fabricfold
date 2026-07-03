@@ -1,29 +1,36 @@
-import { requireStaff } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { TopBar } from "@/components/chrome";
+import { TopBar, RealtimeRefresh } from "@/components/chrome";
 import StaffComplaintsClient from "./_components/ComplaintsClient";
 
 export default async function StaffComplaintsPage() {
-  await requireStaff(1);
+  const s = await getSession();
+  if (!s || s.mode !== "staff") redirect("/login");
+  const staff = await db.staff.findUnique({ where: { id: s.staffId } });
+  if (!staff) redirect("/login");
 
-  const [openComplaints, resolvedComplaints] = await Promise.all([
-    db.complaint.findMany({
-      where: { status: "open" },
-      include: { student: true, messages: true },
-      orderBy: { createdAt: "desc" },
-    }),
-    db.complaint.findMany({
-      where: { status: "resolved" },
-      include: { student: true },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-    }),
-  ]);
+  const complaints = await db.complaint.findMany({
+    include: { student: { include: { college: true } }, messages: { orderBy: { at: "asc" } } },
+    orderBy: { at: "desc" },
+  });
+
+  const plain = complaints.map((c) => ({
+    id: c.id,
+    studentId: c.studentId,
+    orderId: c.orderId,
+    text: c.text,
+    status: c.status,
+    at: c.at.getTime(),
+    student: { id: c.student.id, name: c.student.name, college: c.student.college?.name || "" },
+    messages: c.messages.map((m) => ({ id: m.id, from: m.from, text: m.text, at: m.at.getTime() })),
+  }));
 
   return (
     <div className="screen">
-      <TopBar title="Complaints" sub="" back={null} />
-      <StaffComplaintsClient open={openComplaints} resolved={resolvedComplaints} />
+      <TopBar title="Complaints" />
+      <RealtimeRefresh types={["complaint.message"]} />
+      <StaffComplaintsClient complaints={plain} staffRole={staff.role} />
     </div>
   );
 }

@@ -37,7 +37,7 @@ export default async function CustomerHome() {
 
   // Check subscription expiry
   const sub = student.subscription;
-  const subExpiryWarning = sub?.active && sub.expiresAt && sub.expiresAt.getTime() - Date.now() < 30 * 86400000 && Number(sub.cyclesTotal) - Number(sub.cyclesUsed) > 0;
+  const subExpiryWarning = sub?.active && sub.expiresAt && sub.expiresAt.getTime() - Date.now() < 30 * 86400000;
 
   // Build enabled services
   const services: Array<{ key: string; flag: string; label: string; icon: string }> = [
@@ -132,7 +132,7 @@ export default async function CustomerHome() {
         )}
 
         {/* Credit balance card */}
-        {student.credits > 0 && (
+        {Number(student.credits) > 0 && (
           <Link href="/c/wallet" className="card between mt12" style={{ padding: "14px 16px", width: "100%", textDecoration: "none" }}>
             <span className="row gap8">
               <span style={{ color: "var(--teal)" }}>
@@ -143,7 +143,7 @@ export default async function CustomerHome() {
               </span>
             </span>
             <span className="h-md" style={{ color: "var(--teal-dark)" }}>
-              {fmt(student.credits)}
+              {fmt(Number(student.credits))}
             </span>
           </Link>
         )}

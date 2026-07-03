@@ -16,12 +16,25 @@ export default async function OrdersPage() {
   const appConfig = await db.appConfig.findUnique({ where: { id: "main" } });
   const rates = appConfig?.rates as unknown as Record<string, { label: string }>;
 
+  // Convert to a plain, serializable shape (Decimal fields -> number)
+  const orders = allOrders.map((o) => ({
+    ...o,
+    total: Number(o.total),
+    subtotal: Number(o.subtotal),
+    gst: Number(o.gst),
+    surcharge: Number(o.surcharge),
+    weightKg: o.weightKg == null ? null : Number(o.weightKg),
+    gstPctSnapshot: Number(o.gstPctSnapshot),
+    creditApplied: Number(o.creditApplied),
+    refundAmount: o.refundAmount == null ? null : Number(o.refundAmount),
+  }));
+
   return (
     <div className="screen">
-      <TopBar title="My Orders" sub={`${allOrders.length} total`} />
+      <TopBar title="My Orders" sub={`${orders.length} total`} />
 
       <div className="pad">
-        <OrdersClient orders={allOrders} rates={rates} />
+        <OrdersClient orders={orders as any} rates={rates} />
       </div>
     </div>
   );

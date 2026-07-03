@@ -1,209 +1,274 @@
 "use client";
+/* Admin hub — rates & GST, plan, payment details, colleges + feature flags,
+   staff roles, payroll, report settings. All wired to server actions. */
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
-import { fmt, dateStr } from "@/lib/format";
-import { useToast, Seg, Sheet, Switch } from "@/components/chrome";
+import { fmt } from "@/lib/format";
+import { useToast, Sheet, Switch, Seg } from "@/components/chrome";
+import {
+  saveRates, savePlan, savePaymentConfig, saveSettings,
+  toggleFeature, saveCollege, deleteCollege, saveStaff, createPayslip,
+} from "@/lib/actions/admin";
 
-type AppConfig = {
-  id: string;
-  gstPct: number;
-  plan: any;
-  rates: any;
-  payment: any;
-  settings: any;
-};
-
-type College = {
-  id: string;
-  name: string;
-  address: string;
-  features: Record<string, boolean>;
-};
-
-type Staff = {
-  id: string;
-  name: string;
-  phone: string;
-  role: number;
-  collegeId: string;
-};
-
-type Payslip = {
-  id: string;
-  month: string;
-  net: number;
-  staff: { name: string };
-};
-
-export default function StaffAdminClient({
-  appConfig,
-  colleges,
-  staff,
-  payslips,
-  currentRole,
-}: {
-  appConfig: AppConfig | null;
-  colleges: College[];
-  staff: Staff[];
-  payslips: Payslip[];
+type Rates = Record<string, { label: string; items: [string, number][] }>;
+type Props = {
+  config: {
+    gstPct: number;
+    plan: { price: number; cycles: number; kgPerCycle: number };
+    rates: Rates;
+    payment: { upiId: string; payeeName: string; bankName: string; accountName: string; accountNo: string; ifsc: string; gatewayKey: string };
+    settings: { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number };
+  };
+  colleges: { id: string; name: string; address: string; features: Record<string, boolean> }[];
+  staff: { id: string; name: string; phone: string; role: number; collegeId: string | null }[];
+  payslips: { id: string; number: string; month: string; net: number; staffName: string }[];
   currentRole: number;
-}) {
-  const toast = useToast();
-  const [showRatesSheet, setShowRatesSheet] = useState(false);
-  const [showPlanSheet, setShowPlanSheet] = useState(false);
-  const [showPaymentSheet, setShowPaymentSheet] = useState(false);
-  const [showCollegeSheet, setShowCollegeSheet] = useState(false);
-  const [showStaffSheet, setShowStaffSheet] = useState(false);
+};
 
-  const handleSaveRates = async (gst: number) => {
-    try {
-      // TODO: call saveRates action
-      toast("Rates updated");
-      setShowRatesSheet(false);
-    } catch (err) {
-      toast("Failed to save rates", true);
-    }
+const ROLE_NAMES: Record<number, string> = { 1: "Counter", 2: "Manager", 3: "Admin", 4: "Owner" };
+const FEATURES: [string, string][] = [
+  ["svc_wash", "Wash & Iron"], ["svc_iron", "Iron Only"], ["svc_dryclean", "Dry Clean"],
+  ["subscriptions", "Subscriptions"], ["credits", "Credits & compensation"],
+  ["express", "Express (same-day)"], ["chat", "Chat & complaints"],
+];
+
+export default function StaffAdminClient({ config, colleges, staff, payslips, currentRole }: Props) {
+  const router = useRouter();
+  const toast = useToast();
+
+  const [sheet, setSheet] = useState<null | "rates" | "plan" | "payment" | "settings" | "college" | "staff" | "payslip">(null);
+  const [rates, setRates] = useState<Rates>(JSON.parse(JSON.stringify(config.rates)));
+  const [gst, setGst] = useState(config.gstPct);
+  const [plan, setPlan] = useState({ ...config.plan });
+  const [pay, setPay] = useState({ ...config.payment });
+  const [settings, setSettings] = useState({ reportEmail: config.settings.reportEmail || "", dailyEmail: !!config.settings.dailyEmail, sendHour: config.settings.sendHour ?? 21, openingFloat: config.settings.openingFloat ?? 0 });
+  const [colEdit, setColEdit] = useState<{ id?: string; name: string; address: string }>({ name: "", address: "" });
+  const [stEdit, setStEdit] = useState<{ id?: string; name: string; phone: string; role: number }>({ name: "", phone: "", role: 1 });
+  const [slip, setSlip] = useState({ staffId: staff[0]?.id || "", month: new Date().toISOString().slice(0, 7), basic: 0, allowances: 0, deductions: 0, postExpense: true });
+
+  const run = async (fn: () => Promise<{ ok: boolean; error?: string }>, okMsg: string) => {
+    const r = await fn();
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(okMsg);
+    setSheet(null);
+    router.refresh();
+  };
+
+  const setRatePrice = (svc: string, idx: number, price: number) => {
+    const next = JSON.parse(JSON.stringify(rates)) as Rates;
+    next[svc].items[idx][1] = price;
+    setRates(next);
   };
 
   return (
     <div className="pad">
-      {/* Rates & GST */}
       <div className="sec-title">Settings</div>
 
-      <button className="card-btn mt12" onClick={() => setShowRatesSheet(true)}>
-        <div className="icon-tile">
-          <Svg name="tag" size={20} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div className="h-sm">Rates & GST</div>
-          <div className="muted" style={{ fontSize: "12px" }}>
-            Service pricing, GST %
-          </div>
-        </div>
+      <button className="card-btn mt12" onClick={() => setSheet("rates")}>
+        <div className="icon-tile"><Svg name="list" size={20} /></div>
+        <div className="grow"><div className="h-sm">Rates &amp; GST</div><div className="muted" style={{ fontSize: 12 }}>Per-item pricing · GST {config.gstPct}%</div></div>
+        <Svg name="chevR" size={18} />
+      </button>
+      <button className="card-btn mt8" onClick={() => setSheet("plan")}>
+        <div className="icon-tile" style={{ background: "var(--blue-soft)", color: "var(--blue)" }}><Svg name="wallet" size={20} /></div>
+        <div className="grow"><div className="h-sm">Subscription plan</div><div className="muted" style={{ fontSize: 12 }}>{fmt(config.plan.price)} · {config.plan.cycles} cycles · {config.plan.kgPerCycle} kg</div></div>
+        <Svg name="chevR" size={18} />
+      </button>
+      <button className="card-btn mt8" onClick={() => setSheet("payment")}>
+        <div className="icon-tile" style={{ background: "var(--amber-soft)", color: "var(--amber)" }}><Svg name="card" size={20} /></div>
+        <div className="grow"><div className="h-sm">Payment &amp; bank</div><div className="muted" style={{ fontSize: 12 }}>{config.payment.upiId || "UPI not set"}</div></div>
+        <Svg name="chevR" size={18} />
+      </button>
+      <button className="card-btn mt8" onClick={() => setSheet("settings")}>
+        <div className="icon-tile" style={{ background: "var(--teal-tint)" }}><Svg name="bell" size={20} /></div>
+        <div className="grow"><div className="h-sm">Daily report &amp; drawer</div><div className="muted" style={{ fontSize: 12 }}>{settings.reportEmail || "Report email not set"} · float {fmt(settings.openingFloat)}</div></div>
         <Svg name="chevR" size={18} />
       </button>
 
-      <button className="card-btn mt8" onClick={() => setShowPlanSheet(true)}>
-        <div className="icon-tile" style={{ background: "var(--blue-soft)", color: "var(--blue)" }}>
-          <Svg name="wallet" size={20} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div className="h-sm">Subscription plan</div>
-          <div className="muted" style={{ fontSize: "12px" }}>
-            Price, cycles, weight per cycle
-          </div>
-        </div>
-        <Svg name="chevR" size={18} />
-      </button>
-
-      <button className="card-btn mt8" onClick={() => setShowPaymentSheet(true)}>
-        <div className="icon-tile" style={{ background: "var(--amber-soft)", color: "var(--amber)" }}>
-          <Svg name="card" size={20} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <div className="h-sm">Payment & bank</div>
-          <div className="muted" style={{ fontSize: "12px" }}>
-            UPI ID, bank details, gateway key
-          </div>
-        </div>
-        <Svg name="chevR" size={18} />
-      </button>
-
-      {/* Colleges (Owner only) */}
-      {currentRole >= 4 && (
-        <>
-          <div className="sec-title mt20">Colleges</div>
-          {colleges.map((c) => (
-            <div key={c.id} className="card pad mt10">
+      {/* Colleges + feature flags */}
+      <div className="sec-title mt20">Colleges &amp; features</div>
+      {colleges.map((c) => (
+        <div key={c.id} className="card pad mt10">
+          <div className="between">
+            <div>
               <div className="h-sm">{c.name}</div>
-              <div className="muted" style={{ fontSize: "12px", marginTop: "4px" }}>
-                {c.address}
-              </div>
+              <div className="muted" style={{ fontSize: 12 }}>{c.address}</div>
             </div>
-          ))}
-          <button className="btn mt12" onClick={() => setShowCollegeSheet(true)}>
-            <Svg name="plus" size={18} /> Add college
-          </button>
-        </>
-      )}
-
-      {/* Staff roles (Admin+) */}
-      {currentRole >= 3 && (
-        <>
-          <div className="sec-title mt20">Staff</div>
-          {staff.map((s) => (
-            <div key={s.id} className="card pad mt10">
-              <div className="between">
-                <div>
-                  <div className="h-sm">{s.name}</div>
-                  <div className="muted" style={{ fontSize: "12px", marginTop: "4px" }}>
-                    {["Counter", "Manager", "Admin", "Owner"][s.role - 1] || "Unknown"}
-                  </div>
-                </div>
+            {currentRole >= 4 && (
+              <div className="row gap6">
+                <button className="btn xs sec" onClick={() => { setColEdit({ id: c.id, name: c.name, address: c.address }); setSheet("college"); }}><Svg name="edit" size={13} /></button>
+                {colleges.length > 1 && (
+                  <button className="btn xs sec" style={{ color: "var(--red)" }} onClick={() => { if (confirm(`Remove ${c.name}?`)) run(() => deleteCollege(c.id), "College removed"); }}><Svg name="trash" size={13} /></button>
+                )}
               </div>
-            </div>
-          ))}
-          <button className="btn mt12" onClick={() => setShowStaffSheet(true)}>
-            <Svg name="plus" size={18} /> Add staff
-          </button>
-        </>
-      )}
-
-      {/* Payroll (Admin+) */}
-      {currentRole >= 3 && (
-        <>
-          <div className="sec-title mt20">Payroll</div>
-          {payslips.slice(0, 5).map((p) => (
-            <div key={p.id} className="card pad mt10">
-              <div className="kv">
-                <span className="k">{p.staff.name}</span>
-                <span className="mono">{fmt(p.net)}</span>
-              </div>
-              <div className="muted" style={{ fontSize: "12px", marginTop: "4px" }}>
-                {p.month}
-              </div>
-            </div>
-          ))}
-        </>
-      )}
-
-      {/* Sheets */}
-      <Sheet open={showRatesSheet} onClose={() => setShowRatesSheet(false)}>
-        <div className="pad">
-          <h2>Rates & GST</h2>
-          <div className="field mt16">
-            <label>GST %</label>
-            <input className="input" type="number" placeholder="18" defaultValue={appConfig?.gstPct || 18} />
+            )}
           </div>
-          <button className="btn mt16">Save rates</button>
+          <div className="divider" />
+          {FEATURES.map(([key, label]) => (
+            <div key={key} className="between" style={{ padding: "7px 0" }}>
+              <span style={{ fontSize: 14 }}>{label}</span>
+              <Switch
+                on={c.features[key] !== false}
+                onToggle={async () => {
+                  const r = await toggleFeature(c.id, key);
+                  if (!r.ok) return toast("Failed", true);
+                  toast(`${label} ${r.on ? "enabled" : "disabled"} · ${c.name}`);
+                  router.refresh();
+                }}
+              />
+            </div>
+          ))}
         </div>
+      ))}
+      {currentRole >= 4 && (
+        <button className="btn ghost mt12" onClick={() => { setColEdit({ name: "", address: "" }); setSheet("college"); }}>
+          <Svg name="plus" size={17} /> Add college
+        </button>
+      )}
+
+      {/* Staff */}
+      <div className="sec-title mt20">Staff roles</div>
+      <div className="list">
+        {staff.map((x) => (
+          <button key={x.id} className="list-item tap" style={{ width: "100%", textAlign: "left" }} onClick={() => { setStEdit({ id: x.id, name: x.name, phone: x.phone, role: x.role }); setSheet("staff"); }}>
+            <div className="avatar" style={{ width: 38, height: 38, fontSize: 14 }}>{x.name[0]}</div>
+            <div className="grow">
+              <div className="h-sm">{x.name}</div>
+              <div className="muted" style={{ fontSize: 12 }}>{x.phone}</div>
+            </div>
+            <span className="pill gray">{ROLE_NAMES[x.role]}</span>
+          </button>
+        ))}
+      </div>
+      <button className="btn ghost mt12" onClick={() => { setStEdit({ name: "", phone: "", role: 1 }); setSheet("staff"); }}>
+        <Svg name="plus" size={17} /> Add staff
+      </button>
+
+      {/* Payroll */}
+      <div className="sec-title mt20">Payroll</div>
+      <button className="btn ghost" onClick={() => setSheet("payslip")}>
+        <Svg name="users" size={17} /> Create payslip
+      </button>
+      {payslips.length > 0 && (
+        <div className="list mt12">
+          {payslips.map((p) => (
+            <div key={p.id} className="list-item">
+              <div className="grow">
+                <div className="h-sm mono">{p.number}</div>
+                <div className="muted" style={{ fontSize: 12 }}>{p.staffName} · {p.month}</div>
+              </div>
+              <span className="mono" style={{ fontWeight: 650 }}>{fmt(p.net)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ---------- Sheets ---------- */}
+      <Sheet open={sheet === "rates"} onClose={() => setSheet(null)}>
+        <div className="h-md" style={{ padding: "0 4px 12px" }}>Rates &amp; GST</div>
+        {Object.entries(rates).map(([svc, r]) => (
+          <div key={svc} className="card pad" style={{ marginBottom: 12 }}>
+            <div className="h-sm" style={{ marginBottom: 8 }}>{r.label}</div>
+            {r.items.map(([name, price], i) => (
+              <div key={name} className="between" style={{ padding: "5px 0" }}>
+                <span style={{ fontSize: 13.5 }}>{name}</span>
+                <input className="input" type="number" value={price} style={{ width: 90, height: 38, textAlign: "right" }} onChange={(e) => setRatePrice(svc, i, Number(e.target.value))} />
+              </div>
+            ))}
+          </div>
+        ))}
+        <div className="field"><label>GST %</label><input className="input" type="number" value={gst} onChange={(e) => setGst(Number(e.target.value))} /></div>
+        <button className="btn" onClick={() => run(() => saveRates(rates, gst), "Rates saved")}>Save rates</button>
       </Sheet>
 
-      <Sheet open={showPlanSheet} onClose={() => setShowPlanSheet(false)}>
-        <div className="pad">
-          <h2>Subscription plan</h2>
-          <div className="field mt16">
-            <label>Price (₹)</label>
-            <input className="input" type="number" placeholder="6800" defaultValue={appConfig?.plan?.price || 6800} />
-          </div>
-          <div className="field">
-            <label>Cycles per plan</label>
-            <input className="input" type="number" placeholder="34" defaultValue={appConfig?.plan?.cycles || 34} />
-          </div>
-          <button className="btn mt16">Save plan</button>
-        </div>
+      <Sheet open={sheet === "plan"} onClose={() => setSheet(null)}>
+        <div className="h-md" style={{ padding: "0 4px 12px" }}>Subscription plan</div>
+        <div className="field"><label>Price (₹, before GST)</label><input className="input" type="number" value={plan.price} onChange={(e) => setPlan({ ...plan, price: Number(e.target.value) })} /></div>
+        <div className="field"><label>Cycles per plan</label><input className="input" type="number" value={plan.cycles} onChange={(e) => setPlan({ ...plan, cycles: Number(e.target.value) })} /></div>
+        <div className="field"><label>Kg per cycle</label><input className="input" type="number" value={plan.kgPerCycle} onChange={(e) => setPlan({ ...plan, kgPerCycle: Number(e.target.value) })} /></div>
+        <button className="btn" onClick={() => run(() => savePlan(plan), "Plan saved")}>Save plan</button>
       </Sheet>
 
-      <Sheet open={showPaymentSheet} onClose={() => setShowPaymentSheet(false)}>
-        <div className="pad">
-          <h2>Payment & bank</h2>
-          <div className="field mt16">
-            <label>UPI ID</label>
-            <input className="input" type="text" placeholder="abc@oicici" defaultValue={appConfig?.payment?.upiId || ""} />
+      <Sheet open={sheet === "payment"} onClose={() => setSheet(null)}>
+        <div className="h-md" style={{ padding: "0 4px 12px" }}>Payment &amp; bank details</div>
+        {([["upiId", "UPI ID"], ["payeeName", "Payee name"], ["bankName", "Bank"], ["accountName", "Account name"], ["accountNo", "Account number"], ["ifsc", "IFSC"], ["gatewayKey", "Razorpay key id"]] as const).map(([k, label]) => (
+          <div key={k} className="field">
+            <label>{label}</label>
+            <input className="input" value={pay[k] || ""} onChange={(e) => setPay({ ...pay, [k]: e.target.value })} />
           </div>
-          <button className="btn mt16">Save payment details</button>
+        ))}
+        <button className="btn" onClick={() => run(() => savePaymentConfig(pay), "Payment details saved")}>Save details</button>
+      </Sheet>
+
+      <Sheet open={sheet === "settings"} onClose={() => setSheet(null)}>
+        <div className="h-md" style={{ padding: "0 4px 12px" }}>Daily report &amp; drawer</div>
+        <div className="field"><label>Owner report email</label><input className="input" type="email" value={settings.reportEmail} onChange={(e) => setSettings({ ...settings, reportEmail: e.target.value })} /></div>
+        <div className="chip-toggle" style={{ marginBottom: 15 }}>
+          <div><div className="h-sm">Daily email at {settings.sendHour}:00</div><div className="muted" style={{ fontSize: 12 }}>Automatic end-of-day report</div></div>
+          <Switch on={settings.dailyEmail} onToggle={() => setSettings({ ...settings, dailyEmail: !settings.dailyEmail })} />
         </div>
+        <div className="field"><label>Opening cash float (₹)</label><input className="input" type="number" value={settings.openingFloat} onChange={(e) => setSettings({ ...settings, openingFloat: Number(e.target.value) })} /></div>
+        <button className="btn" onClick={() => run(() => saveSettings(settings), "Settings saved")}>Save settings</button>
+      </Sheet>
+
+      <Sheet open={sheet === "college"} onClose={() => setSheet(null)}>
+        <div className="h-md" style={{ padding: "0 4px 12px" }}>{colEdit.id ? "Edit college" : "Add college"}</div>
+        <div className="field"><label>Name</label><input className="input" value={colEdit.name} onChange={(e) => setColEdit({ ...colEdit, name: e.target.value })} /></div>
+        <div className="field"><label>Address</label><input className="input" value={colEdit.address} onChange={(e) => setColEdit({ ...colEdit, address: e.target.value })} /></div>
+        <button className="btn" onClick={() => run(() => saveCollege(colEdit), "College saved")}>{colEdit.id ? "Save" : "Create college"}</button>
+      </Sheet>
+
+      <Sheet open={sheet === "staff"} onClose={() => setSheet(null)}>
+        <div className="h-md" style={{ padding: "0 4px 12px" }}>{stEdit.id ? "Edit staff" : "Add staff"}</div>
+        <div className="field"><label>Name</label><input className="input" value={stEdit.name} onChange={(e) => setStEdit({ ...stEdit, name: e.target.value })} /></div>
+        <div className="field"><label>Mobile</label><input className="input" inputMode="numeric" maxLength={10} value={stEdit.phone} onChange={(e) => setStEdit({ ...stEdit, phone: e.target.value })} /></div>
+        <div className="field">
+          <label>Role</label>
+          <select className="input" value={stEdit.role} onChange={(e) => setStEdit({ ...stEdit, role: Number(e.target.value) })}>
+            <option value={1}>Counter</option>
+            <option value={2}>Manager</option>
+            <option value={3}>Admin</option>
+            {currentRole >= 4 && <option value={4}>Owner</option>}
+          </select>
+        </div>
+        <button className="btn" onClick={() => run(() => saveStaff({ ...stEdit, collegeId: null }), "Staff saved")}>{stEdit.id ? "Save" : "Create staff account"}</button>
+        <div className="muted center mt8" style={{ fontSize: 12 }}>They sign in to the staff app with this mobile.</div>
+      </Sheet>
+
+      <Sheet open={sheet === "payslip"} onClose={() => setSheet(null)}>
+        <div className="h-md" style={{ padding: "0 4px 12px" }}>Create payslip</div>
+        <div className="field">
+          <label>Staff member</label>
+          <select className="input" value={slip.staffId} onChange={(e) => setSlip({ ...slip, staffId: e.target.value })}>
+            {staff.map((x) => <option key={x.id} value={x.id}>{x.name} · {ROLE_NAMES[x.role]}</option>)}
+          </select>
+        </div>
+        <div className="field"><label>Month</label><input className="input" type="month" value={slip.month} onChange={(e) => setSlip({ ...slip, month: e.target.value })} /></div>
+        <div className="field"><label>Basic salary (₹)</label><input className="input" type="number" value={slip.basic || ""} onChange={(e) => setSlip({ ...slip, basic: Number(e.target.value) })} /></div>
+        <div className="field"><label>Allowances (₹)</label><input className="input" type="number" value={slip.allowances || ""} onChange={(e) => setSlip({ ...slip, allowances: Number(e.target.value) })} /></div>
+        <div className="field"><label>Deductions (₹)</label><input className="input" type="number" value={slip.deductions || ""} onChange={(e) => setSlip({ ...slip, deductions: Number(e.target.value) })} /></div>
+        <div className="card pad" style={{ marginBottom: 12 }}>
+          <div className="kv total" style={{ borderTop: "none", margin: 0, padding: 0 }}>
+            <span>Net pay</span><span className="mono">{fmt(Math.max(0, slip.basic + slip.allowances - slip.deductions))}</span>
+          </div>
+        </div>
+        <div className="chip-toggle" style={{ marginBottom: 15 }}>
+          <div><div className="h-sm">Post to Salaries expenses</div><div className="muted" style={{ fontSize: 12 }}>Flows into accounts &amp; net</div></div>
+          <Switch on={slip.postExpense} onToggle={() => setSlip({ ...slip, postExpense: !slip.postExpense })} />
+        </div>
+        <button
+          className="btn"
+          onClick={async () => {
+            const r = await createPayslip(slip);
+            if (!r.ok) return toast(r.error || "Failed", true);
+            toast(`Payslip ${"number" in r ? r.number : ""} created`);
+            setSheet(null);
+            router.refresh();
+          }}
+        >
+          Create payslip
+        </button>
       </Sheet>
     </div>
   );

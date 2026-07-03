@@ -25,10 +25,10 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
       <div className="pad">
         <PayClient
           orderId={order.id}
-          orderTotal={order.total}
+          orderTotal={Number(order.total)}
           orderService={rateLabel}
           orderPieces={order.items as unknown as Array<any>}
-          studentCredits={student.credits}
+          studentCredits={Number(student.credits)}
           paymentUpiId={payment?.upiId || ""}
           paymentPayeeName={payment?.payeeName || "FabricFold"}
         />

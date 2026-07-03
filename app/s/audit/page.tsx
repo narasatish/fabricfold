@@ -8,13 +8,12 @@ export default async function StaffAuditPage() {
   const staff = await requireStaff(3);
 
   const logs = await db.auditLog.findMany({
-    include: { staff: true },
-    orderBy: { createdAt: "desc" },
+    orderBy: { at: "desc" },
   });
 
   return (
     <div className="screen">
-      <TopBar title="Audit log" sub="" back={null} />
+      <TopBar title="Audit log" sub="" back={undefined} />
       <StaffAuditClient logs={logs} />
     </div>
   );

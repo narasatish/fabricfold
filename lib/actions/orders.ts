@@ -64,7 +64,9 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
   const st = await requireStaff(1);
   const cfg = await getConfig();
 
-  const result = await db.$transaction(async (tx) => {
+  let result;
+  try {
+    result = await db.$transaction(async (tx) => {
     const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { student: { include: { subscription: true } } } });
     if (o.status !== "draft") throw new Error("Order already received");
 
@@ -120,12 +122,15 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       },
     });
     return updated;
-  });
+    });
+  } catch (e) {
+    return { ok: false as const, error: (e as Error).message };
+  }
 
   await pushNotif(result.studentId, `Order received — ${result.actualPieces} pieces logged for ${cfg.rates[result.service].label}.`, "status");
   bcast(result);
   void st;
-  return { ok: true as const };
+  return { ok: true as const, error: undefined };
 }
 
 /* ---------- Staff: advance status ---------- */
@@ -227,10 +232,12 @@ export async function recordPay(orderId: string, method: "upi" | "cash", applyCr
   }
 }
 
+export type ActionResult = { ok: boolean; error?: string; id?: string; status?: string };
+
 /* ---------- Refund (negative payment + proportional GST credit note) ---------- */
-export async function refundOrder(orderId: string, amount: number, via: "upi" | "cash" | "credit", reason: string) {
+export async function refundOrder(orderId: string, amount: number, via: "upi" | "cash" | "credit", reason: string): Promise<ActionResult> {
   const st = await requireStaff(1);
-  if (!amount || amount <= 0) return { ok: false as const, error: "Enter a valid amount" };
+  if (!amount || amount <= 0) return { ok: false, error: "Enter a valid amount" };
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId }, include: { invoice: true } });
 
   await db.$transaction(async (tx) => {
@@ -245,11 +252,11 @@ export async function refundOrder(orderId: string, amount: number, via: "upi" | 
   await pushNotif(o.studentId, via === "credit" ? `₹${amount} refunded to your store credits.${reason ? " " + reason : ""}` : `₹${amount} refunded via ${via.toUpperCase()}.${reason ? " " + reason : ""}`, "status");
   await audit("Refund", `#${o.id.slice(-4)} ₹${amount} via ${via}${reason ? " — " + reason : ""}`, st.id);
   bcast(o);
-  return { ok: true as const };
+  return { ok: true };
 }
 
 /* ---------- Free re-do ---------- */
-export async function redoOrder(orderId: string) {
+export async function redoOrder(orderId: string): Promise<ActionResult> {
   const st = await requireStaff(1);
   const cfg = await getConfig();
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
@@ -270,7 +277,7 @@ export async function redoOrder(orderId: string) {
 }
 
 /* ---------- Cancel ---------- */
-export async function cancelOrder(orderId: string) {
+export async function cancelOrder(orderId: string): Promise<ActionResult> {
   const st = await requireStaff(1);
   const ord = await db.order.findUniqueOrThrow({ where: { id: orderId } });
   await db.order.update({ where: { id: ord.id }, data: { status: "cancelled", cancelledAt: new Date(), timeline: { create: { status: "cancelled" } } } });

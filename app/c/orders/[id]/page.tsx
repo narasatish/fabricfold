@@ -138,16 +138,16 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           ))}
           <div className="kv">
             <span className="k">Subtotal ({totalQty} pcs)</span>
-            <span className="mono">{fmt(Number(order.subtotal))}</span>
+            <span className="mono">{fmt(Number(order.subtotal ?? 0))}</span>
           </div>
-          {Number(order.surcharge) > 0 && (
+          {(Number(order.surcharge ?? 0)) > 0 && (
             <div className="kv">
               <span className="k">Express surcharge</span>
-              <span className="mono">{fmt(Number(order.surcharge))}</span>
+              <span className="mono">{fmt(Number(order.surcharge ?? 0))}</span>
             </div>
           )}
           <div className="kv">
-            <span className="k">GST ({order.gstPctSnapshot || 18}%)</span>
+            <span className="k">GST ({Number(order.gstPctSnapshot || 18)}%)</span>
             <span className="mono">{fmt(Number(order.gst))}</span>
           </div>
           <div className="kv total">
@@ -178,7 +178,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
 
         {/* Rating (if collected) */}
         {order.status === "collected" && (
-          <OrderDetailClient orderId={order.id} initialRating={order.rating} />
+          <OrderDetailClient orderId={order.id} initialRating={order.rating ?? undefined} />
         )}
 
         {/* Reorder button */}

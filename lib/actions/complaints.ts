@@ -40,7 +40,7 @@ export async function sendComplaintMessage(complaintId: string, text: string) {
   return { ok: true as const };
 }
 
-export async function resolveComplaint(complaintId: string, resolution: string) {
+export async function resolveComplaint(complaintId: string, resolution: string): Promise<{ ok: boolean; error?: string }> {
   const st = await requireStaff(1);
   const c = await db.complaint.findUniqueOrThrow({ where: { id: complaintId } });
   const res = resolution.trim() || "Resolved by staff.";

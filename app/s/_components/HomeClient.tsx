@@ -2,9 +2,10 @@
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
-import { Seg } from "@/components/chrome";
+import { Seg, Sheet, useToast } from "@/components/chrome";
 import { fmt, timeAgo, initials } from "@/lib/format";
 import { isOverdue } from "@/lib/money";
+import { activateSubscription } from "@/lib/actions/subscription";
 
 type Order = {
   id: string;
@@ -13,39 +14,45 @@ type Order = {
   express: boolean;
   actualPieces: number | null;
   declaredPieces: number | null;
-  weightKg: any;
-  total: any;
+  weightKg: number | null;
+  total: number;
   paid: boolean;
-  createdAt: Date;
-  receivedAt: Date | null;
+  createdAt: number;
+  receivedAt: number | null;
   student: { id: string; name: string; phone: string };
 };
 
-type Otp = {
+type PendingSub = {
   studentId: string;
   student: { id: string; name: string };
-  refId?: string;
-  payload?: Record<string, unknown>;
+  hasOtp: boolean;
 };
 
 export default function StaffHomeClient({
   staff,
   orders,
   pendingSubs,
+  students,
 }: {
   staff: { name: string; role: number };
   orders: Order[];
-  pendingSubs: Otp[];
+  pendingSubs: PendingSub[];
+  students: { id: string; name: string; phone: string }[];
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "received" | "processing" | "ready" | "overdue">("all");
+  const [showSubSheet, setShowSubSheet] = useState<string | null>(null);
+  const [subMethod, setSubMethod] = useState<"cash" | "upi">("upi");
+  const [subOtp, setSubOtp] = useState("");
 
   const q = search.trim().toLowerCase();
 
   // Actionable orders: draft, received, processing, ready (sorted by status then date desc)
   const actionable = orders.filter((o) => ["draft", "received", "processing", "ready"].includes(o.status));
-  const overdueOrders = actionable.filter((o) => isOverdue(o));
+  const ov = (o: Order) => isOverdue({ status: o.status, receivedAt: o.receivedAt ? new Date(o.receivedAt) : null, express: o.express });
+  const overdueOrders = actionable.filter(ov);
 
   // Filter by filter type
   const filtered =
@@ -53,16 +60,30 @@ export default function StaffHomeClient({
       ? actionable
       : filter === "overdue"
         ? overdueOrders
-        : actionable.filter((o) => o.status === filter);
+        : filter === "received"
+          ? actionable.filter((o) => o.status === "received" || o.status === "draft")
+          : actionable.filter((o) => o.status === filter);
 
   // Search results (students and orders by ID/phone/name)
   const searchResults = useMemo(() => {
     if (!q) return null;
     return {
-      students: [], // TODO: fetch students from DB on client side or use search params
+      students: students.filter((st) => st.id.includes(q) || st.phone.includes(q) || st.name.toLowerCase().includes(q)),
       orders: orders.filter((o) => o.id.toLowerCase().includes(q)),
     };
-  }, [q, orders]);
+  }, [q, orders, students]);
+
+  const handleActivateSub = async (studentId: string) => {
+    const r = await activateSubscription(studentId, subMethod, subOtp || undefined);
+    if (!r.ok) {
+      toast(r.error || "Failed", true);
+      return;
+    }
+    toast("Subscription activated");
+    setShowSubSheet(null);
+    setSubOtp("");
+    router.refresh();
+  };
 
   const renderOrderRow = (o: Order) => {
     const pieces = o.actualPieces !== null ? o.actualPieces : o.declaredPieces;
@@ -76,7 +97,7 @@ export default function StaffHomeClient({
     }[o.status] || o.status;
 
     const statusClass = `st-${o.status}`;
-    const late = isOverdue(o) && (o.status === "received" || o.status === "processing");
+    const late = ov(o) && (o.status === "received" || o.status === "processing");
 
     return (
       <button
@@ -133,17 +154,32 @@ export default function StaffHomeClient({
       {/* Search results or main view */}
       {q ? (
         <div style={{ marginTop: "16px" }}>
+          {searchResults?.students.length ? (
+            <>
+              <div className="sec-title">Students</div>
+              {searchResults.students.slice(0, 10).map((st) => (
+                <button key={st.id} className="card-btn mt10" onClick={() => router.push(`/s/customers/${st.id}`)}>
+                  <div className="avatar">{initials(st.name)}</div>
+                  <div className="grow">
+                    <div className="h-sm">{st.name}</div>
+                    <div className="muted" style={{ fontSize: "12.5px" }}>ID {st.id} · {st.phone}</div>
+                  </div>
+                  <Svg name="chevR" size={18} />
+                </button>
+              ))}
+            </>
+          ) : null}
           {searchResults?.orders.length ? (
             <>
-              <div className="sec-title">{searchResults.orders.length} order(s)</div>
+              <div className="sec-title mt12">{searchResults.orders.length} order(s)</div>
               {searchResults.orders.slice(0, 20).map(renderOrderRow)}
             </>
-          ) : (
+          ) : !searchResults?.students.length ? (
             <div className="empty" style={{ padding: "34px" }}>
               <Svg name="search" size={44} />
               <div>Nothing found</div>
             </div>
-          )}
+          ) : null}
         </div>
       ) : (
         <>
@@ -156,7 +192,7 @@ export default function StaffHomeClient({
                   key={p.studentId}
                   className="card mt10"
                   style={{ width: "100%", textAlign: "left", padding: "14px 16px", display: "flex", alignItems: "center", gap: "13px" }}
-                  onClick={() => router.push(`/s/customers/${p.studentId}`)}
+                  onClick={() => setShowSubSheet(p.studentId)}
                 >
                   <div className="icon-tile" style={{ background: "var(--amber-soft)", color: "var(--amber)" }}>
                     <Svg name="card" size={22} />
@@ -164,7 +200,7 @@ export default function StaffHomeClient({
                   <div style={{ flex: 1 }}>
                     <div className="h-sm">{p.student.name}</div>
                     <div className="muted" style={{ fontSize: "12.5px" }}>
-                      {(p.payload as any)?.method === "cash" ? "Cash — needs OTP verification" : "UPI — needs approval"}
+                      {p.hasOtp ? "Cash — verify the student’s OTP" : "Awaiting approval"}
                     </div>
                   </div>
                   <span className="pill amber">Review</span>
@@ -227,6 +263,42 @@ export default function StaffHomeClient({
           </div>
         </>
       )}
+
+      {/* Subscription activation sheet */}
+      <Sheet open={showSubSheet !== null} onClose={() => setShowSubSheet(null)}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "16px" }}>Activate subscription</h2>
+          <Seg<"cash" | "upi">
+            options={[
+              ["cash", "Cash"],
+              ["upi", "UPI"],
+            ]}
+            value={subMethod}
+            onChange={setSubMethod}
+          />
+          {subMethod === "cash" && (
+            <div className="field mt16">
+              <label>OTP (student shows on their phone)</label>
+              <input
+                className="input"
+                type="text"
+                placeholder="4 digits"
+                value={subOtp}
+                onChange={(e) => setSubOtp(e.target.value)}
+                maxLength={4}
+              />
+            </div>
+          )}
+          <button
+            className="btn mt16"
+            onClick={() => {
+              if (showSubSheet) handleActivateSub(showSubSheet);
+            }}
+          >
+            <Svg name="check" size={18} /> Activate
+          </button>
+        </div>
+      </Sheet>
     </div>
   );
 }

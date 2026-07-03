@@ -5,8 +5,8 @@ type AuditLog = {
   id: string;
   action: string;
   detail: string;
-  createdAt: Date;
-  staff: { id: string; name: string } | null;
+  at: Date;
+  by: string;
 };
 
 export default function StaffAuditClient({ logs }: { logs: AuditLog[] }) {
@@ -24,7 +24,7 @@ export default function StaffAuditClient({ logs }: { logs: AuditLog[] }) {
                   {log.detail}
                 </div>
                 <div className="faint" style={{ fontSize: "11.5px", marginTop: "6px" }}>
-                  {log.staff?.name} · {timeAgo(log.createdAt)}
+                  {log.by} · {timeAgo(log.at)}
                 </div>
               </div>
             </div>

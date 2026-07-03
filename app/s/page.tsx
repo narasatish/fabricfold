@@ -1,29 +1,58 @@
 import { redirect } from "next/navigation";
-import { requireStaff } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import StaffHomeClient from "./_components/HomeClient";
 
 export default async function StaffHomePage() {
-  const staff = await requireStaff(1);
+  const s = await getSession();
+  if (!s || s.mode !== "staff") redirect("/login");
+  const staff = await db.staff.findUnique({ where: { id: s.staffId } });
+  if (!staff) redirect("/login");
 
-  // Fetch orders in actionable statuses
+  const N = (x: unknown) => Number(x || 0);
+
   const orders = await db.order.findMany({
     where: { status: { in: ["draft", "received", "processing", "ready"] } },
-    include: { student: true, college: true },
-    orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+    include: { student: true },
+    orderBy: { createdAt: "desc" },
   });
 
-  // Fetch pending subscription OTPs/requests
-  const pendingSubs = await db.otp.findMany({
-    where: { purpose: "subscription" },
-    include: { student: true },
-  });
+  // Pending subscription requests (active=false) + their cash OTP codes
+  const pending = await db.subscription.findMany({ where: { active: false }, include: { student: true } });
+  const pendingSubs = await Promise.all(
+    pending.map(async (p) => {
+      const otp = await db.otp.findFirst({ where: { purpose: "subscription", refId: p.studentId, usedAt: null } });
+      return { studentId: p.studentId, student: { id: p.student.id, name: p.student.name }, hasOtp: !!otp };
+    }),
+  );
+
+  const students = await db.student.findMany({ select: { id: true, name: true, phone: true } });
+
+  const plainOrders = orders.map((o) => ({
+    id: o.id,
+    studentId: o.studentId,
+    status: o.status,
+    express: o.express,
+    actualPieces: o.actualPieces,
+    declaredPieces: o.declaredPieces,
+    weightKg: o.weightKg == null ? null : N(o.weightKg),
+    total: N(o.total),
+    paid: o.paid,
+    createdAt: o.createdAt.getTime(),
+    receivedAt: o.receivedAt ? o.receivedAt.getTime() : null,
+    student: { id: o.student.id, name: o.student.name, phone: o.student.phone },
+  }));
 
   return (
     <div className="screen">
       <TopBar title="Counter" sub={`Welcome, ${staff.name.split(" ")[0]}`} />
-      <StaffHomeClient staff={staff} orders={orders} pendingSubs={pendingSubs} />
+      <StaffHomeClient
+        staff={{ name: staff.name, role: staff.role }}
+        orders={plainOrders}
+        pendingSubs={pendingSubs}
+        students={students}
+      />
     </div>
   );
 }

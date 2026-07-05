@@ -1,11 +1,19 @@
 /* Seed reproducing the prototype's seed() (FabricFold.html) — same colleges,
    students, staff, orders, payments, invoices, expenses, compensation, complaint. */
 import "dotenv/config";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "../lib/generated/prisma/client";
 
-const adapter = new PrismaBetterSqlite3({ url: process.env.DATABASE_URL || "file:./dev.db" });
-const db = new PrismaClient({ adapter });
+// Same adapter-by-URL logic as lib/db.ts so the seed runs on SQLite (dev) or Postgres (Supabase).
+const url = process.env.DATABASE_URL || "file:./dev.db";
+function makeAdapter() {
+  if (/^postgres(ql)?:\/\//.test(url)) {
+    const { PrismaPg } = require("@prisma/adapter-pg");
+    return new PrismaPg({ connectionString: url });
+  }
+  const { PrismaBetterSqlite3 } = require("@prisma/adapter-better-sqlite3");
+  return new PrismaBetterSqlite3({ url });
+}
+const db = new PrismaClient({ adapter: makeAdapter() });
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
 const EXPRESS_FEE = 100; // flat surcharge per express order

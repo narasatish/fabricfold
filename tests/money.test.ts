@@ -1,12 +1,19 @@
 /* Money-path tests: GST split, per-FY invoice numbering (no gaps), refund
    credit-note proportionality, credit-split payment, drawer reconciliation. */
+import "dotenv/config";
 import { beforeAll, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 
+// Run the money tests in an ISOLATED schema so they never touch real data:
+//  - Postgres (Supabase): a throwaway "ff_test" schema on the same database.
+//  - SQLite fallback: a local test.db file (used if DATABASE_URL is a file: URL).
+const BASE = process.env.DATABASE_URL || "";
+const IS_PG = /^postgres(ql)?:\/\//.test(BASE);
 const TEST_DB = path.resolve(__dirname, "../test.db");
-process.env.DATABASE_URL = "file:" + TEST_DB;
+const TEST_URL = IS_PG ? BASE.split("?")[0] + "?schema=ff_test" : "file:" + TEST_DB;
+process.env.DATABASE_URL = TEST_URL;
 
 // imported lazily after env is set
 let db: typeof import("../lib/db").db;
@@ -14,11 +21,23 @@ let money: typeof import("../lib/money");
 let report: typeof import("../lib/report");
 
 beforeAll(async () => {
-  if (fs.existsSync(TEST_DB)) fs.rmSync(TEST_DB);
-  execSync(`npx prisma db push --url "file:${TEST_DB}"`, {
-    cwd: path.resolve(__dirname, ".."),
-    stdio: "ignore",
-  });
+  if (IS_PG) {
+    // wipe & recreate the isolated test schema, then build tables in it
+    const { Client } = await import("pg");
+    const admin = new Client({ connectionString: BASE.split("?")[0] });
+    await admin.connect();
+    await admin.query("DROP SCHEMA IF EXISTS ff_test CASCADE; CREATE SCHEMA ff_test;");
+    await admin.end();
+    execSync("npx prisma db push", {
+      cwd: path.resolve(__dirname, ".."), stdio: "ignore",
+      env: { ...process.env, DATABASE_URL: TEST_URL },
+    });
+  } else {
+    if (fs.existsSync(TEST_DB)) fs.rmSync(TEST_DB);
+    execSync(`npx prisma db push --url "file:${TEST_DB}"`, {
+      cwd: path.resolve(__dirname, ".."), stdio: "ignore",
+    });
+  }
   db = (await import("../lib/db")).db;
   money = await import("../lib/money");
   report = await import("../lib/report");

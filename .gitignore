@@ -5,3 +5,6 @@ dev.db
 lib/generated
 test.db
 public/uploads
+
+.vercel
+.env*

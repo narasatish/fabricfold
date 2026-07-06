@@ -6,9 +6,31 @@ import { createSession, clearSession, requireStudent } from "../auth";
 
 const OTP_TTL = 5 * 60_000;
 
-async function sendSms(phone: string, text: string) {
-  // MessageProvider interface — dev: log to console.
-  console.log(`[SMS -> ${phone}] ${text}`);
+/* Deliver the login code by SMS.
+   - If MSG91 keys are set → send a real SMS via MSG91's Flow API.
+   - Otherwise → fall back to the server console (dev / pre-SMS soft launch). */
+async function sendSms(phone: string, code: string) {
+  const authKey = process.env.MSG91_AUTHKEY;
+  const templateId = process.env.MSG91_TEMPLATE_ID;
+  if (!authKey || !templateId) {
+    console.log(`[SMS -> ${phone}] Your FabricFold login OTP is ${code}`);
+    return;
+  }
+  const res = await fetch("https://control.msg91.com/api/v5/flow/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", authkey: authKey },
+    // The template's variable name must match one of these keys — adjust to your
+    // DLT-approved template (commonly ##OTP##). We send several aliases to be safe.
+    body: JSON.stringify({
+      template_id: templateId,
+      ...(process.env.MSG91_SENDER_ID ? { sender: process.env.MSG91_SENDER_ID } : {}),
+      recipients: [{ mobiles: "91" + phone, OTP: code, otp: code, var1: code, code }],
+    }),
+  });
+  if (!res.ok) {
+    console.error("MSG91 send failed", res.status, await res.text().catch(() => ""));
+    throw new Error("Couldn't send the OTP — please try again in a moment");
+  }
 }
 
 function genCode() {
@@ -27,7 +49,7 @@ export async function requestOtp(phone: string, mode: "customer" | "staff") {
   const code = genCode();
   await db.otp.deleteMany({ where: { phone, purpose: "login" } });
   await db.otp.create({ data: { phone, purpose: "login", code, expiresAt: new Date(Date.now() + OTP_TTL) } });
-  await sendSms(phone, `Your FabricFold login OTP is ${code}`);
+  await sendSms(phone, code);
   return { ok: true as const };
 }
 

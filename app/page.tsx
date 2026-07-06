@@ -1,17 +1,17 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import Landing from "./_components/Landing";
+import Home from "./_components/marketing/Home";
 
 export const metadata: Metadata = {
-  title: "FabricFold — Campus Laundry & Dry-Cleaning | Wash & Iron from ₹15/piece",
+  title: "FabricFold — Campus & Community Laundry Service",
   description:
-    "Campus laundry for hostel students at BVRIT & St Mary's. Pre-book from your phone, QR-tagged garments, live tracking, pickup OTP. Wash & iron ₹15/piece, 48-hour turnaround, same-day express. Annual plans available.",
-  keywords: ["campus laundry", "hostel laundry service", "laundry BVRIT", "dry cleaning college", "wash and iron per piece", "student laundry Telangana"],
+    "FabricFold runs the laundry counter on campuses, hostels and communities. Students book from their phone, every garment is QR-tagged, orders are tracked live, and pickup is by one-time code. Bring FabricFold to your campus.",
+  keywords: ["campus laundry service", "college laundry", "hostel laundry", "community laundry", "laundry counter on campus", "student laundry Telangana", "laundry vendor for colleges"],
   alternates: { canonical: "https://fabricfold.in" },
   openGraph: {
-    title: "FabricFold — Campus Laundry & Dry-Cleaning",
-    description: "Drop at the counter, track every piece, collect with an OTP. Wash & iron from ₹15/piece.",
+    title: "FabricFold — Campus & Community Laundry Service",
+    description: "We run the laundry counter on your campus or community. Book, track and collect from your phone.",
     type: "website",
     locale: "en_IN",
     url: "https://fabricfold.in",
@@ -24,14 +24,11 @@ const jsonLd = {
   "@type": "LocalBusiness",
   name: "FabricFold",
   url: "https://fabricfold.in",
-  description: "Campus laundry and dry-cleaning service for hostel students. Per-piece pricing, live order tracking, QR-tagged garments.",
+  description: "Campus and community laundry & dry-cleaning service. On-site counter, QR-tagged garments, live order tracking, and digital records for colleges, hostels and communities.",
   areaServed: "Telangana, India",
   telephone: "+918019121966",
-  priceRange: "₹10–₹350 per piece",
-  makesOffer: [
-    { "@type": "Offer", name: "Wash & Iron", price: "15", priceCurrency: "INR" },
-    { "@type": "Offer", name: "Annual subscription — 34 cycles × 7 kg", price: "8024", priceCurrency: "INR" },
-  ],
+  email: "support@fabricfold.in",
+  knowsAbout: ["campus laundry", "hostel laundry", "community laundry", "dry cleaning", "garment tracking"],
 };
 
 export default async function Root() {
@@ -41,7 +38,7 @@ export default async function Root() {
   return (
     <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
-      <Landing />
+      <Home />
     </>
   );
 }

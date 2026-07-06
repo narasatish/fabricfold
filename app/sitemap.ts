@@ -1,18 +1,14 @@
 import type { MetadataRoute } from "next";
 
+const BASE = "https://fabricfold.in";
+
 export default function sitemap(): MetadataRoute.Sitemap {
-  return [
-    {
-      url: "https://fabricfold.in",
-      lastModified: new Date(),
-      changeFrequency: "weekly",
-      priority: 1,
-    },
-    {
-      url: "https://fabricfold.in/login",
-      lastModified: new Date(),
-      changeFrequency: "monthly",
-      priority: 0.5,
-    },
-  ];
+  const now = new Date();
+  const pages = ["", "/how-it-works", "/partners", "/about", "/contact", "/login"];
+  return pages.map((p) => ({
+    url: BASE + p,
+    lastModified: now,
+    changeFrequency: p === "" ? "weekly" : "monthly",
+    priority: p === "" ? 1 : p === "/partners" ? 0.9 : 0.7,
+  }));
 }

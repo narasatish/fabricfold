@@ -2,7 +2,6 @@ import { requireStudent } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { fmt, dateStr } from "@/lib/format";
-import Link from "next/link";
 import { Svg } from "@/components/icons";
 import WalletClient from "./_components/WalletClient";
 
@@ -91,9 +90,7 @@ export default async function WalletPage() {
             <div className="muted" style={{ fontSize: "12px" }}>
               {fmt(plan.price)} + {gst}% GST
             </div>
-            <Link href="#" className="btn mt16">
-              Get the plan
-            </Link>
+            <WalletClient planTotal={planTotal} cycles={plan.cycles} kg={plan.kgPerCycle} />
             <div className="muted center mt8" style={{ fontSize: "11.5px" }}>
               Activated after staff approval
             </div>

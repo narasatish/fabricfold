@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/chrome";
-import { Svg } from "@/components/icons";
+import { submitComplaint } from "@/lib/actions/complaints";
 
 export default function HelpClient({ orderId }: { orderId?: string }) {
   const router = useRouter();
@@ -16,8 +16,12 @@ export default function HelpClient({ orderId }: { orderId?: string }) {
       return;
     }
     setLoading(true);
-    // TODO: implement submitComplaint action
+    const r = await submitComplaint(complaintText, orderId || null);
     setLoading(false);
+    if (!r.ok) {
+      toast(r.error || "Could not submit", true);
+      return;
+    }
     toast("Complaint submitted");
     setComplaintText("");
     router.refresh();

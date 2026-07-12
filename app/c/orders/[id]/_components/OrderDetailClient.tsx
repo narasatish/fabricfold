@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/chrome";
 import { Svg } from "@/components/icons";
-import { rateOrder } from "@/lib/actions/orders";
+import { rateOrder, deleteDraft } from "@/lib/actions/orders";
 
 export default function OrderDetailClient({
   orderId,
@@ -35,8 +35,14 @@ export default function OrderDetailClient({
   const handleDeleteDraft = async () => {
     if (!confirm("Delete this draft order?")) return;
     setLoading(true);
-    // TODO: implement deleteDraft action
+    const r = await deleteDraft(orderId);
     setLoading(false);
+    if (!r.ok) {
+      toast(r.error || "Could not delete", true);
+      return;
+    }
+    toast("Draft deleted");
+    router.push("/c/orders");
   };
 
   if (isDraft) {

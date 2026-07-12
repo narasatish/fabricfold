@@ -301,6 +301,21 @@ export async function rateOrder(orderId: string, rating: number, comment: string
   return { ok: true as const };
 }
 
+/* ---------- Delete a draft (customer, own un-accepted order) ---------- */
+export async function deleteDraft(orderId: string) {
+  const stu = await requireStudent();
+  const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
+  if (o.studentId !== stu.id) return { ok: false as const, error: "Not your order" };
+  if (o.status !== "draft") return { ok: false as const, error: "Only draft orders can be deleted" };
+  await db.$transaction(async (tx) => {
+    await tx.orderEvent.deleteMany({ where: { orderId: o.id } });
+    await tx.garmentTag.deleteMany({ where: { orderId: o.id } });
+    await tx.order.delete({ where: { id: o.id } });
+  });
+  bcast(o, "order.updated");
+  return { ok: true as const };
+}
+
 /* ---------- Garment tag scan ---------- */
 export async function scanTag(orderId: string, code: string) {
   await requireStaff(1);

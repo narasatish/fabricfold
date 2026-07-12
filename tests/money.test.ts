@@ -9,7 +9,8 @@ import fs from "node:fs";
 // Run the money tests in an ISOLATED schema so they never touch real data:
 //  - Postgres (Supabase): a throwaway "ff_test" schema on the same database.
 //  - SQLite fallback: a local test.db file (used if DATABASE_URL is a file: URL).
-const BASE = process.env.DATABASE_URL || "";
+// Prefer DIRECT_URL (session pooler) — tests do DDL (db push) which needs it.
+const BASE = process.env.DIRECT_URL || process.env.DATABASE_URL || "";
 const IS_PG = /^postgres(ql)?:\/\//.test(BASE);
 const TEST_DB = path.resolve(__dirname, "../test.db");
 const TEST_URL = IS_PG ? BASE.split("?")[0] + "?schema=ff_test" : "file:" + TEST_DB;

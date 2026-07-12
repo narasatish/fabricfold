@@ -13,7 +13,13 @@ function makeAdapter() {
     const { PrismaPg } = require("@prisma/adapter-pg");
     // Honour ?schema=… so an isolated schema (e.g. tests) is actually used at runtime.
     const schema = new URL(url).searchParams.get("schema") || undefined;
-    return new PrismaPg({ connectionString: url }, schema ? { schema } : undefined);
+    // Cap connections so a serverless instance never exhausts Supabase's pooler.
+    // The transaction pooler (port 6543) releases each connection after a query,
+    // so a small client pool is plenty and safe under concurrency.
+    return new PrismaPg(
+      { connectionString: url, max: 4, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 15_000 },
+      schema ? { schema } : undefined,
+    );
   }
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { PrismaBetterSqlite3 } = require("@prisma/adapter-better-sqlite3");

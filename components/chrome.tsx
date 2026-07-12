@@ -123,28 +123,33 @@ export function Switch({ on, onToggle }: { on: boolean; onToggle: () => void }) 
   return <button type="button" className={`switch ${on ? "on" : ""}`} onClick={onToggle} role="switch" aria-checked={on} />;
 }
 
-/* ---------- Realtime (SSE) ---------- */
-export function useRealtime(onEvent: (ev: { type: string; payload: Record<string, unknown> }) => void) {
-  const cb = useRef(onEvent);
-  cb.current = onEvent;
+/* ---------- Realtime (polling) ----------
+   Runs on Vercel's serverless runtime, where an in-memory SSE bus can't push
+   across instances. We refresh server data on a short interval while the tab
+   is visible, and immediately when it regains focus — so a student's order
+   shows up on the staff screen (and vice-versa) within a few seconds. */
+export function useRealtime(onTick: () => void, intervalMs = 4000) {
+  const cb = useRef(onTick);
+  cb.current = onTick;
   useEffect(() => {
-    const es = new EventSource("/api/rt");
-    es.onmessage = (m) => {
-      try { cb.current(JSON.parse(m.data)); } catch { /* ignore */ }
+    const tick = () => { if (document.visibilityState === "visible") cb.current(); };
+    const id = setInterval(tick, intervalMs);
+    const onFocus = () => tick();
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
     };
-    return () => es.close();
-  }, []);
+  }, [intervalMs]);
 }
 
-/* ---------- Refresh-on-realtime helper ---------- */
-export function RealtimeRefresh({ types, toastOn }: { types?: string[]; toastOn?: Record<string, string> }) {
+/* ---------- Refresh-on-realtime helper ----------
+   Props are kept for call-site compatibility; polling refreshes all server
+   data, so per-event filtering/toasts no longer apply. */
+export function RealtimeRefresh(_props: { types?: string[]; toastOn?: Record<string, string> } = {}) {
   const router = useRouter();
-  const toast = useToast();
-  useRealtime((ev) => {
-    if (!types || types.includes(ev.type)) {
-      if (toastOn?.[ev.type]) toast(toastOn[ev.type]);
-      router.refresh();
-    }
-  });
+  useRealtime(() => router.refresh());
   return null;
 }

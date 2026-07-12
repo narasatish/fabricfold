@@ -1,6 +1,6 @@
 /* FabricFold service worker — offline shell + Web Push. Network-first for
    navigations so deploys show up without manual refresh. */
-const CACHE = "ff-v1";
+const CACHE = "ff-v2";
 
 self.addEventListener("install", () => self.skipWaiting());
 
@@ -44,7 +44,7 @@ self.addEventListener("fetch", (e) => {
 self.addEventListener("push", (e) => {
   let data = { title: "FabricFold", body: "" };
   try { data = e.data.json(); } catch { /* ignore */ }
-  e.waitUntil(self.registration.showNotification(data.title || "FabricFold", { body: data.body || "", icon: "/icon.svg", badge: "/icon.svg" }));
+  e.waitUntil(self.registration.showNotification(data.title || "FabricFold", { body: data.body || "", icon: "/icon-192.png", badge: "/icon-192.png" }));
 });
 
 self.addEventListener("notificationclick", (e) => {

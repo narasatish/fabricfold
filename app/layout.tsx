@@ -8,10 +8,15 @@ export const metadata: Metadata = {
   title: "FabricFold",
   description: "Campus laundry & dry-cleaning",
   manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, statusBarStyle: "default", title: "FabricFold" },
+  icons: {
+    icon: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }, { url: "/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+  },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0f8a66",
+  themeColor: "#0e9271",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,

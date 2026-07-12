@@ -59,6 +59,34 @@ export async function activateSubscription(studentId: string, method: "cash" | "
   return { ok: true as const };
 }
 
+/** Manager+ assigns the annual plan DIRECTLY to a registered student — no
+    pending request or OTP needed (payment is taken at the counter). */
+export async function assignSubscription(studentId: string, method: "cash" | "upi") {
+  const st = await requireStaff(2); // Manager+ only
+  const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: true } });
+  if (!stu) return { ok: false as const, error: "Student not found" };
+  if (stu.subscription?.active) return { ok: false as const, error: "This student already has an active plan" };
+
+  const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
+  const plan = cfg.plan as { price: number; cycles: number; kgPerCycle: number };
+  const gross = plan.price + Math.round(plan.price * Number(cfg.gstPct) / 100);
+
+  await db.$transaction(async (tx) => {
+    await tx.subscription.upsert({
+      where: { studentId },
+      create: { studentId, active: true, plan: "Annual Plan", startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesTotal: plan.cycles, kgPerCycle: plan.kgPerCycle },
+      update: { active: true, plan: "Annual Plan", startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesTotal: plan.cycles, cyclesUsed: 0, kgPerCycle: plan.kgPerCycle },
+    });
+    await tx.payment.create({ data: { method, amount: gross, collegeId: stu.collegeId, studentId, note: "Annual subscription (assigned at counter)" } });
+  });
+  await db.otp.deleteMany({ where: { purpose: "subscription", refId: studentId } });
+
+  await pushNotif(studentId, `Your annual plan is active — ${plan.cycles} cycles, up to ${plan.kgPerCycle} kg each. Happy washing!`, "status");
+  await audit("Subscription assigned", `${stu.name} · ₹${gross} (${method})`, st.id);
+  publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "subscription", payload: { studentId } });
+  return { ok: true as const };
+}
+
 export async function cancelSubscriptionRequest() {
   const stu = await requireStudent();
   if (stu.subscription && !stu.subscription.active) {

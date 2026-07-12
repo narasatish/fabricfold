@@ -6,6 +6,7 @@ import { Seg, Sheet, useToast } from "@/components/chrome";
 import { fmt, timeAgo, initials } from "@/lib/format";
 import { isOverdue } from "@/lib/money";
 import { activateSubscription } from "@/lib/actions/subscription";
+import { registerStudent } from "@/lib/actions/admin";
 
 type Order = {
   id: string;
@@ -33,11 +34,13 @@ export default function StaffHomeClient({
   orders,
   pendingSubs,
   students,
+  colleges,
 }: {
   staff: { name: string; role: number };
   orders: Order[];
   pendingSubs: PendingSub[];
   students: { id: string; name: string; phone: string }[];
+  colleges: { id: string; name: string }[];
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -46,6 +49,9 @@ export default function StaffHomeClient({
   const [showSubSheet, setShowSubSheet] = useState<string | null>(null);
   const [subMethod, setSubMethod] = useState<"cash" | "upi">("upi");
   const [subOtp, setSubOtp] = useState("");
+  const [showRegister, setShowRegister] = useState(false);
+  const [reg, setReg] = useState({ name: "", phone: "", collegeId: colleges[0]?.id || "" });
+  const [regLoading, setRegLoading] = useState(false);
 
   const q = search.trim().toLowerCase();
 
@@ -72,6 +78,17 @@ export default function StaffHomeClient({
       orders: orders.filter((o) => o.id.toLowerCase().includes(q)),
     };
   }, [q, orders, students]);
+
+  const handleRegister = async () => {
+    setRegLoading(true);
+    const r = await registerStudent(reg);
+    setRegLoading(false);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(`Student registered — ID ${r.id}`);
+    setShowRegister(false);
+    setReg({ name: "", phone: "", collegeId: colleges[0]?.id || "" });
+    router.push(`/s/customers/${r.id}`);
+  };
 
   const handleActivateSub = async (studentId: string) => {
     const r = await activateSubscription(studentId, subMethod, subOtp || undefined);
@@ -151,6 +168,11 @@ export default function StaffHomeClient({
         )}
       </div>
 
+      {/* Register a new student at the counter */}
+      <button className="btn ghost mt10" onClick={() => setShowRegister(true)}>
+        <Svg name="edit" size={17} /> Register new student
+      </button>
+
       {/* Search results or main view */}
       {q ? (
         <div style={{ marginTop: "16px" }}>
@@ -178,6 +200,7 @@ export default function StaffHomeClient({
             <div className="empty" style={{ padding: "34px" }}>
               <Svg name="search" size={44} />
               <div>Nothing found</div>
+              <button className="btn sm mt16" onClick={() => setShowRegister(true)}>Register this student</button>
             </div>
           ) : null}
         </div>
@@ -263,6 +286,37 @@ export default function StaffHomeClient({
           </div>
         </>
       )}
+
+      {/* Register-student sheet */}
+      <Sheet open={showRegister} onClose={() => setShowRegister(false)}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "6px" }}>Register new student</h2>
+          <p className="muted" style={{ fontSize: "13px", marginBottom: "16px" }}>
+            They&apos;ll log in with this number and see their campus rates right away.
+          </p>
+          <div className="field">
+            <label>Full name</label>
+            <input className="input" type="text" placeholder="Student's name" value={reg.name}
+              onChange={(e) => setReg({ ...reg, name: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>Mobile number</label>
+            <input className="input" type="tel" inputMode="numeric" placeholder="10-digit number" value={reg.phone}
+              onChange={(e) => setReg({ ...reg, phone: e.target.value.replace(/\D/g, "").slice(0, 10) })} />
+          </div>
+          <div className="field">
+            <label>Campus</label>
+            <select className="input" value={reg.collegeId} onChange={(e) => setReg({ ...reg, collegeId: e.target.value })}>
+              {colleges.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <button className="btn mt16" onClick={handleRegister} disabled={regLoading || !reg.name.trim() || reg.phone.length !== 10}>
+            <Svg name="check" size={18} /> {regLoading ? "Registering…" : "Register student"}
+          </button>
+        </div>
+      </Sheet>
 
       {/* Subscription activation sheet */}
       <Sheet open={showSubSheet !== null} onClose={() => setShowSubSheet(null)}>

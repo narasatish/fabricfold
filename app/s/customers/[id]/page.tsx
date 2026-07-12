@@ -23,6 +23,10 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
   });
   if (!student) notFound();
 
+  const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
+  const planCfg = cfg.plan as { price: number; cycles: number; kgPerCycle: number };
+  const planGross = planCfg.price + Math.round(planCfg.price * Number(cfg.gstPct) / 100);
+
   const N = (x: unknown) => Number(x || 0);
   const plain = {
     id: student.id,
@@ -51,7 +55,7 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
   return (
     <div className="screen">
       <TopBar title={student.name} sub={`ID ${student.id}`} back="/s" />
-      <StaffCustomerClient student={plain} staffRole={staff.role} />
+      <StaffCustomerClient student={plain} staffRole={staff.role} plan={{ ...planCfg, gross: planGross }} />
     </div>
   );
 }

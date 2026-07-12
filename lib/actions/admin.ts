@@ -6,6 +6,28 @@ import { requireStaff } from "../auth";
 import { audit } from "../notify";
 import { publish } from "../realtime";
 
+/* ----- Register a student at the counter (any staff) ----- */
+export async function registerStudent(input: { name: string; phone: string; collegeId: string }) {
+  const st = await requireStaff(1);
+  const name = input.name.trim();
+  const phone = input.phone.replace(/\D/g, "").slice(-10);
+  if (name.length < 2) return { ok: false as const, error: "Enter the student's name" };
+  if (phone.length !== 10) return { ok: false as const, error: "Enter a valid 10-digit mobile number" };
+  if (await db.student.findUnique({ where: { phone } })) return { ok: false as const, error: "This number is already registered" };
+  const college = await db.college.findUnique({ where: { id: input.collegeId } });
+  if (!college || !college.active) return { ok: false as const, error: "Pick a campus" };
+
+  // permanent random 6-digit FabricFold code, unique (same scheme as self-registration)
+  let id = "";
+  for (let i = 0; i < 20; i++) {
+    id = String(Math.floor(100000 + Math.random() * 900000));
+    if (!(await db.student.findUnique({ where: { id } }))) break;
+  }
+  const stu = await db.student.create({ data: { id, phone, name, collegeId: college.id } });
+  await audit("Student registered", `${name} · +91 ${phone} · ${college.name}`, st.id);
+  return { ok: true as const, id: stu.id };
+}
+
 /* ----- Rates & GST (Admin+) ----- */
 export async function saveRates(rates: Record<string, { label: string; items: [string, number][] }>, gstPct: number) {
   const st = await requireStaff(3);

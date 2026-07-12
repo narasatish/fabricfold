@@ -28,6 +28,7 @@ export default async function StaffHomePage() {
   );
 
   const students = await db.student.findMany({ select: { id: true, name: true, phone: true } });
+  const colleges = await db.college.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } });
 
   const plainOrders = orders.map((o) => ({
     id: o.id,
@@ -52,6 +53,7 @@ export default async function StaffHomePage() {
         orders={plainOrders}
         pendingSubs={pendingSubs}
         students={students}
+        colleges={colleges}
       />
     </div>
   );

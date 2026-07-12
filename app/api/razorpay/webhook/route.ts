@@ -4,7 +4,7 @@
    endpoint safely rejects everything. */
 import crypto from "node:crypto";
 import { db } from "@/lib/db";
-import { createInvoice, shouldInvoice } from "@/lib/money";
+import { createInvoice, shouldInvoiceOrder } from "@/lib/money";
 import { publish, orderChannels } from "@/lib/realtime";
 import { pushNotif } from "@/lib/notify";
 
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
     await tx.payment.create({ data: { method: "upi", amount: Number(o.total) - Number(o.creditApplied), orderId: o.id, collegeId: o.collegeId, studentId: o.studentId, gatewayRef } });
     const paymentMethod = Number(o.creditApplied) > 0 ? "upi+credit" : "upi";
     const u = await tx.order.update({ where: { id: o.id }, data: { paid: true, paymentMethod } });
-    if (shouldInvoice(paymentMethod)) await createInvoice(tx, u, paymentMethod);
+    if (shouldInvoiceOrder(u, paymentMethod)) await createInvoice(tx, u, paymentMethod);
     return u;
   });
 

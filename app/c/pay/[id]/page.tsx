@@ -27,10 +27,11 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
           orderId={order.id}
           orderTotal={Number(order.total)}
           orderService={rateLabel}
-          orderPieces={order.items as unknown as Array<any>}
+          orderPieces={order.items as unknown as Array<{ qty: number }>}
           studentCredits={Number(student.credits)}
           paymentUpiId={payment?.upiId || ""}
           paymentPayeeName={payment?.payeeName || "FabricFold"}
+          gatewayEnabled={!!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET)}
         />
       </div>
     </div>

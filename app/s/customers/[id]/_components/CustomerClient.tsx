@@ -6,6 +6,7 @@ import { Qr } from "@/components/qr";
 import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, loyaltyBadge } from "@/lib/format";
 import { Seg, Sheet, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
+import { assignSubscription } from "@/lib/actions/subscription";
 
 type Student = {
   id: string;
@@ -26,12 +27,25 @@ type Student = {
 
 const KIND_LABEL: Record<string, string> = { damage: "Damage", stain: "Stain / re-do", missing: "Missing item", goodwill: "Goodwill", manual: "Adjustment" };
 
-export default function StaffCustomerClient({ student, staffRole }: { student: Student; staffRole: number }) {
+export default function StaffCustomerClient({ student, staffRole, plan }: { student: Student; staffRole: number; plan: { price: number; cycles: number; kgPerCycle: number; gross: number } }) {
   const router = useRouter();
   const toast = useToast();
   const tier = loyaltyBadge(student.lifetimePieces);
   const [showComp, setShowComp] = useState(false);
   const [comp, setComp] = useState({ kind: "damage", amount: 0, method: "credit" as "credit" | "cash", comment: "" });
+  const [showAssign, setShowAssign] = useState(false);
+  const [assignMethod, setAssignMethod] = useState<"cash" | "upi">("upi");
+  const [assignLoading, setAssignLoading] = useState(false);
+
+  const doAssign = async () => {
+    setAssignLoading(true);
+    const r = await assignSubscription(student.id, assignMethod);
+    setAssignLoading(false);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast("Annual plan activated");
+    setShowAssign(false);
+    router.refresh();
+  };
 
   const doComp = async () => {
     const r = await submitCompensation({ studentId: student.id, orderId: null, kind: comp.kind, amount: comp.amount, method: comp.method, comment: comp.comment });
@@ -67,6 +81,12 @@ export default function StaffCustomerClient({ student, staffRole }: { student: S
       <button className="btn ghost mt12" onClick={() => setShowComp(true)}>
         <Svg name="gift" size={17} /> Issue compensation
       </button>
+
+      {staffRole >= 2 && !student.subscription?.active && (
+        <button className="btn mt10" onClick={() => setShowAssign(true)}>
+          <Svg name="layers" size={17} /> Assign annual plan
+        </button>
+      )}
 
       {/* Subscription */}
       {student.subscription && (
@@ -148,6 +168,32 @@ export default function StaffCustomerClient({ student, staffRole }: { student: S
       )}
 
       {/* Compensation sheet */}
+      {/* Assign annual plan (Manager+) */}
+      <Sheet open={showAssign} onClose={() => setShowAssign(false)}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "6px" }}>Assign annual plan</h2>
+          <p className="muted" style={{ fontSize: "13px", marginBottom: "14px" }}>
+            Activates immediately for {student.name}. Collect the payment first.
+          </p>
+          <div className="card pad" style={{ background: "var(--teal-tint)" }}>
+            <div className="kv"><span className="k">Plan</span><span>Annual Plan</span></div>
+            <div className="kv"><span className="k">Cycles</span><span className="mono">{plan.cycles} × up to {plan.kgPerCycle} kg</span></div>
+            <div className="kv total"><span>To collect (incl. GST)</span><span className="mono">{fmt(plan.gross)}</span></div>
+          </div>
+          <div className="field mt16">
+            <label>Paid by</label>
+            <Seg<"cash" | "upi">
+              options={[["upi", "UPI"], ["cash", "Cash"]]}
+              value={assignMethod}
+              onChange={setAssignMethod}
+            />
+          </div>
+          <button className="btn mt16" onClick={doAssign} disabled={assignLoading}>
+            <Svg name="check" size={18} /> {assignLoading ? "Activating…" : `Confirm ${fmt(plan.gross)} received & activate`}
+          </button>
+        </div>
+      </Sheet>
+
       <Sheet open={showComp} onClose={() => setShowComp(false)}>
         <div className="h-md" style={{ padding: "0 4px 12px" }}>Issue compensation</div>
         <div className="field">

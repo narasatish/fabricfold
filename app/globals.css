@@ -230,6 +230,14 @@ select.input{-webkit-appearance:none;appearance:none;background-image:url("data:
 .otp-box{font-size:38px;font-weight:750;letter-spacing:.18em;color:var(--teal);font-variant-numeric:tabular-nums;text-align:center}
 .notif-dot{position:absolute;top:10px;right:11px;width:9px;height:9px;background:var(--red);border-radius:50%;border:2px solid #fff;animation:ff-pop var(--dur-3) var(--ease-spring)}
 
+/* At-a-glance dashboard (staff home) */
+.stat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.stat-tile{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-xs);padding:14px 16px;text-align:left;transition:transform var(--dur-1) var(--ease-out),box-shadow var(--dur-2)}
+.stat-tile.tap:active{transform:scale(.98);background:var(--teal-tint)}
+@media(hover:hover){.stat-tile.tap:hover{box-shadow:var(--shadow-md)}}
+.stat-num{font-size:24px;font-weight:750;letter-spacing:-.02em;color:var(--ink);font-variant-numeric:tabular-nums}
+.stat-lbl{font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+
 /* mode banner */
 .mode-strip{display:flex;align-items:center;gap:8px;background:var(--ink);color:#fff;font-size:11.5px;font-weight:600;padding:6px 14px;justify-content:center;letter-spacing:.02em}
 .mode-strip .swap{background:rgba(255,255,255,.16);padding:3px 10px;border-radius:8px;color:#fff;font-weight:600;font-size:11px}

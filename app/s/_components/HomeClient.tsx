@@ -29,18 +29,22 @@ type PendingSub = {
   hasOtp: boolean;
 };
 
+type Metrics = { todayRevenue: number; pending: number; ready: number; activeSubs: number; newStudents: number };
+
 export default function StaffHomeClient({
   staff,
   orders,
   pendingSubs,
   students,
   colleges,
+  metrics,
 }: {
   staff: { name: string; role: number };
   orders: Order[];
   pendingSubs: PendingSub[];
   students: { id: string; name: string; phone: string }[];
   colleges: { id: string; name: string }[];
+  metrics: Metrics;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -149,6 +153,31 @@ export default function StaffHomeClient({
 
   return (
     <div className="pad">
+      {/* At-a-glance dashboard */}
+      <div className="stat-grid">
+        <div className="stat-tile">
+          <div className="stat-num">{fmt(metrics.todayRevenue)}</div>
+          <div className="stat-lbl">Today&apos;s takings</div>
+        </div>
+        <button className="stat-tile tap" onClick={() => setFilter("received")}>
+          <div className="stat-num">{metrics.pending}</div>
+          <div className="stat-lbl">In progress</div>
+        </button>
+        <button className="stat-tile tap" onClick={() => setFilter("ready")}>
+          <div className="stat-num">{metrics.ready}</div>
+          <div className="stat-lbl">Ready to collect</div>
+        </button>
+        <div className="stat-tile">
+          <div className="stat-num">{metrics.activeSubs}</div>
+          <div className="stat-lbl">Active plans</div>
+        </div>
+      </div>
+      {metrics.newStudents > 0 && (
+        <div className="muted center mt8" style={{ fontSize: "12px" }}>
+          {metrics.newStudents} new student{metrics.newStudents > 1 ? "s" : ""} registered today
+        </div>
+      )}
+
       {/* Search box */}
       <div className="card" style={{ padding: "4px 6px", display: "flex", alignItems: "center", gap: "8px" }}>
         <span style={{ color: "var(--muted)", paddingLeft: "8px" }}>
@@ -168,10 +197,15 @@ export default function StaffHomeClient({
         )}
       </div>
 
-      {/* Register a new student at the counter */}
-      <button className="btn ghost mt10" onClick={() => setShowRegister(true)}>
-        <Svg name="edit" size={17} /> Register new student
-      </button>
+      {/* Student management */}
+      <div className="row gap8 mt10">
+        <button className="btn ghost" onClick={() => setShowRegister(true)}>
+          <Svg name="edit" size={17} /> Register student
+        </button>
+        <button className="btn sec" onClick={() => router.push("/s/students")}>
+          <Svg name="building" size={17} /> All students
+        </button>
+      </div>
 
       {/* Search results or main view */}
       {q ? (

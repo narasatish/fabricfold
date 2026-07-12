@@ -30,6 +30,21 @@ export default async function StaffHomePage() {
   const students = await db.student.findMany({ select: { id: true, name: true, phone: true } });
   const colleges = await db.college.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } });
 
+  // At-a-glance dashboard metrics
+  const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+  const [todayPays, activeSubs, newStudents] = await Promise.all([
+    db.payment.findMany({ where: { at: { gte: startOfDay }, amount: { gt: 0 }, method: { in: ["cash", "upi", "credit"] } }, select: { amount: true } }),
+    db.subscription.count({ where: { active: true } }),
+    db.student.count({ where: { createdAt: { gte: startOfDay } } }),
+  ]);
+  const metrics = {
+    todayRevenue: todayPays.reduce((s, p) => s + N(p.amount), 0),
+    pending: orders.filter((o) => o.status === "received" || o.status === "processing").length,
+    ready: orders.filter((o) => o.status === "ready").length,
+    activeSubs,
+    newStudents,
+  };
+
   const plainOrders = orders.map((o) => ({
     id: o.id,
     studentId: o.studentId,
@@ -54,6 +69,7 @@ export default async function StaffHomePage() {
         pendingSubs={pendingSubs}
         students={students}
         colleges={colleges}
+        metrics={metrics}
       />
     </div>
   );

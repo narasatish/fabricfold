@@ -15,7 +15,13 @@ export async function createSession(s: Session) {
     .setExpirationTime("30d")
     .sign(SECRET);
   const jar = await cookies();
-  jar.set(COOKIE, jwt, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 30 });
+  jar.set(COOKIE, jwt, {
+    httpOnly: true,               // JS on the page can never read the session
+    sameSite: "lax",              // not sent on cross-site POSTs (CSRF hardening)
+    secure: process.env.NODE_ENV === "production", // HTTPS-only in production
+    path: "/",
+    maxAge: 60 * 60 * 24 * 30,
+  });
 }
 
 export async function clearSession() {

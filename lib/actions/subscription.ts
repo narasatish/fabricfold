@@ -42,8 +42,8 @@ export async function activateSubscription(studentId: string, method: "cash" | "
 
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const plan = cfg.plan as { price: number; cycles: number; kgPerCycle: number };
-  const gstPct = Number(cfg.gstPct);
-  const gross = plan.price + Math.round(plan.price * gstPct / 100);
+  const gstOn = (cfg.settings as Record<string, unknown>)?.gstEnabled !== false;
+  const gross = plan.price + (gstOn ? Math.round(plan.price * Number(cfg.gstPct) / 100) : 0);
 
   await db.$transaction(async (tx) => {
     await tx.subscription.update({
@@ -69,7 +69,8 @@ export async function assignSubscription(studentId: string, method: "cash" | "up
 
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const plan = cfg.plan as { price: number; cycles: number; kgPerCycle: number };
-  const gross = plan.price + Math.round(plan.price * Number(cfg.gstPct) / 100);
+  const gstOn2 = (cfg.settings as Record<string, unknown>)?.gstEnabled !== false;
+  const gross = plan.price + (gstOn2 ? Math.round(plan.price * Number(cfg.gstPct) / 100) : 0);
 
   await db.$transaction(async (tx) => {
     await tx.subscription.upsert({

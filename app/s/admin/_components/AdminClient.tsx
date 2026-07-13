@@ -18,7 +18,7 @@ type Props = {
     plan: { price: number; cycles: number; kgPerCycle: number };
     rates: Rates;
     payment: { upiId: string; payeeName: string; bankName: string; accountName: string; accountNo: string; ifsc: string; gatewayKey: string };
-    settings: { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number };
+    settings: { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number; gstEnabled?: boolean };
   };
   colleges: { id: string; name: string; address: string; features: Record<string, boolean> }[];
   staff: { id: string; name: string; phone: string; role: number; collegeId: string | null }[];
@@ -40,6 +40,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, cu
   const [sheet, setSheet] = useState<null | "rates" | "plan" | "payment" | "settings" | "college" | "staff" | "payslip">(null);
   const [rates, setRates] = useState<Rates>(JSON.parse(JSON.stringify(config.rates)));
   const [gst, setGst] = useState(config.gstPct);
+  const [gstOn, setGstOn] = useState(config.settings.gstEnabled !== false);
   const [plan, setPlan] = useState({ ...config.plan });
   const [pay, setPay] = useState({ ...config.payment });
   const [settings, setSettings] = useState({ reportEmail: config.settings.reportEmail || "", dailyEmail: !!config.settings.dailyEmail, sendHour: config.settings.sendHour ?? 21, openingFloat: config.settings.openingFloat ?? 0 });
@@ -85,6 +86,13 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, cu
         <div className="grow"><div className="h-sm">Daily report &amp; drawer</div><div className="muted" style={{ fontSize: 12 }}>{settings.reportEmail || "Report email not set"} · float {fmt(settings.openingFloat)}</div></div>
         <Svg name="chevR" size={18} />
       </button>
+      {currentRole >= 4 && (
+        <a className="card-btn mt8" href="/api/backup">
+          <div className="icon-tile" style={{ background: "var(--blue-soft)", color: "var(--blue)" }}><Svg name="layers" size={20} /></div>
+          <div className="grow"><div className="h-sm">Download full backup</div><div className="muted" style={{ fontSize: 12 }}>Complete data snapshot (JSON) · runs nightly automatically too</div></div>
+          <Svg name="chevR" size={18} />
+        </a>
+      )}
 
       {/* Colleges + feature flags */}
       <div className="sec-title mt20">Colleges &amp; features</div>
@@ -178,8 +186,17 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, cu
             ))}
           </div>
         ))}
-        <div className="field"><label>GST %</label><input className="input" type="number" value={gst} onChange={(e) => setGst(Number(e.target.value))} /></div>
-        <button className="btn" onClick={() => run(() => saveRates(rates, gst), "Rates saved")}>Save rates</button>
+        <div className="chip-toggle" style={{ marginBottom: 14 }}>
+          <div>
+            <div className="h-sm">Charge GST</div>
+            <div className="muted" style={{ fontSize: 12 }}>Off = no GST added anywhere, no tax invoices (for businesses without GST registration)</div>
+          </div>
+          <Switch on={gstOn} onToggle={() => setGstOn(!gstOn)} />
+        </div>
+        {gstOn && (
+          <div className="field"><label>GST %</label><input className="input" type="number" value={gst} onChange={(e) => setGst(Number(e.target.value))} /></div>
+        )}
+        <button className="btn" onClick={() => run(() => saveRates(rates, gst, gstOn), "Rates saved")}>Save rates</button>
       </Sheet>
 
       <Sheet open={sheet === "plan"} onClose={() => setSheet(null)}>

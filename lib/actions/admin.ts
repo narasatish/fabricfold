@@ -29,10 +29,12 @@ export async function registerStudent(input: { name: string; phone: string; coll
 }
 
 /* ----- Rates & GST (Admin+) ----- */
-export async function saveRates(rates: Record<string, { label: string; items: [string, number][] }>, gstPct: number) {
+export async function saveRates(rates: Record<string, { label: string; items: [string, number][] }>, gstPct: number, gstEnabled?: boolean) {
   const st = await requireStaff(3);
-  await db.appConfig.update({ where: { id: "main" }, data: { rates: rates as object, gstPct } });
-  await audit("Rates updated", `GST ${gstPct}%`, st.id);
+  const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
+  const settings = { ...(cfg.settings as Record<string, unknown>), ...(gstEnabled === undefined ? {} : { gstEnabled }) };
+  await db.appConfig.update({ where: { id: "main" }, data: { rates: rates as object, gstPct, settings } });
+  await audit("Rates updated", `GST ${gstPct}%${gstEnabled === false ? " (GST billing OFF)" : ""}`, st.id);
   return { ok: true as const };
 }
 

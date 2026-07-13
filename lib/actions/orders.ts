@@ -14,7 +14,10 @@ const orderCode = () => "FF" + rid(6);
 type Rates = Record<string, { label: string; items: [string, number][] }>;
 async function getConfig() {
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
-  return { ...cfg, rates: cfg.rates as unknown as Rates, gstPct: Number(cfg.gstPct) };
+  // gstEnabled: owner can turn GST billing off entirely (not mandatory for
+  // unregistered businesses). Default ON for backwards compatibility.
+  const gstEnabled = (cfg.settings as Record<string, unknown>)?.gstEnabled !== false;
+  return { ...cfg, rates: cfg.rates as unknown as Rates, gstPct: Number(cfg.gstPct), gstEnabled };
 }
 
 function bcast(o: { id: string; collegeId: string; studentId: string }, type = "order.updated") {
@@ -43,7 +46,7 @@ export async function placeOrder(input: { service: string; items: { label: strin
   const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
   const express = input.express && feat.express !== false;
   const surcharge = express ? EXPRESS_FEE : 0;
-  const gst = Math.round((sub + surcharge) * (cfg.gstPct / 100));
+  const gst = cfg.gstEnabled ? Math.round((sub + surcharge) * (cfg.gstPct / 100)) : 0;
   const total = sub + surcharge + gst;
 
   const o = await db.order.create({
@@ -51,7 +54,7 @@ export async function placeOrder(input: { service: string; items: { label: strin
       id: orderCode(), studentId: stu.id, collegeId: stu.collegeId, service: input.service,
       items, declaredPieces: items.reduce((s, i) => s + i.qty, 0),
       express, surcharge, status: "draft",
-      subtotal: sub, gst, gstPctSnapshot: cfg.gstPct, total,
+      subtotal: sub, gst, gstPctSnapshot: cfg.gstEnabled ? cfg.gstPct : 0, total,
       timeline: { create: { status: "placed" } },
     },
   });
@@ -98,10 +101,12 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       }
     }
 
-    // recomputeOrder() — exact prototype math (+ optional no-GST billing)
+    // recomputeOrder() — exact prototype math (+ optional no-GST billing).
+    // GST is skipped when staff chose 'Bill without GST' OR GST billing is
+    // switched off app-wide in Admin.
     const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
     const surcharge = o.express ? EXPRESS_FEE : 0;
-    const noGst = !!input.noGst && !usedCycle;
+    const noGst = !usedCycle && (!!input.noGst || !cfg.gstEnabled);
     const { gst, total } = computeBill(sub, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });
 
     // per-garment QR tags — one per piece

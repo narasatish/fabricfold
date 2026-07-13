@@ -11,7 +11,8 @@ export default async function WalletPage() {
 
   const sub = student.subscription;
   const plan = appConfig?.plan as unknown as { price: number; cycles: number; kgPerCycle: number };
-  const gst = Number(appConfig?.gstPct || 18);
+  const gstEnabled = (appConfig?.settings as Record<string, unknown>)?.gstEnabled !== false;
+  const gst = gstEnabled ? Number(appConfig?.gstPct || 18) : 0;
   const planTotal = Math.round(plan.price * (1 + gst / 100));
 
   // Get compensations and credits
@@ -88,7 +89,7 @@ export default async function WalletPage() {
               <span className="muted">/ year</span>
             </div>
             <div className="muted" style={{ fontSize: "12px" }}>
-              {fmt(plan.price)} + {gst}% GST
+              {gst > 0 ? `${fmt(plan.price)} + ${gst}% GST` : "No GST applicable"}
             </div>
             <WalletClient planTotal={planTotal} cycles={plan.cycles} kg={plan.kgPerCycle} />
             <div className="muted center mt8" style={{ fontSize: "11.5px" }}>

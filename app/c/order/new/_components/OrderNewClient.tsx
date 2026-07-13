@@ -150,10 +150,12 @@ export default function OrderNewClient({
             <span className="mono">{fmt(surcharge)}</span>
           </div>
         )}
-        <div className="kv">
-          <span className="k">GST ({gstPct}%)</span>
-          <span className="mono">{fmt(gst)}</span>
-        </div>
+        {gstPct > 0 && (
+          <div className="kv">
+            <span className="k">GST ({gstPct}%)</span>
+            <span className="mono">{fmt(gst)}</span>
+          </div>
+        )}
         <div className="kv total">
           <span>Estimated total</span>
           <span className="mono">{fmt(total)}</span>

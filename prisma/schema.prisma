@@ -293,6 +293,7 @@ model Otp {
   purpose   String // login | pickup | subscription
   code      String
   refId     String?
+  attempts  Int       @default(0) // wrong tries; OTP dies after 5
   expiresAt DateTime
   usedAt    DateTime?
 

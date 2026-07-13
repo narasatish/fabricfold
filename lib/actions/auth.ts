@@ -46,6 +46,13 @@ export async function requestOtp(phone: string, mode: "customer" | "staff") {
     const st = await db.staff.findUnique({ where: { phone } });
     if (!st) return { ok: false as const, error: "This number is not registered as staff" };
   }
+
+  // Cooldown: at most one OTP per 30 seconds per number (blocks SMS-bombing / spam).
+  const existing = await db.otp.findFirst({ where: { phone, purpose: "login", usedAt: null } });
+  if (existing && existing.expiresAt.getTime() - OTP_TTL > Date.now() - 30_000) {
+    return { ok: false as const, error: "OTP just sent — wait 30 seconds before requesting again" };
+  }
+
   const code = genCode();
   await db.otp.deleteMany({ where: { phone, purpose: "login" } });
   await db.otp.create({ data: { phone, purpose: "login", code, expiresAt: new Date(Date.now() + OTP_TTL) } });
@@ -64,7 +71,21 @@ export async function verifyOtp(
     where: { phone, purpose: "login", usedAt: null, expiresAt: { gt: new Date() } },
     orderBy: { expiresAt: "desc" },
   });
-  if (!otp || otp.code !== code.trim()) return { ok: false as const, error: "Incorrect or expired OTP" };
+  if (!otp) return { ok: false as const, error: "Incorrect or expired OTP" };
+
+  // Brute-force protection: a wrong code burns one of 5 attempts; the 5th kills the OTP.
+  if (otp.attempts >= 5) {
+    await db.otp.delete({ where: { id: otp.id } }).catch(() => {});
+    return { ok: false as const, error: "Too many wrong attempts — request a new OTP" };
+  }
+  if (otp.code !== code.trim()) {
+    const updated = await db.otp.update({ where: { id: otp.id }, data: { attempts: { increment: 1 } } });
+    if (updated.attempts >= 5) {
+      await db.otp.delete({ where: { id: otp.id } }).catch(() => {});
+      return { ok: false as const, error: "Too many wrong attempts — request a new OTP" };
+    }
+    return { ok: false as const, error: "Incorrect or expired OTP" };
+  }
 
   if (mode === "staff") {
     const st = await db.staff.findUnique({ where: { phone } });

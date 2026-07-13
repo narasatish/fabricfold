@@ -25,7 +25,8 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
 
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const planCfg = cfg.plan as { price: number; cycles: number; kgPerCycle: number };
-  const planGross = planCfg.price + Math.round(planCfg.price * Number(cfg.gstPct) / 100);
+  const gstOn = (cfg.settings as Record<string, unknown>)?.gstEnabled !== false;
+  const planGross = planCfg.price + (gstOn ? Math.round(planCfg.price * Number(cfg.gstPct) / 100) : 0);
 
   const N = (x: unknown) => Number(x || 0);
   const plain = {

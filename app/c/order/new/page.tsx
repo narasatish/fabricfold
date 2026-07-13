@@ -14,7 +14,8 @@ export default async function OrderNewPage({ searchParams }: { searchParams: Pro
   if (!appConfig) redirect("/c");
 
   const rates = appConfig.rates as unknown as Record<string, { label: string; items: [string, number][] }>;
-  const gstPct = Number(appConfig.gstPct);
+  const gstEnabled = (appConfig.settings as Record<string, unknown>)?.gstEnabled !== false;
+  const gstPct = gstEnabled ? Number(appConfig.gstPct) : 0;
   const plan = appConfig.plan as unknown as { price: number; cycles: number; kgPerCycle: number };
 
   const sp = await searchParams;

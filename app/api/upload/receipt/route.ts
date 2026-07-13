@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     const bucket = process.env.SUPABASE_BUCKET || "receipts";
     const res = await fetch(`${supaUrl}/storage/v1/object/${bucket}/${key}`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${supaKey}`, "Content-Type": file.type, "x-upsert": "true" },
+      headers: { Authorization: `Bearer ${supaKey}`, apikey: supaKey, "Content-Type": file.type, "x-upsert": "true" },
       body: bytes,
     });
     if (!res.ok) return new Response("storage upload failed", { status: 502 });

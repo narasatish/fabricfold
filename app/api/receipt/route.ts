@@ -19,7 +19,7 @@ export async function GET(req: Request) {
   const bucket = process.env.SUPABASE_BUCKET || "receipts";
   const res = await fetch(`${supaUrl}/storage/v1/object/sign/${bucket}/${key}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${supaKey}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${supaKey}`, apikey: supaKey, "Content-Type": "application/json" },
     body: JSON.stringify({ expiresIn: 600 }),
   });
   if (!res.ok) return new Response("sign failed", { status: 502 });

@@ -62,7 +62,8 @@ export async function GET(req: Request) {
   const name = `auto/fabricfold-${snap.takenAt.slice(0, 10)}-${snap.takenAt.slice(11, 19).replace(/:/g, "")}.json`;
   const res = await fetch(`${base}/storage/v1/object/backups/${name}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "x-upsert": "false" },
+    // new-style sb_secret_ keys need BOTH headers; legacy JWT keys tolerate both.
+    headers: { Authorization: `Bearer ${key}`, apikey: key, "Content-Type": "application/json", "x-upsert": "false" },
     body: JSON.stringify(snap),
   });
   if (!res.ok) {

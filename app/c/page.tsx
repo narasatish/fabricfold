@@ -42,6 +42,7 @@ export default async function CustomerHome() {
   // Build enabled services
   const services: Array<{ key: string; flag: string; label: string; icon: string }> = [
     { key: "washIron", flag: "svc_wash", label: "Wash & Iron", icon: "layers" },
+    { key: "washFold", flag: "svc_washfold", label: "Wash & Fold", icon: "gift" },
     { key: "ironOnly", flag: "svc_iron", label: "Iron Only", icon: "shirt" },
     { key: "dryClean", flag: "svc_dryclean", label: "Dry Clean", icon: "bag" },
   ];

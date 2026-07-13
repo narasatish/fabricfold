@@ -7,6 +7,7 @@ import { requireStudent, requireStaff } from "../auth";
 import { EXPRESS_FEE, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill } from "../money";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit } from "../notify";
+import { notifyOwner } from "../mail";
 
 const rid = (n: number) => { let s = ""; for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10); return s; };
 const orderCode = () => "FF" + rid(6);
@@ -31,8 +32,8 @@ export async function placeOrder(input: { service: string; items: { label: strin
   const rate = cfg.rates[input.service];
   if (!rate) return { ok: false as const, error: "Unknown service" };
   const feat = stu.college.features as Record<string, boolean>;
-  const featKey = input.service === "washIron" ? "svc_wash" : input.service === "ironOnly" ? "svc_iron" : "svc_dryclean";
-  if (feat[featKey] === false) return { ok: false as const, error: "This service is not available at your campus" };
+  const FEAT_KEY: Record<string, string> = { washIron: "svc_wash", washFold: "svc_washfold", ironOnly: "svc_iron", dryClean: "svc_dryclean" };
+  if (feat[FEAT_KEY[input.service] || ""] === false) return { ok: false as const, error: "This service is not available at your campus" };
 
   const items = input.items
     .filter((i) => i.qty > 0)
@@ -59,6 +60,10 @@ export async function placeOrder(input: { service: string; items: { label: strin
     },
   });
   bcast(o, "order.created");
+  void notifyOwner(
+    `New order #${o.id.slice(-4)}${express ? " (EXPRESS)" : ""}`,
+    `${stu.name} pre-booked ${cfg.rates[input.service].label}: ${items.reduce((s, i) => s + i.qty, 0)} pieces, est. ₹${total}. Campus: ${stu.college.name}.`,
+  );
   return { ok: true as const, id: o.id };
 }
 
@@ -89,13 +94,27 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
     let usedCycle = false, excessCharge = 0;
     if (input.useCycle) {
       const sub = o.student.subscription;
-      if (!sub || !sub.active || sub.cyclesUsed >= sub.cyclesTotal) throw new Error("No active subscription cycle available");
+      if (!sub || !sub.active) throw new Error("No active subscription");
+      type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
+      const buckets = (sub.buckets as unknown as Bucket[] | null) || null;
+      let kgLimit: number;
+      if (buckets && buckets.length) {
+        // multi-bucket plan: consume a cycle from the bucket matching THIS service
+        const idx = buckets.findIndex((b) => b.service === o.service && b.used < b.cycles);
+        if (idx < 0) throw new Error(`No ${cfg.rates[o.service]?.label || o.service} cycles left on this plan`);
+        buckets[idx] = { ...buckets[idx], used: buckets[idx].used + 1 };
+        kgLimit = Number(buckets[idx].kgPerCycle) || 7;
+        await tx.subscription.update({ where: { id: sub.id }, data: { buckets, cyclesUsed: { increment: 1 } } });
+      } else {
+        // legacy single-bucket subscription
+        if (sub.cyclesUsed >= sub.cyclesTotal) throw new Error("No active subscription cycle available");
+        kgLimit = Number(sub.kgPerCycle) || (cfg.plan as { kgPerCycle: number }).kgPerCycle;
+        await tx.subscription.update({ where: { id: sub.id }, data: { cyclesUsed: { increment: 1 } } });
+      }
       usedCycle = true;
-      await tx.subscription.update({ where: { id: sub.id }, data: { cyclesUsed: { increment: 1 } } });
       await tx.cycleUse.create({ data: { subscriptionId: sub.id, orderId: o.id } });
-      const plan = cfg.plan as { kgPerCycle: number };
-      if (input.weightKg && input.weightKg > plan.kgPerCycle) {
-        const excessKg = Math.ceil(input.weightKg - plan.kgPerCycle);
+      if (input.weightKg && input.weightKg > kgLimit) {
+        const excessKg = Math.ceil(input.weightKg - kgLimit);
         const rate = cfg.rates.washIron.items[0][1];
         excessCharge = excessKg * rate * 3; // prototype: excess kg billed at 3x base piece rate per kg
       }

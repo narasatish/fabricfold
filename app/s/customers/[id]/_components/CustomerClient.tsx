@@ -27,22 +27,27 @@ type Student = {
 
 const KIND_LABEL: Record<string, string> = { damage: "Damage", stain: "Stain / re-do", missing: "Missing item", goodwill: "Goodwill", manual: "Adjustment" };
 
-export default function StaffCustomerClient({ student, staffRole, plan }: { student: Student; staffRole: number; plan: { price: number; cycles: number; kgPerCycle: number; gross: number } }) {
+type CollegePlan = { id: string; name: string; price: number; gross: number; gstApplies: boolean; buckets: { service: string; label: string; cycles: number; kgPerCycle: number }[] };
+
+export default function StaffCustomerClient({ student, staffRole, plans }: { student: Student; staffRole: number; plans: CollegePlan[] }) {
   const router = useRouter();
   const toast = useToast();
   const tier = loyaltyBadge(student.lifetimePieces);
   const [showComp, setShowComp] = useState(false);
   const [comp, setComp] = useState({ kind: "damage", amount: 0, method: "credit" as "credit" | "cash", comment: "" });
   const [showAssign, setShowAssign] = useState(false);
+  const [assignPlanId, setAssignPlanId] = useState(plans[0]?.id || "");
   const [assignMethod, setAssignMethod] = useState<"cash" | "upi">("upi");
   const [assignLoading, setAssignLoading] = useState(false);
+  const assignPlan = plans.find((p) => p.id === assignPlanId) || plans[0];
 
   const doAssign = async () => {
+    if (!assignPlan) return;
     setAssignLoading(true);
-    const r = await assignSubscription(student.id, assignMethod);
+    const r = await assignSubscription(student.id, assignPlan.id, assignMethod);
     setAssignLoading(false);
     if (!r.ok) return toast(r.error || "Failed", true);
-    toast("Annual plan activated");
+    toast("Plan activated");
     setShowAssign(false);
     router.refresh();
   };
@@ -82,9 +87,9 @@ export default function StaffCustomerClient({ student, staffRole, plan }: { stud
         <Svg name="gift" size={17} /> Issue compensation
       </button>
 
-      {staffRole >= 2 && !student.subscription?.active && (
+      {staffRole >= 2 && !student.subscription?.active && plans.length > 0 && (
         <button className="btn mt10" onClick={() => setShowAssign(true)}>
-          <Svg name="layers" size={17} /> Assign annual plan
+          <Svg name="layers" size={17} /> Assign a plan
         </button>
       )}
 
@@ -168,18 +173,29 @@ export default function StaffCustomerClient({ student, staffRole, plan }: { stud
       )}
 
       {/* Compensation sheet */}
-      {/* Assign annual plan (Manager+) */}
+      {/* Assign a plan (Manager+) */}
       <Sheet open={showAssign} onClose={() => setShowAssign(false)}>
         <div className="pad">
-          <h2 style={{ marginBottom: "6px" }}>Assign annual plan</h2>
+          <h2 style={{ marginBottom: "6px" }}>Assign a plan</h2>
           <p className="muted" style={{ fontSize: "13px", marginBottom: "14px" }}>
             Activates immediately for {student.name}. Collect the payment first.
           </p>
-          <div className="card pad" style={{ background: "var(--teal-tint)" }}>
-            <div className="kv"><span className="k">Plan</span><span>Annual Plan</span></div>
-            <div className="kv"><span className="k">Cycles</span><span className="mono">{plan.cycles} × up to {plan.kgPerCycle} kg</span></div>
-            <div className="kv total"><span>To collect (incl. GST)</span><span className="mono">{fmt(plan.gross)}</span></div>
+          <div className="field">
+            <label>Plan ({student.college?.name})</label>
+            <select className="input" value={assignPlanId} onChange={(e) => setAssignPlanId(e.target.value)}>
+              {plans.map((p) => (
+                <option key={p.id} value={p.id}>{p.name} — {fmt(p.gross)}</option>
+              ))}
+            </select>
           </div>
+          {assignPlan && (
+            <div className="card pad" style={{ background: "var(--teal-tint)" }}>
+              {assignPlan.buckets.map((b) => (
+                <div key={b.service} className="kv"><span className="k">{b.label}</span><span className="mono">{b.cycles} × {b.kgPerCycle} kg</span></div>
+              ))}
+              <div className="kv total"><span>To collect {assignPlan.gstApplies ? "(incl. GST)" : "(no GST)"}</span><span className="mono">{fmt(assignPlan.gross)}</span></div>
+            </div>
+          )}
           <div className="field mt16">
             <label>Paid by</label>
             <Seg<"cash" | "upi">
@@ -188,8 +204,8 @@ export default function StaffCustomerClient({ student, staffRole, plan }: { stud
               onChange={setAssignMethod}
             />
           </div>
-          <button className="btn mt16" onClick={doAssign} disabled={assignLoading}>
-            <Svg name="check" size={18} /> {assignLoading ? "Activating…" : `Confirm ${fmt(plan.gross)} received & activate`}
+          <button className="btn mt16" onClick={doAssign} disabled={assignLoading || !assignPlan}>
+            <Svg name="check" size={18} /> {assignLoading ? "Activating…" : `Confirm ${fmt(assignPlan?.gross || 0)} received & activate`}
           </button>
         </div>
       </Sheet>

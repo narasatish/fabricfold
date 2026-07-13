@@ -24,9 +24,18 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
   if (!student) notFound();
 
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
-  const planCfg = cfg.plan as { price: number; cycles: number; kgPerCycle: number };
   const gstOn = (cfg.settings as Record<string, unknown>)?.gstEnabled !== false;
-  const planGross = planCfg.price + (gstOn ? Math.round(planCfg.price * Number(cfg.gstPct) / 100) : 0);
+  const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFold: "Wash & Fold", ironOnly: "Iron Only", dryClean: "Dry Clean" };
+  const collegePlans = (await db.plan.findMany({ where: { collegeId: student.collegeId, active: true }, orderBy: { price: "asc" } })).map((p) => {
+    const price = Number(p.price);
+    const gstApplies = gstOn && !p.gstFree;
+    return {
+      id: p.id, name: p.name, price,
+      gross: price + (gstApplies ? Math.round(price * Number(cfg.gstPct) / 100) : 0),
+      gstApplies,
+      buckets: (p.buckets as unknown as { service: string; cycles: number; kgPerCycle: number }[]).map((b) => ({ ...b, label: SERVICE_LABEL[b.service] || b.service })),
+    };
+  });
 
   const N = (x: unknown) => Number(x || 0);
   const plain = {
@@ -56,7 +65,7 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
   return (
     <div className="screen">
       <TopBar title={student.name} sub={`ID ${student.id}`} back="/s" />
-      <StaffCustomerClient student={plain} staffRole={staff.role} plan={{ ...planCfg, gross: planGross }} />
+      <StaffCustomerClient student={plain} staffRole={staff.role} plans={collegePlans} />
     </div>
   );
 }

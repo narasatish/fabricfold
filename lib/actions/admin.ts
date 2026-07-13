@@ -5,6 +5,7 @@ import { db } from "../db";
 import { requireStaff } from "../auth";
 import { audit } from "../notify";
 import { publish } from "../realtime";
+import { notifyOwner } from "../mail";
 
 /* ----- Register a student at the counter (any staff) ----- */
 export async function registerStudent(input: { name: string; phone: string; collegeId: string }) {
@@ -25,7 +26,38 @@ export async function registerStudent(input: { name: string; phone: string; coll
   }
   const stu = await db.student.create({ data: { id, phone, name, collegeId: college.id } });
   await audit("Student registered", `${name} · +91 ${phone} · ${college.name}`, st.id);
+  void notifyOwner("New student registered", `${name} (+91 ${phone}) registered at the counter (${college.name}) by ${st.name} — ID ${stu.id}.`);
   return { ok: true as const, id: stu.id };
+}
+
+/* ----- Subscription plans per college (Admin+) ----- */
+const SERVICES = ["washIron", "washFold", "ironOnly", "dryClean"];
+export async function savePlan(input: {
+  id?: string; collegeId: string; name: string; price: number; gstFree: boolean;
+  buckets: { service: string; cycles: number; kgPerCycle: number }[];
+}) {
+  const st = await requireStaff(3);
+  const name = input.name.trim();
+  if (name.length < 2) return { ok: false as const, error: "Give the plan a name" };
+  if (!input.price || input.price <= 0) return { ok: false as const, error: "Enter a valid price" };
+  const buckets = input.buckets.filter((b) => SERVICES.includes(b.service) && b.cycles > 0);
+  if (!buckets.length) return { ok: false as const, error: "Add at least one service with cycles" };
+  const college = await db.college.findUnique({ where: { id: input.collegeId } });
+  if (!college) return { ok: false as const, error: "Pick a campus" };
+
+  const data = { collegeId: input.collegeId, name, price: input.price, gstFree: !!input.gstFree, buckets };
+  if (input.id) await db.plan.update({ where: { id: input.id }, data });
+  else await db.plan.create({ data });
+  await audit(input.id ? "Plan updated" : "Plan created", `${college.name} · ${name} · ₹${input.price}${input.gstFree ? " (no GST)" : ""}`, st.id);
+  return { ok: true as const };
+}
+
+export async function togglePlan(planId: string) {
+  const st = await requireStaff(3);
+  const p = await db.plan.findUniqueOrThrow({ where: { id: planId } });
+  await db.plan.update({ where: { id: planId }, data: { active: !p.active } });
+  await audit("Plan " + (p.active ? "disabled" : "enabled"), p.name, st.id);
+  return { ok: true as const, active: !p.active };
 }
 
 /* ----- Rates & GST (Admin+) ----- */
@@ -35,14 +67,6 @@ export async function saveRates(rates: Record<string, { label: string; items: [s
   const settings = { ...(cfg.settings as Record<string, unknown>), ...(gstEnabled === undefined ? {} : { gstEnabled }) };
   await db.appConfig.update({ where: { id: "main" }, data: { rates: rates as object, gstPct, settings } });
   await audit("Rates updated", `GST ${gstPct}%${gstEnabled === false ? " (GST billing OFF)" : ""}`, st.id);
-  return { ok: true as const };
-}
-
-/* ----- Plan (Admin+) ----- */
-export async function savePlan(plan: { price: number; cycles: number; kgPerCycle: number }) {
-  const st = await requireStaff(3);
-  await db.appConfig.update({ where: { id: "main" }, data: { plan } });
-  await audit("Plan updated", `₹${plan.price} · ${plan.cycles} cycles · ${plan.kgPerCycle}kg`, st.id);
   return { ok: true as const };
 }
 

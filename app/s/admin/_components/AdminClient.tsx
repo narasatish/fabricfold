@@ -7,9 +7,13 @@ import { Svg } from "@/components/icons";
 import { fmt } from "@/lib/format";
 import { useToast, Sheet, Switch, Seg } from "@/components/chrome";
 import {
-  saveRates, savePlan, savePaymentConfig, saveSettings,
+  saveRates, savePlan, togglePlan, savePaymentConfig, saveSettings,
   toggleFeature, saveCollege, deleteCollege, saveStaff, createPayslip,
 } from "@/lib/actions/admin";
+
+const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFold: "Wash & Fold", ironOnly: "Iron Only", dryClean: "Dry Clean" };
+type PlanBucket = { service: string; cycles: number; kgPerCycle: number };
+type PlanRow = { id: string; collegeId: string; name: string; price: number; gstFree: boolean; active: boolean; buckets: PlanBucket[] };
 
 type Rates = Record<string, { label: string; items: [string, number][] }>;
 type Props = {
@@ -23,17 +27,18 @@ type Props = {
   colleges: { id: string; name: string; address: string; features: Record<string, boolean> }[];
   staff: { id: string; name: string; phone: string; role: number; collegeId: string | null }[];
   payslips: { id: string; number: string; month: string; net: number; staffName: string }[];
+  plans: PlanRow[];
   currentRole: number;
 };
 
 const ROLE_NAMES: Record<number, string> = { 1: "Counter", 2: "Manager", 3: "Admin", 4: "Owner" };
 const FEATURES: [string, string][] = [
-  ["svc_wash", "Wash & Iron"], ["svc_iron", "Iron Only"], ["svc_dryclean", "Dry Clean"],
+  ["svc_wash", "Wash & Iron"], ["svc_washfold", "Wash & Fold"], ["svc_iron", "Iron Only"], ["svc_dryclean", "Dry Clean"],
   ["subscriptions", "Subscriptions"], ["credits", "Credits & compensation"],
   ["express", "Express (same-day)"], ["chat", "Chat & complaints"],
 ];
 
-export default function StaffAdminClient({ config, colleges, staff, payslips, currentRole }: Props) {
+export default function StaffAdminClient({ config, colleges, staff, payslips, plans, currentRole }: Props) {
   const router = useRouter();
   const toast = useToast();
 
@@ -41,7 +46,9 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, cu
   const [rates, setRates] = useState<Rates>(JSON.parse(JSON.stringify(config.rates)));
   const [gst, setGst] = useState(config.gstPct);
   const [gstOn, setGstOn] = useState(config.settings.gstEnabled !== false);
-  const [plan, setPlan] = useState({ ...config.plan });
+  const emptyPlan = (collegeId: string): Omit<PlanRow, "active" | "id"> & { id?: string } =>
+    ({ id: undefined, collegeId, name: "", price: 0, gstFree: false, buckets: [{ service: "washIron", cycles: 34, kgPerCycle: 7 }] });
+  const [planEdit, setPlanEdit] = useState<ReturnType<typeof emptyPlan>>(emptyPlan(colleges[0]?.id || ""));
   const [pay, setPay] = useState({ ...config.payment });
   const [settings, setSettings] = useState({ reportEmail: config.settings.reportEmail || "", dailyEmail: !!config.settings.dailyEmail, sendHour: config.settings.sendHour ?? 21, openingFloat: config.settings.openingFloat ?? 0 });
   const [colEdit, setColEdit] = useState<{ id?: string; name: string; address: string }>({ name: "", address: "" });
@@ -69,11 +76,6 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, cu
       <button className="card-btn mt12" onClick={() => setSheet("rates")}>
         <div className="icon-tile"><Svg name="list" size={20} /></div>
         <div className="grow"><div className="h-sm">Rates &amp; GST</div><div className="muted" style={{ fontSize: 12 }}>Per-item pricing · GST {config.gstPct}%</div></div>
-        <Svg name="chevR" size={18} />
-      </button>
-      <button className="card-btn mt8" onClick={() => setSheet("plan")}>
-        <div className="icon-tile" style={{ background: "var(--blue-soft)", color: "var(--blue)" }}><Svg name="wallet" size={20} /></div>
-        <div className="grow"><div className="h-sm">Subscription plan</div><div className="muted" style={{ fontSize: 12 }}>{fmt(config.plan.price)} · {config.plan.cycles} cycles · {config.plan.kgPerCycle} kg</div></div>
         <Svg name="chevR" size={18} />
       </button>
       <button className="card-btn mt8" onClick={() => setSheet("payment")}>
@@ -134,6 +136,35 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, cu
           <Svg name="plus" size={17} /> Add college
         </button>
       )}
+
+      {/* Subscription plans per college */}
+      <div className="sec-title mt20">Subscription plans</div>
+      {colleges.map((c) => (
+        <div key={c.id} className="card pad mt10">
+          <div className="between">
+            <div className="h-sm">{c.name}</div>
+            <button className="btn xs" onClick={() => { setPlanEdit(emptyPlan(c.id)); setSheet("plan"); }}>
+              <Svg name="plus" size={13} /> Add plan
+            </button>
+          </div>
+          {plans.filter((p) => p.collegeId === c.id).length === 0 && (
+            <div className="muted mt8" style={{ fontSize: "12.5px" }}>No plans yet — students here can&apos;t subscribe until you add one.</div>
+          )}
+          {plans.filter((p) => p.collegeId === c.id).map((p) => (
+            <div key={p.id} className="between mt10" style={{ alignItems: "flex-start" }}>
+              <button style={{ textAlign: "left", flex: 1 }} onClick={() => { setPlanEdit({ id: p.id, collegeId: p.collegeId, name: p.name, price: p.price, gstFree: p.gstFree, buckets: JSON.parse(JSON.stringify(p.buckets)) }); setSheet("plan"); }}>
+                <div className="h-sm" style={{ opacity: p.active ? 1 : 0.45 }}>
+                  {p.name} · {fmt(p.price)}{p.gstFree ? " (no GST)" : ""}
+                </div>
+                <div className="muted" style={{ fontSize: "12px", opacity: p.active ? 1 : 0.45 }}>
+                  {p.buckets.map((b) => `${b.cycles}× ${SERVICE_LABEL[b.service] || b.service} (${b.kgPerCycle}kg)`).join(" + ")}
+                </div>
+              </button>
+              <Switch on={p.active} onToggle={async () => { const r = await togglePlan(p.id); if (!r.ok) return toast("Failed", true); toast(`Plan ${r.active ? "enabled" : "disabled"}`); router.refresh(); }} />
+            </div>
+          ))}
+        </div>
+      ))}
 
       {/* Staff */}
       <div className="sec-title mt20">Staff roles</div>
@@ -200,11 +231,39 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, cu
       </Sheet>
 
       <Sheet open={sheet === "plan"} onClose={() => setSheet(null)}>
-        <div className="h-md" style={{ padding: "0 4px 12px" }}>Subscription plan</div>
-        <div className="field"><label>Price (₹, before GST)</label><input className="input" type="number" value={plan.price} onChange={(e) => setPlan({ ...plan, price: Number(e.target.value) })} /></div>
-        <div className="field"><label>Cycles per plan</label><input className="input" type="number" value={plan.cycles} onChange={(e) => setPlan({ ...plan, cycles: Number(e.target.value) })} /></div>
-        <div className="field"><label>Kg per cycle</label><input className="input" type="number" value={plan.kgPerCycle} onChange={(e) => setPlan({ ...plan, kgPerCycle: Number(e.target.value) })} /></div>
-        <button className="btn" onClick={() => run(() => savePlan(plan), "Plan saved")}>Save plan</button>
+        <div className="h-md" style={{ padding: "0 4px 4px" }}>{planEdit.id ? "Edit plan" : "New plan"}</div>
+        <div className="muted" style={{ padding: "0 4px 12px", fontSize: 12.5 }}>
+          For {colleges.find((c) => c.id === planEdit.collegeId)?.name} — students there see this plan in their wallet.
+        </div>
+        <div className="field"><label>Plan name</label><input className="input" placeholder="e.g. Wash & Iron — Annual" value={planEdit.name} onChange={(e) => setPlanEdit({ ...planEdit, name: e.target.value })} /></div>
+        <div className="field"><label>Price (₹{planEdit.gstFree ? ", final" : ", before GST"})</label><input className="input" type="number" value={planEdit.price || ""} onChange={(e) => setPlanEdit({ ...planEdit, price: Number(e.target.value) })} /></div>
+        <div className="chip-toggle" style={{ marginBottom: 14 }}>
+          <div>
+            <div className="h-sm">No GST on this plan</div>
+            <div className="muted" style={{ fontSize: 12 }}>Price is charged as-is, no tax invoice</div>
+          </div>
+          <Switch on={planEdit.gstFree} onToggle={() => setPlanEdit({ ...planEdit, gstFree: !planEdit.gstFree })} />
+        </div>
+        <div className="label" style={{ marginBottom: 8 }}>What the plan includes</div>
+        {planEdit.buckets.map((b, i) => (
+          <div key={i} className="card pad" style={{ marginBottom: 10, padding: 14 }}>
+            <div className="row gap8">
+              <select className="input" style={{ flex: 2, height: 42 }} value={b.service} onChange={(e) => { const bs = [...planEdit.buckets]; bs[i] = { ...b, service: e.target.value }; setPlanEdit({ ...planEdit, buckets: bs }); }}>
+                {Object.entries(SERVICE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+              <input className="input" style={{ flex: 1, height: 42 }} type="number" placeholder="cycles" value={b.cycles || ""} onChange={(e) => { const bs = [...planEdit.buckets]; bs[i] = { ...b, cycles: Number(e.target.value) }; setPlanEdit({ ...planEdit, buckets: bs }); }} />
+              <input className="input" style={{ flex: 1, height: 42 }} type="number" placeholder="kg" value={b.kgPerCycle || ""} onChange={(e) => { const bs = [...planEdit.buckets]; bs[i] = { ...b, kgPerCycle: Number(e.target.value) }; setPlanEdit({ ...planEdit, buckets: bs }); }} />
+              {planEdit.buckets.length > 1 && (
+                <button className="action" onClick={() => setPlanEdit({ ...planEdit, buckets: planEdit.buckets.filter((_, j) => j !== i) })}><Svg name="x" size={16} /></button>
+              )}
+            </div>
+            <div className="muted mt4" style={{ fontSize: 11 }}>cycles · kg per drop-off</div>
+          </div>
+        ))}
+        <button className="btn xs sec" onClick={() => setPlanEdit({ ...planEdit, buckets: [...planEdit.buckets, { service: "washFold", cycles: 20, kgPerCycle: 7 }] })}>
+          <Svg name="plus" size={13} /> Add another service
+        </button>
+        <button className="btn mt12" onClick={() => run(() => savePlan(planEdit), "Plan saved")}>Save plan</button>
       </Sheet>
 
       <Sheet open={sheet === "payment"} onClose={() => setSheet(null)}>

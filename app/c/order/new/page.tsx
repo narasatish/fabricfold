@@ -24,9 +24,8 @@ export default async function OrderNewPage({ searchParams }: { searchParams: Pro
 
   // Validate service is enabled
   const feat = student.college.features as Record<string, boolean>;
-  const serviceKey = serviceParam === "washIron" ? "svc_wash" : serviceParam === "ironOnly" ? "svc_iron" : "svc_dryclean";
-
-  if (!feat[serviceKey]) {
+  const FEAT_KEY: Record<string, string> = { washIron: "svc_wash", washFold: "svc_washfold", ironOnly: "svc_iron", dryClean: "svc_dryclean" };
+  if (feat[FEAT_KEY[serviceParam] || ""] === false || !FEAT_KEY[serviceParam]) {
     redirect("/c");
   }
 
@@ -42,9 +41,10 @@ export default async function OrderNewPage({ searchParams }: { searchParams: Pro
 
   const enabledServices = [
     { key: "washIron", flag: "svc_wash", label: "Wash & Iron" },
+    { key: "washFold", flag: "svc_washfold", label: "Wash & Fold" },
     { key: "ironOnly", flag: "svc_iron", label: "Iron Only" },
     { key: "dryClean", flag: "svc_dryclean", label: "Dry Clean" },
-  ].filter((s) => feat[s.flag]);
+  ].filter((s) => feat[s.flag] !== false);
 
   const rate = rates[serviceParam] || rates.washIron;
 

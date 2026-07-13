@@ -1,13 +1,10 @@
 /* Daily owner report — content from reportText(). Wire to Vercel Cron
    ("0 21 * * *" IST via vercel.json) or trigger manually from Reports.
-   Email delivery uses a MailProvider interface; dev logs to console. */
+   Delivery via lib/mail (Resend when configured; console otherwise). */
 import { db } from "@/lib/db";
 import { parsePeriod, reportText } from "@/lib/report";
 import { requireStaff } from "@/lib/auth";
-
-async function sendMail(to: string, subject: string, text: string) {
-  console.log(`[MAIL -> ${to}] ${subject}\n${text}`);
-}
+import { sendMail } from "@/lib/mail";
 
 export async function POST() {
   try {

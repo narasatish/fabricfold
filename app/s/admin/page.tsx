@@ -11,11 +11,12 @@ export default async function StaffAdminPage() {
   if (!staff) redirect("/login");
   if (staff.role < 3) redirect("/s");
 
-  const [cfg, colleges, staffList, payslips] = await Promise.all([
+  const [cfg, colleges, staffList, payslips, plans] = await Promise.all([
     db.appConfig.findUniqueOrThrow({ where: { id: "main" } }),
     db.college.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
     db.staff.findMany({ orderBy: { role: "desc" } }),
     db.payslip.findMany({ include: { staff: true }, orderBy: { at: "desc" }, take: 12 }),
+    db.plan.findMany({ orderBy: [{ collegeId: "asc" }, { price: "asc" }] }),
   ]);
 
   const N = (x: unknown) => Number(x || 0);
@@ -32,6 +33,7 @@ export default async function StaffAdminPage() {
         }}
         colleges={colleges.map((c) => ({ id: c.id, name: c.name, address: c.address, features: c.features as Record<string, boolean> }))}
         staff={staffList.map((x) => ({ id: x.id, name: x.name, phone: x.phone, role: x.role, collegeId: x.collegeId }))}
+        plans={plans.map((p) => ({ id: p.id, collegeId: p.collegeId, name: p.name, price: N(p.price), gstFree: p.gstFree, active: p.active, buckets: p.buckets as { service: string; cycles: number; kgPerCycle: number }[] }))}
         payslips={payslips.map((p) => ({ id: p.id, number: p.number, month: p.month, net: N(p.net), staffName: p.staff.name }))}
         currentRole={staff.role}
       />

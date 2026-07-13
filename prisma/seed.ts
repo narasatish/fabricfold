@@ -19,12 +19,13 @@ const HOUR = 3_600_000;
 const EXPRESS_FEE = 100; // flat surcharge per express order
 
 const DEFAULT_FEATURES = {
-  svc_wash: true, svc_iron: true, svc_dryclean: true,
+  svc_wash: true, svc_washfold: true, svc_iron: true, svc_dryclean: true,
   subscriptions: true, credits: true, express: false, chat: true,
 };
 
 export const DEFAULT_RATES = {
   washIron: { label: "Wash & Iron", items: [["Regular garment", 15], ["Bed sheet", 25]] },
+  washFold: { label: "Wash & Fold", items: [["Regular garment", 12], ["Bed sheet", 20]] },
   ironOnly: { label: "Iron Only", items: [["Shirt / T-shirt / Pant", 10], ["Ladies' top", 15], ["Saree", 30], ["Pyjama", 10], ["Blouse", 10], ["Dupatta", 10]] },
   dryClean: { label: "Dry Clean", items: [["Shirt / Pant / T-shirt", 100], ["Ladies' top", 129], ["Pyjama", 70], ["Dupatta", 60], ["Blouse (light)", 60], ["Blouse (medium)", 100], ["Blouse (heavy)", 140], ["Shoes / Sneakers", 350]] },
 } as const;

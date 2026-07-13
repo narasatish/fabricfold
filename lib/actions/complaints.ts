@@ -4,6 +4,7 @@ import { db } from "../db";
 import { requireStudent, requireStaff, getSession } from "../auth";
 import { publish } from "../realtime";
 import { pushNotif } from "../notify";
+import { notifyOwner } from "../mail";
 
 export async function submitComplaint(text: string, orderId?: string | null) {
   const stu = await requireStudent();
@@ -16,6 +17,7 @@ export async function submitComplaint(text: string, orderId?: string | null) {
     },
   });
   publish([`orders:${stu.collegeId}`], { type: "complaint.message", payload: { complaintId: c.id } });
+  void notifyOwner("New complaint", `${stu.name} (${stu.college.name}): "${t.slice(0, 160)}"${orderId ? ` — order #${orderId.slice(-4)}` : ""}`);
   return { ok: true as const, id: c.id };
 }
 

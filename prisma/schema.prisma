@@ -18,10 +18,29 @@ model College {
   name     String
   address  String    @default("")
   active   Boolean   @default(true)
-  features Json // per-college flags: svc_wash, svc_iron, svc_dryclean, subscriptions, credits, express, chat
+  features Json // per-college flags: svc_wash, svc_iron, svc_dryclean, svc_washfold, subscriptions, credits, express, chat
   students Student[]
   staff    Staff[]
   orders   Order[]
+  plans    Plan[]
+}
+
+// Subscription plan offered by ONE college. A plan bundles one or more
+// "buckets" — e.g. St Mary's ₹5,000 plan = 20 Wash&Fold + 14 Wash&Iron cycles.
+model Plan {
+  id        String   @id @default(cuid())
+  collegeId String
+  college   College  @relation(fields: [collegeId], references: [id])
+  name      String
+  price     Decimal // base price; GST added on top unless gstFree
+  gstFree   Boolean  @default(false) // e.g. BVRIT ₹7,000 flat, no GST
+  active    Boolean  @default(true)
+  buckets   Json // [{service:"washFold"|"washIron"|..., cycles:20, kgPerCycle:7}]
+  createdAt DateTime @default(now())
+
+  subscriptions Subscription[]
+
+  @@index([collegeId, active])
 }
 
 model Student {
@@ -59,10 +78,13 @@ model Subscription {
   studentId   String    @unique
   student     Student   @relation(fields: [studentId], references: [id])
   active      Boolean   @default(false) // false = pending Manager+ approval
-  plan        String
+  plan        String // plan name snapshot
+  planId      String?
+  planRef     Plan?     @relation(fields: [planId], references: [id])
+  buckets     Json? // usage snapshot: [{service, cycles, used, kgPerCycle}]
   startedAt   DateTime?
   expiresAt   DateTime?
-  cyclesTotal Int
+  cyclesTotal Int // sum across buckets (kept for dashboards/legacy)
   cyclesUsed  Int       @default(0)
   kgPerCycle  Decimal
   cycleLog    CycleUse[]

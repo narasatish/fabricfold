@@ -3,6 +3,7 @@
    swap `sendSms` for Twilio/MSG91 behind the same interface in production. */
 import { db } from "../db";
 import { createSession, clearSession, requireStudent } from "../auth";
+import { notifyOwner } from "../mail";
 
 const OTP_TTL = 5 * 60_000;
 
@@ -106,6 +107,8 @@ export async function verifyOtp(
       if (!(await db.student.findUnique({ where: { id } }))) break;
     }
     stu = await db.student.create({ data: { id, phone, name: reg.name.trim(), collegeId: reg.collegeId } });
+    const college = await db.college.findUnique({ where: { id: reg.collegeId } });
+    void notifyOwner("New student registered", `${stu.name} (+91 ${phone}) signed up at ${college?.name || "?"} — ID ${stu.id}.`);
   }
   await db.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
   await createSession({ mode: "customer", studentId: stu.id });

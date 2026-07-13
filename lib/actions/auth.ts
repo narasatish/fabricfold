@@ -7,31 +7,51 @@ import { notifyOwner } from "../mail";
 
 const OTP_TTL = 5 * 60_000;
 
-/* Deliver the login code by SMS.
-   - If MSG91 keys are set → send a real SMS via MSG91's Flow API.
-   - Otherwise → fall back to the server console (dev / pre-SMS soft launch). */
+/* Deliver the login code by SMS. Providers, first configured one wins:
+   1. SMS-Gate (free) — the "SMS Gateway" Android app (sms-gate.app) running on
+      the owner's spare phone; OTPs go out from its SIM via the app's cloud API.
+      Env: SMSGATE_LOGIN + SMSGATE_PASSWORD (shown inside the app).
+   2. MSG91 (paid, DLT) — env: MSG91_AUTHKEY + MSG91_TEMPLATE_ID.
+   3. Console fallback (dev / pre-SMS soft launch). */
 async function sendSms(phone: string, code: string) {
-  const authKey = process.env.MSG91_AUTHKEY;
-  const templateId = process.env.MSG91_TEMPLATE_ID;
-  if (!authKey || !templateId) {
-    console.log(`[SMS -> ${phone}] Your FabricFold login OTP is ${code}`);
+  const text = `Your FabricFold login OTP is ${code}. It expires in 5 minutes.`;
+
+  const sgLogin = process.env.SMSGATE_LOGIN, sgPass = process.env.SMSGATE_PASSWORD;
+  if (sgLogin && sgPass) {
+    const res = await fetch("https://api.sms-gate.app/3rdparty/v1/message", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Basic " + Buffer.from(`${sgLogin}:${sgPass}`).toString("base64"),
+      },
+      body: JSON.stringify({ message: text, phoneNumbers: ["+91" + phone] }),
+    });
+    if (!res.ok) {
+      console.error("SMS-Gate send failed", res.status, await res.text().catch(() => ""));
+      throw new Error("Couldn't send the OTP — please try again in a moment");
+    }
     return;
   }
-  const res = await fetch("https://control.msg91.com/api/v5/flow/", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", authkey: authKey },
-    // The template's variable name must match one of these keys — adjust to your
-    // DLT-approved template (commonly ##OTP##). We send several aliases to be safe.
-    body: JSON.stringify({
-      template_id: templateId,
-      ...(process.env.MSG91_SENDER_ID ? { sender: process.env.MSG91_SENDER_ID } : {}),
-      recipients: [{ mobiles: "91" + phone, OTP: code, otp: code, var1: code, code }],
-    }),
-  });
-  if (!res.ok) {
-    console.error("MSG91 send failed", res.status, await res.text().catch(() => ""));
-    throw new Error("Couldn't send the OTP — please try again in a moment");
+
+  const authKey = process.env.MSG91_AUTHKEY, templateId = process.env.MSG91_TEMPLATE_ID;
+  if (authKey && templateId) {
+    const res = await fetch("https://control.msg91.com/api/v5/flow/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", authkey: authKey },
+      body: JSON.stringify({
+        template_id: templateId,
+        ...(process.env.MSG91_SENDER_ID ? { sender: process.env.MSG91_SENDER_ID } : {}),
+        recipients: [{ mobiles: "91" + phone, OTP: code, otp: code, var1: code, code }],
+      }),
+    });
+    if (!res.ok) {
+      console.error("MSG91 send failed", res.status, await res.text().catch(() => ""));
+      throw new Error("Couldn't send the OTP — please try again in a moment");
+    }
+    return;
   }
+
+  console.log(`[SMS -> ${phone}] ${text}`);
 }
 
 function genCode() {

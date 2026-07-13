@@ -102,6 +102,41 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
           <div className="muted mt8" style={{ fontSize: "12px" }}>Cash &amp; credit receipts ({fmt(r.nonGstBucket)}) are outside GST.</div>
         </div>
 
+        {/* Invoice register — every tax document in the period, tap to open */}
+        <div className="between mt20" style={{ padding: "0 4px 10px" }}>
+          <span className="sec-title" style={{ padding: 0 }}>Invoices</span>
+          <span className="pill gray">{r.invoices.length}{r.creditNotes.length ? ` + ${r.creditNotes.length} CN` : ""}</span>
+        </div>
+        <div className="card pad">
+          {r.invoices.length === 0 && r.creditNotes.length === 0 ? (
+            <div className="muted center" style={{ fontSize: "13px", padding: "8px 0" }}>No invoices in this period</div>
+          ) : (
+            <>
+              {r.invoices.slice(0, 25).map((inv) => (
+                <a key={inv.id} href={`/api/export/invoice/${inv.orderId}`} target="_blank" className="kv" style={{ display: "flex" }}>
+                  <span className="k">
+                    <span className="mono" style={{ color: "var(--teal-dark)", fontWeight: 600 }}>{inv.number}</span>
+                    <span className="muted" style={{ fontSize: 12 }}> · #{inv.orderId.slice(-4)} · {inv.method.toUpperCase()} · {timeAgo(inv.at.getTime())}</span>
+                  </span>
+                  <span className="mono">{fmt(N(inv.total))}</span>
+                </a>
+              ))}
+              {r.invoices.length > 25 && (
+                <div className="muted center" style={{ fontSize: "12px", padding: "6px 0" }}>+ {r.invoices.length - 25} more — use the Excel export for the full list</div>
+              )}
+              {r.creditNotes.map((cn) => (
+                <div key={cn.id} className="kv">
+                  <span className="k">
+                    <span className="mono" style={{ color: "var(--red)", fontWeight: 600 }}>{cn.number}</span>
+                    <span className="muted" style={{ fontSize: 12 }}> · #{cn.orderId.slice(-4)} · {cn.reason || "credit note"}</span>
+                  </span>
+                  <span className="mono" style={{ color: "var(--red)" }}>−{fmt(N(cn.total))}</span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+
         {/* Operations */}
         <div className="sec-title mt20">Operations</div>
         <div className="card pad">

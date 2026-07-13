@@ -6,7 +6,7 @@ import { Svg } from "@/components/icons";
 import { Seg, Sheet, useToast } from "@/components/chrome";
 import { submitExpense } from "@/lib/actions/admin";
 
-export default function ReportsControls({ period, d, m, y }: { period: "day" | "month" | "year" | "all"; d?: string; m?: string; y?: string }) {
+export default function ReportsControls({ period, d, m, y }: { period: "day" | "week" | "month" | "year" | "all"; d?: string; m?: string; y?: string }) {
   const router = useRouter();
   const today = new Date().toISOString().slice(0, 10);
   const thisMonth = new Date().toISOString().slice(0, 7);
@@ -19,13 +19,13 @@ export default function ReportsControls({ period, d, m, y }: { period: "day" | "
 
   return (
     <>
-      <Seg<"day" | "month" | "year" | "all">
-        options={[["day", "Day"], ["month", "Month"], ["year", "Year"], ["all", "All"]]}
+      <Seg<"day" | "week" | "month" | "year" | "all">
+        options={[["day", "Day"], ["week", "Week"], ["month", "Month"], ["year", "Year"], ["all", "All"]]}
         value={period}
-        onChange={(p) => nav(p, p === "day" ? { d: d || today } : p === "month" ? { m: m || thisMonth } : p === "year" ? { y: y || thisYear } : {})}
+        onChange={(p) => nav(p, p === "day" || p === "week" ? { d: d || today } : p === "month" ? { m: m || thisMonth } : p === "year" ? { y: y || thisYear } : {})}
       />
-      {period === "day" && (
-        <input className="input mt10" type="date" value={d || today} onChange={(e) => nav("day", { d: e.target.value })} />
+      {(period === "day" || period === "week") && (
+        <input className="input mt10" type="date" value={d || today} onChange={(e) => nav(period, { d: e.target.value })} />
       )}
       {period === "month" && (
         <input className="input mt10" type="month" value={m || thisMonth} onChange={(e) => nav("month", { m: e.target.value })} />

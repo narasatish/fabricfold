@@ -2,13 +2,22 @@
    daily email — formulas ported from the prototype's staffReports(). */
 import { db } from "./db";
 
-export type Period = { kind: "day" | "month" | "year" | "all"; from: Date | null; to: Date | null; label: string };
+export type Period = { kind: "day" | "week" | "month" | "year" | "all"; from: Date | null; to: Date | null; label: string };
 
 export function parsePeriod(sp: { p?: string; d?: string; m?: string; y?: string }): Period {
   const kind = (sp.p as Period["kind"]) || "day";
   if (kind === "day") {
     const d = sp.d ? new Date(sp.d + "T00:00:00") : new Date(new Date().toDateString());
     return { kind, from: d, to: new Date(d.getTime() + 86_400_000), label: d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) };
+  }
+  if (kind === "week") {
+    // the week (Mon–Sun) containing the given date (?d=), defaulting to today
+    const ref = sp.d ? new Date(sp.d + "T00:00:00") : new Date(new Date().toDateString());
+    const dow = (ref.getDay() + 6) % 7; // 0 = Monday
+    const from = new Date(ref.getTime() - dow * 86_400_000);
+    const to = new Date(from.getTime() + 7 * 86_400_000);
+    const f = (x: Date) => x.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+    return { kind, from, to, label: `Week ${f(from)} – ${f(new Date(to.getTime() - 86_400_000))}` };
   }
   if (kind === "month") {
     const [y, m] = (sp.m || new Date().toISOString().slice(0, 7)).split("-").map(Number);

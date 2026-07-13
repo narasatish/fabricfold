@@ -157,6 +157,94 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
   return { ok: true as const, error: undefined };
 }
 
+/* ---------- Staff: WALK-IN order (no pre-booking) ----------
+   A student hands over clothes at the counter without booking in the app.
+   Creates + accepts in one step: counted, QR-tagged, priced (GST / no-GST /
+   plan cycle) — so offline drop-offs are tracked exactly like app orders. */
+export async function walkInOrder(
+  studentId: string,
+  input: { service: string; items: { label: string; qty: number }[]; weightKg: number | null; useCycle: boolean; noGst?: boolean },
+) {
+  const st = await requireStaff(1);
+  const cfg = await getConfig();
+  const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: true, college: true } });
+  if (!stu) return { ok: false as const, error: "Student not found" };
+  const rate = cfg.rates[input.service];
+  if (!rate) return { ok: false as const, error: "Unknown service" };
+
+  const items = input.items
+    .filter((i) => i.qty > 0)
+    .map((i) => {
+      const found = rate.items.find((r) => r[0] === i.label);
+      if (!found) throw new Error("Unknown item " + i.label);
+      return { label: found[0], rate: found[1], qty: Math.min(99, Math.floor(i.qty)) };
+    });
+  if (!items.length) return { ok: false as const, error: "Add at least one piece" };
+
+  let result;
+  try {
+    result = await db.$transaction(async (tx) => {
+      // optional plan-cycle burn (same rules as acceptOrder)
+      let usedCycle = false, excessCharge = 0;
+      if (input.useCycle) {
+        const sub = stu.subscription;
+        if (!sub || !sub.active) throw new Error("No active subscription");
+        type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
+        const buckets = (sub.buckets as unknown as Bucket[] | null) || null;
+        let kgLimit: number;
+        if (buckets && buckets.length) {
+          const idx = buckets.findIndex((b) => b.service === input.service && b.used < b.cycles);
+          if (idx < 0) throw new Error(`No ${rate.label} cycles left on this plan`);
+          buckets[idx] = { ...buckets[idx], used: buckets[idx].used + 1 };
+          kgLimit = Number(buckets[idx].kgPerCycle) || 7;
+          await tx.subscription.update({ where: { id: sub.id }, data: { buckets, cyclesUsed: { increment: 1 } } });
+        } else {
+          if (sub.cyclesUsed >= sub.cyclesTotal) throw new Error("No subscription cycles left");
+          kgLimit = Number(sub.kgPerCycle) || 7;
+          await tx.subscription.update({ where: { id: sub.id }, data: { cyclesUsed: { increment: 1 } } });
+        }
+        usedCycle = true;
+        if (input.weightKg && input.weightKg > kgLimit) {
+          const excessKg = Math.ceil(input.weightKg - kgLimit);
+          excessCharge = excessKg * cfg.rates.washIron.items[0][1] * 3;
+        }
+      }
+
+      const sub2 = items.reduce((s, i) => s + i.rate * i.qty, 0);
+      const noGst = !usedCycle && (!!input.noGst || !cfg.gstEnabled);
+      const { gst, total } = computeBill(sub2, 0, cfg.gstPct, { usedCycle, excessCharge, noGst });
+      const declaredPieces = items.reduce((s, i) => s + i.qty, 0);
+      const id = orderCode();
+      let ti = 0;
+      const tags = items.flatMap((it) => Array.from({ length: it.qty }, () => ({ code: id.slice(-6) + "-" + String(++ti).padStart(2, "0"), label: it.label })));
+
+      const o = await tx.order.create({
+        data: {
+          id, studentId: stu.id, collegeId: stu.collegeId, service: input.service,
+          items, declaredPieces, actualPieces: declaredPieces, weightKg: input.weightKg,
+          express: false, surcharge: 0, usedCycle, noGst,
+          paid: usedCycle && total === 0, paymentMethod: usedCycle && total === 0 ? "cycle" : null,
+          subtotal: sub2, gst, gstPctSnapshot: noGst ? 0 : cfg.gstPct, total,
+          status: "received", receivedAt: new Date(),
+          timeline: { create: [{ status: "placed" }, { status: "received" }] },
+          tags: { create: tags },
+        },
+      });
+      if (usedCycle) await tx.cycleUse.create({ data: { subscriptionId: stu.subscription!.id, orderId: o.id } });
+      return o;
+    });
+  } catch (e) {
+    return { ok: false as const, error: (e as Error).message };
+  }
+
+  await pushNotif(stu.id, `Walk-in order received — ${result.actualPieces} pieces logged for ${cfg.rates[result.service].label}.`, "status");
+  await audit("Walk-in order", `#${result.id.slice(-4)} · ${stu.name} · ₹${Number(result.total)}${result.usedCycle ? " (cycle)" : ""}${result.noGst ? " (no GST)" : ""}`, st.id);
+  if (result.noGst) await audit("No-GST billing", `#${result.id.slice(-4)} ₹${Number(result.total)}`, st.id);
+  void notifyOwner(`Walk-in order #${result.id.slice(-4)}`, `${stu.name}: ${result.actualPieces} pieces of ${cfg.rates[result.service].label} — ₹${Number(result.total)}${result.usedCycle ? " (plan cycle)" : ""}. Logged by ${st.name}.`);
+  bcast(result, "order.created");
+  return { ok: true as const, id: result.id };
+}
+
 /* ---------- Staff: advance status ---------- */
 export async function advanceStatus(orderId: string) {
   await requireStaff(1);

@@ -4,9 +4,10 @@ import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { Qr } from "@/components/qr";
 import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, loyaltyBadge } from "@/lib/format";
-import { Seg, Sheet, useToast } from "@/components/chrome";
+import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
 import { assignSubscription } from "@/lib/actions/subscription";
+import { walkInOrder } from "@/lib/actions/orders";
 
 type Student = {
   id: string;
@@ -29,7 +30,9 @@ const KIND_LABEL: Record<string, string> = { damage: "Damage", stain: "Stain / r
 
 type CollegePlan = { id: string; name: string; price: number; gross: number; gstApplies: boolean; buckets: { service: string; label: string; cycles: number; kgPerCycle: number }[] };
 
-export default function StaffCustomerClient({ student, staffRole, plans }: { student: Student; staffRole: number; plans: CollegePlan[] }) {
+type Rates = Record<string, { label: string; items: [string, number][] }>;
+
+export default function StaffCustomerClient({ student, staffRole, plans, rates, gstEnabled }: { student: Student; staffRole: number; plans: CollegePlan[]; rates: Rates; gstEnabled: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const tier = loyaltyBadge(student.lifetimePieces);
@@ -40,6 +43,38 @@ export default function StaffCustomerClient({ student, staffRole, plans }: { stu
   const [assignMethod, setAssignMethod] = useState<"cash" | "upi">("upi");
   const [assignLoading, setAssignLoading] = useState(false);
   const assignPlan = plans.find((p) => p.id === assignPlanId) || plans[0];
+
+  // Walk-in order (student at the counter without a booking)
+  const serviceKeys = Object.keys(rates);
+  const [showWalkIn, setShowWalkIn] = useState(false);
+  const [wiService, setWiService] = useState(serviceKeys[0] || "washIron");
+  const [wiQty, setWiQty] = useState<Record<string, number>>({});
+  const [wiWeight, setWiWeight] = useState(0);
+  const [wiUseCycle, setWiUseCycle] = useState(false);
+  const [wiNoGst, setWiNoGst] = useState(false);
+  const [wiLoading, setWiLoading] = useState(false);
+  const wiItems = rates[wiService]?.items || [];
+  const wiSubtotal = wiItems.reduce((s, [label, price]) => s + price * (wiQty[label] || 0), 0);
+  const wiPieces = wiItems.reduce((s, [label]) => s + (wiQty[label] || 0), 0);
+  const wiGst = wiUseCycle || wiNoGst || !gstEnabled ? 0 : Math.round(wiSubtotal * 0.18);
+  const subHasCycles = !!student.subscription?.active;
+
+  const doWalkIn = async () => {
+    setWiLoading(true);
+    const r = await walkInOrder(student.id, {
+      service: wiService,
+      items: wiItems.map(([label]) => ({ label, qty: wiQty[label] || 0 })),
+      weightKg: wiWeight || null,
+      useCycle: wiUseCycle,
+      noGst: wiNoGst,
+    });
+    setWiLoading(false);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(`Walk-in order #${r.id?.slice(-4)} created`);
+    setShowWalkIn(false);
+    setWiQty({});
+    router.push(`/s/orders/${r.id}`);
+  };
 
   const doAssign = async () => {
     if (!assignPlan) return;
@@ -83,7 +118,11 @@ export default function StaffCustomerClient({ student, staffRole, plans }: { stu
         <div className="kv"><span className="k">Member since</span><span>{dateStr(student.createdAt)}</span></div>
       </div>
 
-      <button className="btn ghost mt12" onClick={() => setShowComp(true)}>
+      <button className="btn mt12" onClick={() => setShowWalkIn(true)}>
+        <Svg name="plus" size={17} /> New walk-in order
+      </button>
+
+      <button className="btn ghost mt10" onClick={() => setShowComp(true)}>
         <Svg name="gift" size={17} /> Issue compensation
       </button>
 
@@ -173,6 +212,62 @@ export default function StaffCustomerClient({ student, staffRole, plans }: { stu
       )}
 
       {/* Compensation sheet */}
+      {/* Walk-in order sheet */}
+      <Sheet open={showWalkIn} onClose={() => setShowWalkIn(false)}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "6px" }}>New walk-in order</h2>
+          <p className="muted" style={{ fontSize: "13px", marginBottom: "14px" }}>
+            Counted &amp; tagged in one step — for students who didn&apos;t pre-book.
+          </p>
+          <div className="field">
+            <label>Service</label>
+            <select className="input" value={wiService} onChange={(e) => { setWiService(e.target.value); setWiQty({}); }}>
+              {serviceKeys.map((k) => <option key={k} value={k}>{rates[k].label}</option>)}
+            </select>
+          </div>
+          {wiItems.map(([label, price]) => (
+            <div key={label} className="between" style={{ padding: "7px 0" }}>
+              <span style={{ fontSize: 14 }}>{label} <span className="muted" style={{ fontSize: 12 }}>₹{price}</span></span>
+              <div className="step"><div className="qty">
+                <button onClick={() => setWiQty({ ...wiQty, [label]: Math.max(0, (wiQty[label] || 0) - 1) })}>−</button>
+                <span>{wiQty[label] || 0}</span>
+                <button onClick={() => setWiQty({ ...wiQty, [label]: (wiQty[label] || 0) + 1 })}>+</button>
+              </div></div>
+            </div>
+          ))}
+          <div className="field mt8">
+            <label>Weight (kg)</label>
+            <input className="input" type="number" step="0.1" value={wiWeight || ""} onChange={(e) => setWiWeight(Number(e.target.value))} />
+          </div>
+          {subHasCycles && (
+            <div className="chip-toggle" style={{ marginBottom: "12px" }}>
+              <div>
+                <div className="h-sm">Use a plan cycle</div>
+                <div className="muted" style={{ fontSize: "12px" }}>Burns a {rates[wiService]?.label} cycle from their plan</div>
+              </div>
+              <Switch on={wiUseCycle} onToggle={() => setWiUseCycle(!wiUseCycle)} />
+            </div>
+          )}
+          {!wiUseCycle && gstEnabled && (
+            <div className="chip-toggle" style={{ marginBottom: "12px" }}>
+              <div>
+                <div className="h-sm">Bill without GST</div>
+                <div className="muted" style={{ fontSize: "12px" }}>Recorded, no tax invoice</div>
+              </div>
+              <Switch on={wiNoGst} onToggle={() => setWiNoGst(!wiNoGst)} />
+            </div>
+          )}
+          <div className="card pad" style={{ background: "var(--teal-tint)" }}>
+            <div className="kv"><span className="k">Pieces</span><span className="mono">{wiPieces}</span></div>
+            <div className="kv"><span className="k">Subtotal</span><span className="mono">{fmt(wiSubtotal)}</span></div>
+            <div className="kv total"><span>{wiUseCycle ? "Covered by plan cycle" : "Est. total"}</span><span className="mono">{fmt(wiUseCycle ? 0 : wiSubtotal + wiGst)}</span></div>
+          </div>
+          <button className="btn mt16" onClick={doWalkIn} disabled={wiLoading || wiPieces === 0}>
+            <Svg name="check" size={18} /> {wiLoading ? "Creating…" : "Create & receive order"}
+          </button>
+        </div>
+      </Sheet>
+
       {/* Assign a plan (Manager+) */}
       <Sheet open={showAssign} onClose={() => setShowAssign(false)}>
         <div className="pad">

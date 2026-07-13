@@ -65,7 +65,13 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
   return (
     <div className="screen">
       <TopBar title={student.name} sub={`ID ${student.id}`} back="/s" />
-      <StaffCustomerClient student={plain} staffRole={staff.role} plans={collegePlans} />
+      <StaffCustomerClient
+        student={plain}
+        staffRole={staff.role}
+        plans={collegePlans}
+        rates={cfg.rates as Record<string, { label: string; items: [string, number][] }>}
+        gstEnabled={gstOn}
+      />
     </div>
   );
 }

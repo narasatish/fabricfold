@@ -8,6 +8,7 @@ import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
 import { assignSubscription } from "@/lib/actions/subscription";
 import { walkInOrder } from "@/lib/actions/orders";
+import { topUpCredits } from "@/lib/actions/ops";
 
 type Student = {
   id: string;
@@ -58,6 +59,22 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
   const wiPieces = wiItems.reduce((s, [label]) => s + (wiQty[label] || 0), 0);
   const wiGst = wiUseCycle || wiNoGst || !gstEnabled ? 0 : Math.round(wiSubtotal * 0.18);
   const subHasCycles = !!student.subscription?.active;
+
+  // Wallet top-up (money physically received first)
+  const [showTopUp, setShowTopUp] = useState(false);
+  const [tuAmount, setTuAmount] = useState(0);
+  const [tuMethod, setTuMethod] = useState<"cash" | "upi">("upi");
+  const [tuLoading, setTuLoading] = useState(false);
+  const doTopUp = async () => {
+    setTuLoading(true);
+    const r = await topUpCredits(student.id, tuAmount, tuMethod);
+    setTuLoading(false);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(`₹${tuAmount} added to wallet`);
+    setShowTopUp(false);
+    setTuAmount(0);
+    router.refresh();
+  };
 
   const doWalkIn = async () => {
     setWiLoading(true);
@@ -122,9 +139,14 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
         <Svg name="plus" size={17} /> New walk-in order
       </button>
 
-      <button className="btn ghost mt10" onClick={() => setShowComp(true)}>
-        <Svg name="gift" size={17} /> Issue compensation
-      </button>
+      <div className="row gap8 mt10">
+        <button className="btn ghost" onClick={() => setShowTopUp(true)}>
+          <Svg name="wallet" size={17} /> Add money
+        </button>
+        <button className="btn ghost" onClick={() => setShowComp(true)}>
+          <Svg name="gift" size={17} /> Compensation
+        </button>
+      </div>
 
       {staffRole >= 2 && !student.subscription?.active && plans.length > 0 && (
         <button className="btn mt10" onClick={() => setShowAssign(true)}>
@@ -212,6 +234,27 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
       )}
 
       {/* Compensation sheet */}
+      {/* Wallet top-up sheet */}
+      <Sheet open={showTopUp} onClose={() => setShowTopUp(false)}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "6px" }}>Add money to wallet</h2>
+          <p className="muted" style={{ fontSize: "13px", marginBottom: "14px" }}>
+            Collect the money first — it becomes spendable credit for {student.name}.
+          </p>
+          <div className="field">
+            <label>Amount (₹)</label>
+            <input className="input" type="number" inputMode="numeric" placeholder="e.g. 500" value={tuAmount || ""} onChange={(e) => setTuAmount(Number(e.target.value))} />
+          </div>
+          <div className="field">
+            <label>Received by</label>
+            <Seg<"cash" | "upi"> options={[["upi", "UPI"], ["cash", "Cash"]]} value={tuMethod} onChange={setTuMethod} />
+          </div>
+          <button className="btn mt12" onClick={doTopUp} disabled={tuLoading || !tuAmount}>
+            <Svg name="check" size={18} /> {tuLoading ? "Adding…" : `Confirm ₹${tuAmount || 0} received`}
+          </button>
+        </div>
+      </Sheet>
+
       {/* Walk-in order sheet */}
       <Sheet open={showWalkIn} onClose={() => setShowWalkIn(false)}>
         <div className="pad">

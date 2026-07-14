@@ -6,7 +6,7 @@ import { TopBar, RealtimeRefresh } from "@/components/chrome";
 import { parsePeriod, computeReport } from "@/lib/report";
 import { fmt, timeAgo } from "@/lib/format";
 import { Svg } from "@/components/icons";
-import ReportsControls, { ExpenseButton, EmailReportButton } from "./_components/ReportsClient";
+import ReportsControls, { ExpenseButton, EmailReportButton, CloseDayButton } from "./_components/ReportsClient";
 
 export default async function StaffReportsPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const sp = await searchParams;
@@ -17,6 +17,8 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
 
   const period = parsePeriod(sp);
   const r = await computeReport(period);
+  const istDate = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+  const dayClose = await db.dayClose.findUnique({ where: { date: istDate } });
   const staffList = await db.staff.findMany();
   const byId = (id: string) => staffList.find((x) => x.id === id)?.name || id;
   const N = (x: unknown) => Number(x || 0);
@@ -80,7 +82,10 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
         {/* Cash drawer (day view) */}
         {period.kind === "day" && (
           <>
-            <div className="sec-title mt20">Cash drawer</div>
+            <div className="between mt20" style={{ padding: "0 4px 10px" }}>
+              <span className="sec-title" style={{ padding: 0 }}>Cash drawer</span>
+              {staff.role >= 2 && <CloseDayButton expected={r.expectedDrawer} closed={!!dayClose} variance={dayClose ? N(dayClose.variance) : undefined} />}
+            </div>
             <div className="card pad">
               <div className="kv"><span className="k">Opening float</span><span className="mono">{fmt(r.openingFloat)}</span></div>
               <div className="kv"><span className="k">Cash received</span><span className="mono">{fmt(r.cash)}</span></div>

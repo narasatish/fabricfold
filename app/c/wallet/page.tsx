@@ -39,7 +39,7 @@ export default async function WalletPage() {
   const ledger = [
     ...compensations.map((c) => ({
       dir: 1 as const, amount: Number(c.amount), at: c.at,
-      label: { damage: "Damage compensation", stain: "Re-do / stain credit", missing: "Missing item credit", goodwill: "Goodwill credit", manual: "Credit adjustment" }[c.kind] || "Credit added",
+      label: { damage: "Damage compensation", stain: "Re-do / stain credit", missing: "Missing item credit", goodwill: "Goodwill credit", manual: "Credit adjustment", topup: "Money added" }[c.kind] || "Credit added",
     })),
     ...creditUses.map((u) => ({ dir: -1 as const, amount: Number(u.amount), at: u.at, label: u.orderId ? `Used on order #${u.orderId.slice(-4)}` : "Used towards a bill" })),
   ].sort((a, b) => b.at.getTime() - a.at.getTime());

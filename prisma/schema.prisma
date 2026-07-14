@@ -63,13 +63,14 @@ model Student {
 }
 
 model Staff {
-  id        String   @id @default(cuid())
-  phone     String   @unique
-  name      String
-  role      Int // 1 Counter · 2 Manager · 3 Admin · 4 Owner (server-enforced)
-  collegeId String?
-  college   College? @relation(fields: [collegeId], references: [id])
-  payslips  Payslip[]
+  id         String   @id @default(cuid())
+  phone      String   @unique
+  name       String
+  role       Int // 1 Counter · 2 Manager · 3 Admin · 4 Owner (server-enforced)
+  collegeId  String?
+  college    College? @relation(fields: [collegeId], references: [id])
+  payslips   Payslip[]
+  attendance Attendance[]
 }
 
 // ───────────── Subscription (cycle-based) ─────────────
@@ -299,6 +300,31 @@ model Notification {
   kind      String   @default("status") // ready | status | credit | ...
   read      Boolean  @default(false)
   at        DateTime @default(now())
+}
+
+// ───────────── Attendance (staff clock in/out) ─────────────
+model Attendance {
+  id       String    @id @default(cuid())
+  staffId  String
+  staff    Staff     @relation(fields: [staffId], references: [id])
+  date     String // YYYY-MM-DD (IST business day)
+  clockIn  DateTime  @default(now())
+  clockOut DateTime?
+
+  @@unique([staffId, date])
+  @@index([date])
+}
+
+// ───────────── Day close (cash drawer reconciliation ritual) ─────────────
+model DayClose {
+  id           String   @id @default(cuid())
+  date         String   @unique // YYYY-MM-DD
+  expectedCash Decimal // computed by the app at close time
+  countedCash  Decimal // physically counted by staff
+  variance     Decimal // counted − expected (≠0 is investigated)
+  note         String?
+  by           String // staffId
+  at           DateTime @default(now())
 }
 
 model AuditLog {

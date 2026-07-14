@@ -30,6 +30,11 @@ export default async function StaffHomePage() {
   const students = await db.student.findMany({ select: { id: true, name: true, phone: true } });
   const colleges = await db.college.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } });
 
+  // Attendance state for THIS staff member (IST business day)
+  const istDate = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+  const att = await db.attendance.findUnique({ where: { staffId_date: { staffId: staff.id, date: istDate } } });
+  const attendance = { clockedIn: !!att, clockedOut: !!att?.clockOut, since: att?.clockIn.getTime() ?? null };
+
   // At-a-glance dashboard metrics
   const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
   const [todayPays, activeSubs, newStudents] = await Promise.all([
@@ -70,6 +75,7 @@ export default async function StaffHomePage() {
         students={students}
         colleges={colleges}
         metrics={metrics}
+        attendance={attendance}
       />
     </div>
   );

@@ -28,6 +28,8 @@ type Props = {
   staff: { id: string; name: string; phone: string; role: number; collegeId: string | null }[];
   payslips: { id: string; number: string; month: string; net: number; staffName: string }[];
   plans: PlanRow[];
+  attendance: { staffId: string; name: string; todayIn: number | null; todayOut: number | null; daysThisMonth: number }[];
+  month: string;
   currentRole: number;
 };
 
@@ -38,7 +40,8 @@ const FEATURES: [string, string][] = [
   ["express", "Express (same-day)"], ["chat", "Chat & complaints"],
 ];
 
-export default function StaffAdminClient({ config, colleges, staff, payslips, plans, currentRole }: Props) {
+export default function StaffAdminClient({ config, colleges, staff, payslips, plans, attendance, month, currentRole }: Props) {
+  const hhmm = (t: number) => new Date(t).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
   const router = useRouter();
   const toast = useToast();
 
@@ -105,14 +108,17 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
               <div className="h-sm">{c.name}</div>
               <div className="muted" style={{ fontSize: 12 }}>{c.address}</div>
             </div>
-            {currentRole >= 4 && (
-              <div className="row gap6">
-                <button className="btn xs sec" onClick={() => { setColEdit({ id: c.id, name: c.name, address: c.address }); setSheet("college"); }}><Svg name="edit" size={13} /></button>
-                {colleges.length > 1 && (
-                  <button className="btn xs sec" style={{ color: "var(--red)" }} onClick={() => { if (confirm(`Remove ${c.name}?`)) run(() => deleteCollege(c.id), "College removed"); }}><Svg name="trash" size={13} /></button>
-                )}
-              </div>
-            )}
+            <div className="row gap6">
+              <a className="btn xs sec" href={`/api/export/college-statement?collegeId=${c.id}&m=${month}`} target="_blank">Statement</a>
+              {currentRole >= 4 && (
+                <>
+                  <button className="btn xs sec" onClick={() => { setColEdit({ id: c.id, name: c.name, address: c.address }); setSheet("college"); }}><Svg name="edit" size={13} /></button>
+                  {colleges.length > 1 && (
+                    <button className="btn xs sec" style={{ color: "var(--red)" }} onClick={() => { if (confirm(`Remove ${c.name}?`)) run(() => deleteCollege(c.id), "College removed"); }}><Svg name="trash" size={13} /></button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
           <div className="divider" />
           {FEATURES.map(([key, label]) => (
@@ -183,6 +189,22 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
       <button className="btn ghost mt12" onClick={() => { setStEdit({ name: "", phone: "", role: 1 }); setSheet("staff"); }}>
         <Svg name="plus" size={17} /> Add staff
       </button>
+
+      {/* Attendance */}
+      <div className="sec-title mt20">Attendance · {month}</div>
+      <div className="list">
+        {attendance.map((a) => (
+          <div key={a.staffId} className="list-item">
+            <div className="grow">
+              <div className="h-sm">{a.name}</div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                {a.todayIn ? `Today: in ${hhmm(a.todayIn)}${a.todayOut ? ` · out ${hhmm(a.todayOut)}` : " · on shift"}` : "Not in today"}
+              </div>
+            </div>
+            <span className="pill gray">{a.daysThisMonth} day{a.daysThisMonth === 1 ? "" : "s"}</span>
+          </div>
+        ))}
+      </div>
 
       {/* Payroll */}
       <div className="sec-title mt20">Payroll</div>

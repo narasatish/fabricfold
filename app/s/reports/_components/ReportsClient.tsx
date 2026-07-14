@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { Seg, Sheet, useToast } from "@/components/chrome";
 import { submitExpense } from "@/lib/actions/admin";
+import { closeDay } from "@/lib/actions/ops";
+import { fmt } from "@/lib/format";
 
 export default function ReportsControls({ period, d, m, y }: { period: "day" | "week" | "month" | "year" | "all"; d?: string; m?: string; y?: string }) {
   const router = useRouter();
@@ -33,6 +35,70 @@ export default function ReportsControls({ period, d, m, y }: { period: "day" | "
       {period === "year" && (
         <input className="input mt10" type="number" defaultValue={y || thisYear} onBlur={(e) => nav("year", { y: e.target.value })} />
       )}
+    </>
+  );
+}
+
+/* Day-close ritual: count the physical drawer, record counted vs expected.
+   Variance is stored permanently and emailed to the owner. Manager+. */
+export function CloseDayButton({ expected, closed, variance }: { expected: number; closed: boolean; variance?: number }) {
+  const router = useRouter();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [counted, setCounted] = useState<number>(0);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  if (closed) {
+    const v = variance ?? 0;
+    return (
+      <span className={`pill ${v === 0 ? "" : "red"}`}>
+        {v === 0 ? "Day closed · drawer matches" : `Day closed · variance ₹${v}`}
+      </span>
+    );
+  }
+
+  const doClose = async () => {
+    setBusy(true);
+    const r = await closeDay(counted, note);
+    setBusy(false);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(r.variance === 0 ? "Day closed — drawer matches ✓" : `Day closed — variance ₹${r.variance}`, r.variance !== 0);
+    setOpen(false);
+    router.refresh();
+  };
+
+  const diff = Math.round((counted - expected) * 100) / 100;
+  return (
+    <>
+      <button className="btn xs" onClick={() => { setCounted(0); setNote(""); setOpen(true); }}>Close day</button>
+      <Sheet open={open} onClose={() => setOpen(false)}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "6px" }}>Close the day</h2>
+          <p className="muted" style={{ fontSize: "13px", marginBottom: "14px" }}>
+            Count the physical cash in the drawer. The result is recorded permanently and emailed to the owner.
+          </p>
+          <div className="card pad" style={{ background: "var(--teal-tint)", marginBottom: "14px" }}>
+            <div className="kv"><span className="k">Expected in drawer</span><span className="mono">{fmt(expected)}</span></div>
+          </div>
+          <div className="field">
+            <label>Counted cash (₹)</label>
+            <input className="input" type="number" inputMode="numeric" value={counted || ""} onChange={(e) => setCounted(Number(e.target.value))} />
+          </div>
+          {counted > 0 && (
+            <div className={`card pad`} style={{ background: diff === 0 ? "var(--teal-tint)" : "var(--red-soft)", marginBottom: "12px" }}>
+              <div className="kv total"><span>Variance</span><span className="mono" style={{ color: diff === 0 ? "var(--teal-dark)" : "var(--red)" }}>{diff === 0 ? "₹0 — matches" : `₹${diff}`}</span></div>
+            </div>
+          )}
+          <div className="field">
+            <label>Note (required if variance)</label>
+            <input className="input" placeholder="e.g. ₹50 short — change error" value={note} onChange={(e) => setNote(e.target.value)} />
+          </div>
+          <button className="btn" onClick={doClose} disabled={busy || counted <= 0 || (diff !== 0 && !note.trim())}>
+            {busy ? "Closing…" : "Confirm & close the day"}
+          </button>
+        </div>
+      </Sheet>
     </>
   );
 }

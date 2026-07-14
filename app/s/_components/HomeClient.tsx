@@ -7,6 +7,7 @@ import { fmt, timeAgo, initials } from "@/lib/format";
 import { isOverdue } from "@/lib/money";
 import { activateSubscription } from "@/lib/actions/subscription";
 import { registerStudent } from "@/lib/actions/admin";
+import { clockIn, clockOut } from "@/lib/actions/ops";
 
 type Order = {
   id: string;
@@ -38,6 +39,7 @@ export default function StaffHomeClient({
   students,
   colleges,
   metrics,
+  attendance,
 }: {
   staff: { name: string; role: number };
   orders: Order[];
@@ -45,6 +47,7 @@ export default function StaffHomeClient({
   students: { id: string; name: string; phone: string }[];
   colleges: { id: string; name: string }[];
   metrics: Metrics;
+  attendance: { clockedIn: boolean; clockedOut: boolean; since: number | null };
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -82,6 +85,13 @@ export default function StaffHomeClient({
       orders: orders.filter((o) => o.id.toLowerCase().includes(q)),
     };
   }, [q, orders, students]);
+
+  const handleClock = async () => {
+    const r = attendance.clockedIn && !attendance.clockedOut ? await clockOut() : await clockIn();
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast("hours" in r && r.hours ? `Clocked out — ${r.hours}h today` : "Clocked in — have a good shift!");
+    router.refresh();
+  };
 
   const handleRegister = async () => {
     setRegLoading(true);
@@ -153,6 +163,21 @@ export default function StaffHomeClient({
 
   return (
     <div className="pad">
+      {/* Attendance */}
+      <div className="chip-toggle" style={{ marginBottom: 12 }}>
+        <div>
+          <div className="h-sm">
+            {attendance.clockedOut ? "Shift complete for today" : attendance.clockedIn ? `On shift since ${attendance.since ? new Date(attendance.since).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}` : "Not clocked in"}
+          </div>
+          <div className="muted" style={{ fontSize: "12px" }}>Attendance is recorded for payroll</div>
+        </div>
+        {!attendance.clockedOut && (
+          <button className={`btn sm ${attendance.clockedIn ? "sec" : ""}`} onClick={handleClock}>
+            {attendance.clockedIn ? "Clock out" : "Clock in"}
+          </button>
+        )}
+      </div>
+
       {/* At-a-glance dashboard */}
       <div className="stat-grid">
         <div className="stat-tile">

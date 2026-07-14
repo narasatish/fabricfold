@@ -46,6 +46,7 @@ export function CloseDayButton({ expected, closed, variance }: { expected: numbe
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [counted, setCounted] = useState<number>(0);
+  const [touched, setTouched] = useState(false); // so a genuine ₹0 count is possible
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -71,7 +72,7 @@ export function CloseDayButton({ expected, closed, variance }: { expected: numbe
   const diff = Math.round((counted - expected) * 100) / 100;
   return (
     <>
-      <button className="btn xs" onClick={() => { setCounted(0); setNote(""); setOpen(true); }}>Close day</button>
+      <button className="btn xs" onClick={() => { setCounted(0); setTouched(false); setNote(""); setOpen(true); }}>Close day</button>
       <Sheet open={open} onClose={() => setOpen(false)}>
         <div className="pad">
           <h2 style={{ marginBottom: "6px" }}>Close the day</h2>
@@ -83,9 +84,9 @@ export function CloseDayButton({ expected, closed, variance }: { expected: numbe
           </div>
           <div className="field">
             <label>Counted cash (₹)</label>
-            <input className="input" type="number" inputMode="numeric" value={counted || ""} onChange={(e) => setCounted(Number(e.target.value))} />
+            <input className="input" type="number" inputMode="numeric" value={touched ? counted : ""} onChange={(e) => { setTouched(true); setCounted(Number(e.target.value)); }} />
           </div>
-          {counted > 0 && (
+          {touched && (
             <div className={`card pad`} style={{ background: diff === 0 ? "var(--teal-tint)" : "var(--red-soft)", marginBottom: "12px" }}>
               <div className="kv total"><span>Variance</span><span className="mono" style={{ color: diff === 0 ? "var(--teal-dark)" : "var(--red)" }}>{diff === 0 ? "₹0 — matches" : `₹${diff}`}</span></div>
             </div>
@@ -94,7 +95,7 @@ export function CloseDayButton({ expected, closed, variance }: { expected: numbe
             <label>Note (required if variance)</label>
             <input className="input" placeholder="e.g. ₹50 short — change error" value={note} onChange={(e) => setNote(e.target.value)} />
           </div>
-          <button className="btn" onClick={doClose} disabled={busy || counted <= 0 || (diff !== 0 && !note.trim())}>
+          <button className="btn" onClick={doClose} disabled={busy || !touched || counted < 0 || (diff !== 0 && !note.trim())}>
             {busy ? "Closing…" : "Confirm & close the day"}
           </button>
         </div>

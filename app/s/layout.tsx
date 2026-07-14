@@ -26,7 +26,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     <>
       {children}
       <StaffTabBar openComplaints={openComplaints} role={staff.role} />
-      <RealtimeRefresh types={["order.status", "payment", "complaint.message"]} toastOn={{ "order.status": "Order updated", "payment": "Payment received" }} />
+      <RealtimeRefresh intervalMs={10000} />
     </>
   );
 }

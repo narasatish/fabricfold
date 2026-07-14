@@ -124,17 +124,19 @@ export function Switch({ on, onToggle }: { on: boolean; onToggle: () => void }) 
 }
 
 /* ---------- Realtime (polling) ----------
-   Runs on Vercel's serverless runtime, where an in-memory SSE bus can't push
-   across instances. We refresh server data on a short interval while the tab
-   is visible, and immediately when it regains focus — so a student's order
-   shows up on the staff screen (and vice-versa) within a few seconds. */
-export function useRealtime(onTick: () => void, intervalMs = 4000) {
+   Vercel's serverless runtime can't push across instances, so we poll — but
+   the app must stay SMOOTH. What actually makes it feel live is refreshing the
+   instant the tab regains focus (returning to the app shows fresh data at
+   once). Background polling is a gentle safety net, not the main mechanism, so
+   it runs on a long interval — a laundry order doesn't change second-to-second,
+   and frequent full re-renders were the biggest cause of jank. */
+export function useRealtime(onTick: () => void, intervalMs = 20000) {
   const cb = useRef(onTick);
   cb.current = onTick;
   useEffect(() => {
     const tick = () => { if (document.visibilityState === "visible") cb.current(); };
     const id = setInterval(tick, intervalMs);
-    const onFocus = () => tick();
+    const onFocus = () => tick();               // instant refresh when you come back
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
     return () => {
@@ -146,10 +148,10 @@ export function useRealtime(onTick: () => void, intervalMs = 4000) {
 }
 
 /* ---------- Refresh-on-realtime helper ----------
-   Props are kept for call-site compatibility; polling refreshes all server
-   data, so per-event filtering/toasts no longer apply. */
-export function RealtimeRefresh(_props: { types?: string[]; toastOn?: Record<string, string> } = {}) {
+   `intervalMs` lets a busy screen (e.g. the staff order queue) poll faster.
+   `types`/`toastOn` kept for call-site compatibility. */
+export function RealtimeRefresh({ intervalMs }: { types?: string[]; toastOn?: Record<string, string>; intervalMs?: number } = {}) {
   const router = useRouter();
-  useRealtime(() => router.refresh());
+  useRealtime(() => router.refresh(), intervalMs);
   return null;
 }

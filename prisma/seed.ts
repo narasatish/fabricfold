@@ -16,7 +16,7 @@ function makeAdapter() {
 const db = new PrismaClient({ adapter: makeAdapter() });
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
-const EXPRESS_FEE = 100; // flat surcharge per express order
+const EXPRESS_PCT = 0.4; // same-day surcharge = 40% of order value (all colleges)
 
 const DEFAULT_FEATURES = {
   svc_wash: true, svc_washfold: true, svc_iron: true, svc_dryclean: true,
@@ -83,7 +83,7 @@ async function main() {
       return { label: found[0], rate: found[1], qty };
     });
     const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
-    const surcharge = express ? EXPRESS_FEE : 0;
+    const surcharge = express ? Math.round(sub * EXPRESS_PCT) : 0;
     const gstAmt = Math.round((sub + surcharge) * 0.18);
     const total = sub + surcharge + gstAmt;
     const created = t0 - ageDays * DAY;

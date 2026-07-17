@@ -14,6 +14,7 @@
     "@prisma/adapter-better-sqlite3": "^7.8.0",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "@sentry/nextjs": "^10.65.0",
     "dotenv": "^17.4.2",
     "exceljs": "^4.4.0",
     "jose": "^6.2.3",

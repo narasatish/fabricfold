@@ -10,6 +10,7 @@ import {
   saveRates, savePlan, togglePlan, savePaymentConfig, saveSettings,
   toggleFeature, saveCollege, deleteCollege, saveStaff, createPayslip,
 } from "@/lib/actions/admin";
+import { markErrorsSeen } from "@/lib/actions/ops";
 
 const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFold: "Wash & Fold", ironOnly: "Iron Only", dryClean: "Dry Clean" };
 type PlanBucket = { service: string; cycles: number; kgPerCycle: number };
@@ -30,6 +31,7 @@ type Props = {
   plans: PlanRow[];
   attendance: { staffId: string; name: string; todayIn: number | null; todayOut: number | null; daysThisMonth: number }[];
   month: string;
+  errors: { id: string; kind: string; message: string; url: string | null; seen: boolean; at: number }[];
   currentRole: number;
 };
 
@@ -40,8 +42,9 @@ const FEATURES: [string, string][] = [
   ["express", "Express (same-day)"], ["chat", "Chat & complaints"],
 ];
 
-export default function StaffAdminClient({ config, colleges, staff, payslips, plans, attendance, month, currentRole }: Props) {
+export default function StaffAdminClient({ config, colleges, staff, payslips, plans, attendance, month, errors, currentRole }: Props) {
   const hhmm = (t: number) => new Date(t).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  const unseenErrors = errors.filter((e) => !e.seen).length;
   const router = useRouter();
   const toast = useToast();
 
@@ -74,7 +77,28 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
 
   return (
     <div className="pad">
-      <div className="sec-title">Settings</div>
+      {currentRole >= 4 && errors.length > 0 && (
+        <>
+          <div className="between" style={{ padding: "0 4px 10px" }}>
+            <span className="sec-title" style={{ padding: 0, color: unseenErrors ? "var(--red)" : undefined }}>
+              App errors {unseenErrors ? `· ${unseenErrors} new` : ""}
+            </span>
+            <button className="btn xs sec" onClick={async () => { await markErrorsSeen(); toast("Marked reviewed"); router.refresh(); }}>Mark reviewed</button>
+          </div>
+          <div className="card pad">
+            {errors.slice(0, 8).map((e) => (
+              <div key={e.id} className="kv" style={{ alignItems: "flex-start" }}>
+                <span className="k" style={{ fontSize: 12.5 }}>
+                  <span style={{ fontWeight: 600, color: e.seen ? "var(--muted)" : "var(--red)" }}>{e.message.slice(0, 70)}</span>
+                  <span className="muted" style={{ display: "block", fontSize: 11 }}>{e.kind} · {e.url?.replace(/^https?:\/\/[^/]+/, "") || "?"} · {new Date(e.at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="sec-title mt16">Settings</div>
 
       <button className="card-btn mt12" onClick={() => setSheet("rates")}>
         <div className="icon-tile"><Svg name="list" size={20} /></div>

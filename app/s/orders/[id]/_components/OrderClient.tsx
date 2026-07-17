@@ -39,6 +39,7 @@ type Order = {
   creditApplied: number;
   usedCycle: boolean;
   noGst: boolean;
+  intakePhotos: string[];
   refunded: boolean;
   refundAmount: number;
   redoOfId: string | null;
@@ -83,6 +84,8 @@ export default function StaffOrderClient({
 
   // Sheet state
   const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, useCycle: false, noGst: false, itemQtys: {} as Record<string, number> });
+  const [intakePhotos, setIntakePhotos] = useState<string[]>([]);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [collectCode, setCollectCode] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "upi">("cash");
   const [applyCredits, setApplyCredits] = useState(false);
@@ -106,6 +109,7 @@ export default function StaffOrderClient({
       useCycle: acceptInput.useCycle,
       noGst: acceptInput.noGst,
       items: adjusted.length ? adjusted : undefined,
+      intakePhotos: intakePhotos.length ? intakePhotos : undefined,
     });
     if (!r.ok) {
       toast(r.error || "Failed", true);
@@ -114,6 +118,30 @@ export default function StaffOrderClient({
     toast("Order accepted");
     setShowAcceptSheet(false);
     router.refresh();
+  };
+
+  // Handler: upload a damage/intake photo
+  const handleIntakePhoto = async (file: File) => {
+    if (intakePhotos.length >= 6) {
+      toast("Up to 6 photos", true);
+      return;
+    }
+    setUploadingPhoto(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload/intake", { method: "POST", body: fd });
+      if (!res.ok) {
+        toast(await res.text() || "Upload failed", true);
+        return;
+      }
+      const j = (await res.json()) as { key: string };
+      setIntakePhotos((p) => [...p, j.key]);
+    } catch {
+      toast("Upload failed", true);
+    } finally {
+      setUploadingPhoto(false);
+    }
   };
 
   // Handler: advance status
@@ -333,6 +361,24 @@ export default function StaffOrderClient({
         </div>
       </div>
 
+      {/* Intake / damage photos */}
+      {order.intakePhotos.length > 0 && (
+        <div className="card pad mt12">
+          <div className="sec-title" style={{ padding: "0 0 10px" }}>Intake photos ({order.intakePhotos.length})</div>
+          <div className="row wrap gap8">
+            {order.intakePhotos.map((key, i) => (
+              <a key={key} href={`/api/receipt?key=${encodeURIComponent(key)}`} target="_blank" rel="noreferrer">
+                <img
+                  src={`/api/receipt?key=${encodeURIComponent(key)}`}
+                  alt={`Intake ${i + 1}`}
+                  style={{ width: 76, height: 76, objectFit: "cover", borderRadius: 10, border: "1px solid var(--line)" }}
+                />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Status timeline */}
       {order.timeline.length > 0 && (
         <div className="card pad mt12">
@@ -482,6 +528,40 @@ export default function StaffOrderClient({
               <Switch on={acceptInput.noGst} onToggle={() => setAcceptInput({ ...acceptInput, noGst: !acceptInput.noGst })} />
             </div>
           )}
+          <div className="field">
+            <label>Damage / condition photos <span className="muted">(optional)</span></label>
+            <div className="muted" style={{ fontSize: "12px", marginBottom: "8px" }}>
+              Snap any existing stains or damage before washing — protects both sides in a dispute.
+            </div>
+            {intakePhotos.length > 0 && (
+              <div className="row wrap gap8" style={{ marginBottom: "10px" }}>
+                {intakePhotos.map((key, i) => (
+                  <div key={key} style={{ position: "relative" }}>
+                    <img
+                      src={`/api/receipt?key=${encodeURIComponent(key)}`}
+                      alt={`Intake ${i + 1}`}
+                      style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 10, border: "1px solid var(--line)" }}
+                    />
+                    <button
+                      onClick={() => setIntakePhotos((p) => p.filter((k) => k !== key))}
+                      style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%", background: "var(--red)", color: "#fff", border: "none", fontSize: 12, lineHeight: 1, display: "grid", placeItems: "center" }}
+                    >×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <label className="btn sec sm" style={{ width: "auto", cursor: "pointer" }}>
+              <Svg name="camera" size={16} /> {uploadingPhoto ? "Uploading…" : "Add photo"}
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                style={{ display: "none" }}
+                disabled={uploadingPhoto || intakePhotos.length >= 6}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleIntakePhoto(f); e.target.value = ""; }}
+              />
+            </label>
+          </div>
           <button className="btn mt16" onClick={handleAccept}>
             <Svg name="check" size={18} /> Accept
           </button>
@@ -499,8 +579,10 @@ export default function StaffOrderClient({
               className="input"
               type="text"
               placeholder="e.g. 1234"
+              autoFocus
               value={collectCode}
               onChange={(e) => setCollectCode(e.target.value.toUpperCase())}
+              onKeyDown={(e) => { if (e.key === "Enter" && collectCode.trim()) handleCollect(); }}
             />
           </div>
           <button className="btn mt16" onClick={handleCollect}>

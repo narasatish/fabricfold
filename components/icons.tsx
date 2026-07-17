@@ -8,6 +8,7 @@ export const IC: Record<string, string> = {
   bell: '<path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8Z"/><path d="M10.5 21a2 2 0 0 0 3 0"/>',
   back: '<path d="M15 19l-7-7 7-7"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  camera: '<path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.2"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   chat: '<path d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.5A8 8 0 1 1 21 12Z"/>',

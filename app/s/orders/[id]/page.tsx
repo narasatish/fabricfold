@@ -52,6 +52,7 @@ export default async function StaffOrderPage({ params }: { params: Promise<{ id:
     creditApplied: N(order.creditApplied),
     usedCycle: order.usedCycle,
     noGst: order.noGst,
+    intakePhotos: Array.isArray(order.intakePhotos) ? (order.intakePhotos as string[]) : [],
     refunded: order.refunded,
     refundAmount: N(order.refundAmount),
     redoOfId: order.redoOfId,

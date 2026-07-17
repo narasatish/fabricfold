@@ -4,7 +4,7 @@
    prototype does -> realtime broadcast -> notification. */
 import { db } from "../db";
 import { requireStudent, requireStaff } from "../auth";
-import { EXPRESS_FEE, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill } from "../money";
+import { expressSurcharge, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill } from "../money";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit } from "../notify";
 import { notifyOwner } from "../mail";
@@ -46,7 +46,7 @@ export async function placeOrder(input: { service: string; items: { label: strin
 
   const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
   const express = input.express && feat.express !== false;
-  const surcharge = express ? EXPRESS_FEE : 0;
+  const surcharge = express ? expressSurcharge(sub) : 0;
   const gst = cfg.gstEnabled ? Math.round((sub + surcharge) * (cfg.gstPct / 100)) : 0;
   const total = sub + surcharge + gst;
 
@@ -68,7 +68,7 @@ export async function placeOrder(input: { service: string; items: { label: strin
 }
 
 /* ---------- Staff: verify & accept (receive) ---------- */
-export async function acceptOrder(orderId: string, input: { weightKg: number | null; useCycle: boolean; noGst?: boolean; items?: { label: string; qty: number }[] }) {
+export async function acceptOrder(orderId: string, input: { weightKg: number | null; useCycle: boolean; noGst?: boolean; items?: { label: string; qty: number }[]; intakePhotos?: string[] }) {
   const st = await requireStaff(1);
   const cfg = await getConfig();
 
@@ -124,7 +124,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
     // GST is skipped when staff chose 'Bill without GST' OR GST billing is
     // switched off app-wide in Admin.
     const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
-    const surcharge = o.express ? EXPRESS_FEE : 0;
+    const surcharge = o.express ? expressSurcharge(sub) : 0;
     const noGst = !usedCycle && (!!input.noGst || !cfg.gstEnabled);
     const { gst, total } = computeBill(sub, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });
 
@@ -136,6 +136,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       where: { id: o.id },
       data: {
         items, declaredPieces, actualPieces: declaredPieces, weightKg: input.weightKg,
+        intakePhotos: input.intakePhotos?.length ? input.intakePhotos.slice(0, 6) : undefined,
         usedCycle, noGst, paid: usedCycle && total === 0 ? true : o.paid,
         paymentMethod: usedCycle && total === 0 ? "cycle" : o.paymentMethod,
         subtotal: sub, surcharge, gst, gstPctSnapshot: noGst ? 0 : cfg.gstPct, total,

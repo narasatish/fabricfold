@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 /* Security headers on every response — same baseline large companies ship. */
 const securityHeaders = [
@@ -22,4 +23,13 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+/* Sentry wrapper. Source-map upload only runs when SENTRY_AUTH_TOKEN + org/project
+   are set (build stays green without them). Runtime capture is gated by the DSN. */
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  silent: !process.env.CI,
+  // Route Sentry requests through our own domain to dodge ad-blockers
+  tunnelRoute: "/monitoring-tunnel",
+});

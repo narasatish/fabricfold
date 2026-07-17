@@ -62,6 +62,13 @@ export async function todayClose() {
   return rec ? { closed: true as const, variance: Number(rec.variance) } : { closed: false as const };
 }
 
+/* ---------- Error log (Owner) ---------- */
+export async function markErrorsSeen() {
+  await requireStaff(4);
+  await db.errorLog.updateMany({ where: { seen: false }, data: { seen: true } });
+  return { ok: true as const };
+}
+
 /* ---------- Wallet top-up (any staff; money physically received first) ---------- */
 export async function topUpCredits(studentId: string, amount: number, method: "cash" | "upi") {
   const st = await requireStaff(1);

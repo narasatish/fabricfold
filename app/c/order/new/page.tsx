@@ -4,7 +4,6 @@ import { TopBar } from "@/components/chrome";
 import { fmt, STATUS_LABEL } from "@/lib/format";
 import { Svg } from "@/components/icons";
 import OrderNewClient from "./_components/OrderNewClient";
-import { EXPRESS_FEE } from "@/lib/money";
 import { redirect } from "next/navigation";
 
 export default async function OrderNewPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {

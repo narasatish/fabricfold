@@ -6,7 +6,7 @@ import { Seg, Switch } from "@/components/chrome";
 import { Svg } from "@/components/icons";
 import { fmt } from "@/lib/format";
 import { placeOrder } from "@/lib/actions/orders";
-import { EXPRESS_FEE } from "@/lib/money";
+import { EXPRESS_PCT, expressSurcharge } from "@/lib/money";
 
 type EnabledService = { key: string; flag: string; label: string };
 
@@ -45,7 +45,7 @@ export default function OrderNewClient({
     .map(([label, rate]) => ({ label, rate, qty: quantities[label] }));
 
   const subtotal = items.reduce((s, i) => s + i.rate * i.qty, 0);
-  const surcharge = express ? EXPRESS_FEE : 0;
+  const surcharge = express ? expressSurcharge(subtotal) : 0;
   const gst = Math.round((subtotal + surcharge) * (gstPct / 100));
   const total = subtotal + surcharge + gst;
   const pieces = items.reduce((s, i) => s + i.qty, 0);
@@ -129,7 +129,7 @@ export default function OrderNewClient({
               <div>
                 <div className="h-sm">Express (same-day)</div>
                 <div className="muted" style={{ fontSize: "12px" }}>
-                  Flat {fmt(EXPRESS_FEE)} per order
+                  +{Math.round(EXPRESS_PCT * 100)}% of order value{surcharge > 0 ? ` · ${fmt(surcharge)}` : ""}
                 </div>
               </div>
             </div>

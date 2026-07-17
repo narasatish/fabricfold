@@ -23,6 +23,10 @@ export default async function StaffAdminPage() {
     db.attendance.groupBy({ by: ["staffId"], where: { date: { startsWith: month } }, _count: true }),
   ]);
 
+  const recentErrors = staff.role >= 4
+    ? await db.errorLog.findMany({ orderBy: { at: "desc" }, take: 15 })
+    : [];
+
   const N = (x: unknown) => Number(x || 0);
   return (
     <div className="screen">
@@ -49,6 +53,7 @@ export default async function StaffAdminPage() {
         })}
         month={month}
         payslips={payslips.map((p) => ({ id: p.id, number: p.number, month: p.month, net: N(p.net), staffName: p.staff.name }))}
+        errors={recentErrors.map((e) => ({ id: e.id, kind: e.kind, message: e.message, url: e.url, seen: e.seen, at: e.at.getTime() }))}
         currentRole={staff.role}
       />
     </div>

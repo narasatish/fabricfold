@@ -2,6 +2,7 @@ import { requireStudent } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { fmt, timeAgo, dateStr, STATUS_LABEL } from "@/lib/format";
+import { orderDueAt } from "@/lib/money";
 import Link from "next/link";
 import { Svg } from "@/components/icons";
 import { notFound } from "next/navigation";
@@ -26,6 +27,13 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
 
   const items = order.items as unknown as Array<{ label: string; rate: number; qty: number }>;
   const totalQty = items.reduce((s, i) => s + i.qty, 0);
+
+  // Customer-facing ETA while the order is in progress.
+  const dueAt = orderDueAt({ receivedAt: order.receivedAt, express: order.express });
+  const etaLabel =
+    dueAt && ["received", "processing"].includes(order.status)
+      ? dueAt.toLocaleString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+      : null;
 
   // Timeline: placed, received, processing, ready, collected
   const timelineLabels: Record<string, string> = {
@@ -94,6 +102,17 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         {order.express && (
           <div className="pill amber mt16">
             <Svg name="bolt" size={12} /> Express same-day
+          </div>
+        )}
+
+        {/* Estimated ready */}
+        {etaLabel && (
+          <div className="card pad mt16" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ color: "var(--teal-dark)" }}><Svg name="clock" size={20} /></span>
+            <div>
+              <div className="muted" style={{ fontSize: "11.5px", textTransform: "uppercase", letterSpacing: ".04em" }}>Estimated ready by</div>
+              <div className="h-sm">{etaLabel}</div>
+            </div>
           </div>
         )}
 

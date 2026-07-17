@@ -7,7 +7,12 @@
 import { db } from "./db";
 import type { Prisma } from "./generated/prisma/client";
 
-export const EXPRESS_FEE = 100; // flat surcharge per express order
+/* Same-day express surcharge = 40% of the order value (subtotal). Flat rule for
+   every college — not configurable per campus. */
+export const EXPRESS_PCT = 0.4;
+export function expressSurcharge(subtotal: number) {
+  return Math.round(subtotal * EXPRESS_PCT);
+}
 
 export function financialYearTag(ts?: number | Date) {
   const dt = ts ? new Date(ts) : new Date();

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSession, requireStudent } from "@/lib/auth";
 import { Svg } from "@/components/icons";
 import { TabBar, RealtimeRefresh } from "@/components/chrome";
+import { InstallPrompt } from "@/components/pwa";
 import CustomerTabBar from "./_components/TabBar";
 import { db } from "@/lib/db";
 
@@ -26,6 +27,7 @@ export default async function CustomerLayout({ children }: { children: React.Rea
     <>
       {children}
       <CustomerTabBar unread={unreadCount} />
+      <InstallPrompt />
       <RealtimeRefresh types={["order.status", "notification", "complaint.message"]} toastOn={{ "order.status": "Order updated", "notification": "", "complaint.message": "New message" }} />
     </>
   );

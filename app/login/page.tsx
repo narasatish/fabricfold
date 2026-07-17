@@ -110,8 +110,10 @@ export default function LoginPage() {
                 className="input"
                 type="tel"
                 placeholder="10-digit number"
+                autoFocus
                 value={phone}
                 onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                onKeyDown={(e) => { if (e.key === "Enter" && phone.length === 10 && !loading) handleRequestOtp(); }}
                 inputMode="numeric"
               />
             </div>
@@ -150,8 +152,10 @@ export default function LoginPage() {
                 className="input"
                 type="text"
                 placeholder="••••••"
+                autoFocus
                 value={otp}
                 onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                onKeyDown={(e) => { if (e.key === "Enter" && otp.length === 6 && !loading) handleVerifyOtp(); }}
                 inputMode="numeric"
                 maxLength={6}
                 style={{ letterSpacing: ".3em", fontSize: "18px" }}

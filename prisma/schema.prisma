@@ -129,6 +129,7 @@ model Order {
   rating         Int?
   ratingComment  String?
   ratedAt        DateTime?
+  intakePhotos   Json? // storage keys of photos taken at drop-off (pre-existing damage)
   cancelledAt    DateTime?
   createdAt      DateTime  @default(now())
   receivedAt     DateTime? // SLA: due = receivedAt + (express ? 1 : 2) days
@@ -333,6 +334,20 @@ model AuditLog {
   detail String
   by     String // staffId
   at     DateTime @default(now())
+}
+
+// Self-reported errors (client + server) so the owner learns of crashes.
+model ErrorLog {
+  id      String   @id @default(cuid())
+  kind    String // client | server
+  message String
+  stack   String?
+  url     String?
+  who     String? // student/staff id if known
+  seen    Boolean  @default(false)
+  at      DateTime @default(now())
+
+  @@index([at])
 }
 
 model Otp {

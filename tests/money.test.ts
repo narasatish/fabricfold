@@ -94,6 +94,16 @@ describe("no-GST billing (staff choice at accept)", () => {
     expect(money.computeBill(150, 0, 18, { usedCycle: true, excessCharge: 45, noGst: true })).toEqual({ gst: 0, total: 45 });
   });
 
+  it("express surcharge is 40% of order value (flat, all colleges)", () => {
+    expect(money.EXPRESS_PCT).toBe(0.4);
+    expect(money.expressSurcharge(500)).toBe(200);
+    expect(money.expressSurcharge(0)).toBe(0);
+    // rounds to the nearest rupee
+    expect(money.expressSurcharge(155)).toBe(62);
+    // flows through computeBill: 500 + 200 express, +18% GST = 826
+    expect(money.computeBill(500, money.expressSurcharge(500), 18)).toEqual({ gst: 126, total: 826 });
+  });
+
   it("a no-GST order is never invoiced — not even via UPI or staff override", () => {
     expect(money.shouldInvoiceOrder({ noGst: true }, "upi")).toBe(false);
     expect(money.shouldInvoiceOrder({ noGst: true }, "upi+credit")).toBe(false);

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSession, requireStaff } from "@/lib/auth";
 import { Svg } from "@/components/icons";
 import { TabBar, RealtimeRefresh } from "@/components/chrome";
+import { InstallPrompt } from "@/components/pwa";
 import StaffTabBar from "./_components/StaffTabBar";
 import { db } from "@/lib/db";
 
@@ -26,6 +27,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     <>
       {children}
       <StaffTabBar openComplaints={openComplaints} role={staff.role} />
+      <InstallPrompt />
       <RealtimeRefresh intervalMs={10000} />
     </>
   );

@@ -5,7 +5,7 @@ E2E verified in browser: OTP login (both apps) → draft order → staff verify/
 
 ## Architecture
 - lib/db.ts (Prisma singleton), lib/auth.ts (JWT cookie ff_session, requireStudent/requireStaff(minRole), roles 1 Counter/2 Manager/3 Admin/4 Owner)
-- lib/money.ts (EXPRESS_FEE=100, financialYearTag, nextInvoiceNo/nextCreditNoteNo via FySequence tx, createInvoice, createCreditNote proportional, shouldInvoice, orderDueAt/isOverdue = received+(express?1:2)d, loyaltyTier 50/150)
+- lib/money.ts (EXPRESS_PCT=0.4 → expressSurcharge(subtotal)=40% of order value, flat all colleges; financialYearTag, nextInvoiceNo/nextCreditNoteNo via FySequence tx, createInvoice, createCreditNote proportional, shouldInvoice, orderDueAt/isOverdue = received+(express?1:2)d, loyaltyTier 50/150)
 - lib/actions/* = ALL mutations (server actions): auth, orders (place/accept/advance/collect/payCore credit-split/recordPay staffInvoice override/refund/redo/cancel/rate/scanTag), credits (compensation; cash=Manager+, posts cash_out+CN), subscription (request/activate Manager+ w/ cash OTP), complaints (chat threads), admin (rates/plan/payment/settings/toggleFeature Manager+/college Owner-only/staff/expense Manager+/payslip Admin+ w/ auto Salaries expense)
 - lib/report.ts: parsePeriod + computeReport (drawer = float+cash−cashRefunds−cashOut−cashExpenses; netGst = collected−cnGst) + reportText (daily email)
 - Realtime: lib/realtime.ts EventEmitter bus → SSE /api/rt (channels student:{id}, orders:{collegeId}); components/chrome.tsx RealtimeRefresh

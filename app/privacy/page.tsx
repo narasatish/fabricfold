@@ -84,6 +84,11 @@ export default function Privacy() {
             valid legal order. If your campus has a billing arrangement with us, we share only what that arrangement
             needs (such as order counts and amounts billed), not your individual garment details or photos.
           </p>
+          <p>
+            If FabricFold is ever sold, merged or transferred to another business, your data may transfer with it. If
+            that happens, this policy continues to apply until you are told otherwise, and we will notify you in the app
+            before anything changes.
+          </p>
 
           <h2 className="m-h2">Where your data is stored</h2>
           <p>

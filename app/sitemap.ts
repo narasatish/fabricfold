@@ -4,7 +4,7 @@ const BASE = "https://fabricfold.in";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();
-  const pages = ["", "/how-it-works", "/partners", "/about", "/contact", "/login"];
+  const pages = ["", "/how-it-works", "/partners", "/about", "/contact", "/login", "/privacy"];
   return pages.map((p) => ({
     url: BASE + p,
     lastModified: now,

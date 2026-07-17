@@ -43,6 +43,7 @@ export default function MarketingShell({ active, children }: { active?: string; 
               <Link href="/partners">For colleges &amp; communities</Link>
               <Link href="/about">About us</Link>
               <Link href="/contact">Contact</Link>
+              <Link href="/privacy">Privacy policy</Link>
             </div>
             <div>
               <h4>Get in touch</h4>

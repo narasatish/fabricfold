@@ -4,6 +4,8 @@ import { TopBar } from "@/components/chrome";
 import { fmt, STATUS_LABEL } from "@/lib/format";
 import { Svg } from "@/components/icons";
 import OrderNewClient from "./_components/OrderNewClient";
+import { listDropSlots } from "@/lib/actions/slots";
+import { dayLabel } from "@/lib/slots";
 import { redirect } from "next/navigation";
 
 export default async function OrderNewPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
@@ -47,6 +49,11 @@ export default async function OrderNewPage({ searchParams }: { searchParams: Pro
 
   const rate = rates[serviceParam] || rates.washIron;
 
+  // Bookable drop-off windows for this student's campus (empty = feature unused here).
+  const slots = await listDropSlots();
+  const slotDayLabels: Record<string, string> = {};
+  for (const s of slots) slotDayLabels[s.dateStr] ||= dayLabel(s.dateStr);
+
   return (
     <div className="screen">
       <TopBar title="New order" sub="Declare what you'll bring" back="/c" />
@@ -59,6 +66,8 @@ export default async function OrderNewPage({ searchParams }: { searchParams: Pro
           gstPct={gstPct}
           expressEnabled={feat.express}
           reorderItems={reorderItems}
+          slots={slots}
+          slotDayLabels={slotDayLabels}
         />
       </div>
     </div>

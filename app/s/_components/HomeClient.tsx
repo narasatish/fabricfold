@@ -5,6 +5,7 @@ import { Svg } from "@/components/icons";
 import { Seg, Sheet, useToast } from "@/components/chrome";
 import { fmt, timeAgo, initials } from "@/lib/format";
 import { isOverdue } from "@/lib/money";
+import { dayLabel, hhmm, istDateStr, istMinutes } from "@/lib/slots";
 import { activateSubscription } from "@/lib/actions/subscription";
 import { registerStudent } from "@/lib/actions/admin";
 import { clockIn, clockOut } from "@/lib/actions/ops";
@@ -21,6 +22,7 @@ type Order = {
   paid: boolean;
   createdAt: number;
   receivedAt: number | null;
+  dropSlotAt: number | null;
   student: { id: string; name: string; phone: string };
 };
 
@@ -142,6 +144,11 @@ export default function StaffHomeClient({
             <div className="row gap8">
               {late && <span className="pill red">Late</span>}
               {o.express && <span className="pill amber">EXPRESS</span>}
+              {o.status === "draft" && o.dropSlotAt && (
+                <span className="pill gray" title="Booked drop-off window">
+                  <Svg name="clock" size={11} /> {dayLabel(istDateStr(o.dropSlotAt), Date.now())} {hhmm(istMinutes(o.dropSlotAt))}
+                </span>
+              )}
             </div>
           </div>
           <div className="muted mt4" style={{ fontSize: "13px" }}>

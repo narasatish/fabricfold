@@ -11,6 +11,8 @@ import {
   toggleFeature, saveCollege, deleteCollege, saveStaff, createPayslip,
 } from "@/lib/actions/admin";
 import { markErrorsSeen } from "@/lib/actions/ops";
+import { saveSlotWindow, toggleSlotWindow, deleteSlotWindow } from "@/lib/actions/slots";
+import { hhmm as slotTime } from "@/lib/slots"; // local `hhmm` below formats a timestamp — don't collide
 
 const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFold: "Wash & Fold", ironOnly: "Iron Only", dryClean: "Dry Clean" };
 type PlanBucket = { service: string; cycles: number; kgPerCycle: number };
@@ -32,8 +34,12 @@ type Props = {
   attendance: { staffId: string; name: string; todayIn: number | null; todayOut: number | null; daysThisMonth: number }[];
   month: string;
   errors: { id: string; kind: string; message: string; url: string | null; seen: boolean; at: number }[];
+  slotWindows: SlotWindowRow[];
   currentRole: number;
 };
+
+type SlotWindowRow = { id: string; collegeId: string; weekday: number; startMin: number; endMin: number; capacity: number; active: boolean };
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const ROLE_NAMES: Record<number, string> = { 1: "Counter", 2: "Manager", 3: "Admin", 4: "Owner" };
 const FEATURES: [string, string][] = [
@@ -42,13 +48,13 @@ const FEATURES: [string, string][] = [
   ["express", "Express (same-day)"], ["chat", "Chat & complaints"],
 ];
 
-export default function StaffAdminClient({ config, colleges, staff, payslips, plans, attendance, month, errors, currentRole }: Props) {
+export default function StaffAdminClient({ config, colleges, staff, payslips, plans, attendance, month, errors, slotWindows, currentRole }: Props) {
   const hhmm = (t: number) => new Date(t).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
   const unseenErrors = errors.filter((e) => !e.seen).length;
   const router = useRouter();
   const toast = useToast();
 
-  const [sheet, setSheet] = useState<null | "rates" | "plan" | "payment" | "settings" | "college" | "staff" | "payslip">(null);
+  const [sheet, setSheet] = useState<null | "rates" | "plan" | "payment" | "settings" | "college" | "staff" | "payslip" | "slot">(null);
   const [rates, setRates] = useState<Rates>(JSON.parse(JSON.stringify(config.rates)));
   const [gst, setGst] = useState(config.gstPct);
   const [gstOn, setGstOn] = useState(config.settings.gstEnabled !== false);
@@ -60,6 +66,8 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   const [colEdit, setColEdit] = useState<{ id?: string; name: string; address: string }>({ name: "", address: "" });
   const [stEdit, setStEdit] = useState<{ id?: string; name: string; phone: string; role: number }>({ name: "", phone: "", role: 1 });
   const [slip, setSlip] = useState({ staffId: staff[0]?.id || "", month: new Date().toISOString().slice(0, 7), basic: 0, allowances: 0, deductions: 0, postExpense: true });
+  const emptySlot = (collegeId: string) => ({ id: undefined as string | undefined, collegeId, weekday: 1, startMin: 540, endMin: 660, capacity: 15 });
+  const [slotEdit, setSlotEdit] = useState<ReturnType<typeof emptySlot>>(emptySlot(colleges[0]?.id || ""));
 
   const run = async (fn: () => Promise<{ ok: boolean; error?: string }>, okMsg: string) => {
     const r = await fn();
@@ -191,6 +199,40 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
                 </div>
               </button>
               <Switch on={p.active} onToggle={async () => { const r = await togglePlan(p.id); if (!r.ok) return toast("Failed", true); toast(`Plan ${r.active ? "enabled" : "disabled"}`); router.refresh(); }} />
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {/* Drop-off slot windows per college */}
+      <div className="sec-title mt20">Drop-off slots</div>
+      {colleges.map((c) => (
+        <div key={c.id} className="card pad mt10">
+          <div className="between">
+            <div className="h-sm">{c.name}</div>
+            <button className="btn xs" onClick={() => { setSlotEdit(emptySlot(c.id)); setSheet("slot"); }}>
+              <Svg name="plus" size={13} /> Add window
+            </button>
+          </div>
+          {slotWindows.filter((w) => w.collegeId === c.id).length === 0 && (
+            <div className="muted mt8" style={{ fontSize: "12.5px" }}>
+              No windows — students here just drop in any time (no slot picker shown).
+            </div>
+          )}
+          {slotWindows.filter((w) => w.collegeId === c.id).map((w) => (
+            <div key={w.id} className="between mt10" style={{ alignItems: "flex-start" }}>
+              <button
+                style={{ textAlign: "left", flex: 1 }}
+                onClick={() => { setSlotEdit({ id: w.id, collegeId: w.collegeId, weekday: w.weekday, startMin: w.startMin, endMin: w.endMin, capacity: w.capacity }); setSheet("slot"); }}
+              >
+                <div className="h-sm" style={{ opacity: w.active ? 1 : 0.45 }}>
+                  {WEEKDAYS[w.weekday]} · {slotTime(w.startMin)}–{slotTime(w.endMin)}
+                </div>
+                <div className="muted" style={{ fontSize: "12px", opacity: w.active ? 1 : 0.45 }}>
+                  up to {w.capacity} orders
+                </div>
+              </button>
+              <Switch on={w.active} onToggle={async () => { const r = await toggleSlotWindow(w.id); if (!r.ok) return toast("Failed", true); toast(`Window ${r.active ? "enabled" : "disabled"}`); router.refresh(); }} />
             </div>
           ))}
         </div>
@@ -391,6 +433,61 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
         >
           Create payslip
         </button>
+      </Sheet>
+
+      {/* Drop-off window sheet */}
+      <Sheet open={sheet === "slot"} onClose={() => setSheet(null)}>
+        <div className="h-md" style={{ padding: "0 4px 12px" }}>{slotEdit.id ? "Edit" : "Add"} drop-off window</div>
+        <div className="field">
+          <label>Day</label>
+          <select className="input" value={slotEdit.weekday} onChange={(e) => setSlotEdit({ ...slotEdit, weekday: Number(e.target.value) })}>
+            {WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+          </select>
+        </div>
+        <div className="row gap8">
+          <div className="field" style={{ flex: 1 }}>
+            <label>Starts</label>
+            <input
+              className="input" type="time" step={900}
+              value={`${String(Math.floor(slotEdit.startMin / 60)).padStart(2, "0")}:${String(slotEdit.startMin % 60).padStart(2, "0")}`}
+              onChange={(e) => { const [h, m] = e.target.value.split(":").map(Number); setSlotEdit({ ...slotEdit, startMin: h * 60 + m }); }}
+            />
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Ends</label>
+            <input
+              className="input" type="time" step={900}
+              value={`${String(Math.floor(slotEdit.endMin / 60)).padStart(2, "0")}:${String(slotEdit.endMin % 60).padStart(2, "0")}`}
+              onChange={(e) => { const [h, m] = e.target.value.split(":").map(Number); setSlotEdit({ ...slotEdit, endMin: h * 60 + m }); }}
+            />
+          </div>
+        </div>
+        <div className="field">
+          <label>Capacity — max orders in this window</label>
+          <input className="input" type="number" min={1} max={500} value={slotEdit.capacity} onChange={(e) => setSlotEdit({ ...slotEdit, capacity: Number(e.target.value) })} />
+        </div>
+        <div className="muted" style={{ fontSize: "12px", padding: "0 4px 12px" }}>
+          Once {slotEdit.capacity} orders are booked, students see this window as full and must pick another.
+        </div>
+        <button className="btn" onClick={() => run(() => saveSlotWindow(slotEdit), slotEdit.id ? "Window updated" : "Window added")}>
+          {slotEdit.id ? "Save window" : "Add window"}
+        </button>
+        {slotEdit.id && (
+          <button
+            className="btn sec mt10"
+            style={{ color: "var(--red)", background: "var(--red-soft)", border: "none" }}
+            onClick={async () => {
+              if (!confirm("Delete this window? Orders already booked into it keep their slot.")) return;
+              const r = await deleteSlotWindow(slotEdit.id!);
+              if (!r.ok) return toast("Failed", true);
+              toast("Window deleted");
+              setSheet(null);
+              router.refresh();
+            }}
+          >
+            <Svg name="trash" size={16} /> Delete window
+          </button>
+        )}
       </Sheet>
     </div>
   );

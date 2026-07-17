@@ -5,6 +5,7 @@
 import { db } from "../db";
 import { requireStudent, requireStaff } from "../auth";
 import { expressSurcharge, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill } from "../money";
+import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit } from "../notify";
 import { notifyOwner } from "../mail";
@@ -26,7 +27,7 @@ function bcast(o: { id: string; collegeId: string; studentId: string }, type = "
 }
 
 /* ---------- Customer: place order (draft to bring to the counter) ---------- */
-export async function placeOrder(input: { service: string; items: { label: string; qty: number }[]; express: boolean }) {
+export async function placeOrder(input: { service: string; items: { label: string; qty: number }[]; express: boolean; dropSlotAt?: string }) {
   const stu = await requireStudent();
   const cfg = await getConfig();
   const rate = cfg.rates[input.service];
@@ -44,6 +45,18 @@ export async function placeOrder(input: { service: string; items: { label: strin
     });
   if (!items.length) return { ok: false as const, error: "Add at least one piece" };
 
+  // Drop-off slot is optional; when given, re-validate server-side (existence,
+  // still in the future, and capacity) — never trust the client's pick.
+  let dropSlotAt: Date | null = null, dropSlotEndAt: Date | null = null;
+  if (input.dropSlotAt) {
+    try {
+      dropSlotEndAt = await assertSlotBookable(stu.collegeId, input.dropSlotAt);
+      dropSlotAt = new Date(input.dropSlotAt);
+    } catch (e) {
+      return { ok: false as const, error: (e as Error).message };
+    }
+  }
+
   const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
   const express = input.express && feat.express !== false;
   const surcharge = express ? expressSurcharge(sub) : 0;
@@ -55,6 +68,7 @@ export async function placeOrder(input: { service: string; items: { label: strin
       id: orderCode(), studentId: stu.id, collegeId: stu.collegeId, service: input.service,
       items, declaredPieces: items.reduce((s, i) => s + i.qty, 0),
       express, surcharge, status: "draft",
+      dropSlotAt, dropSlotEndAt,
       subtotal: sub, gst, gstPctSnapshot: cfg.gstEnabled ? cfg.gstPct : 0, total,
       timeline: { create: { status: "placed" } },
     },

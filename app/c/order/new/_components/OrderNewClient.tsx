@@ -9,6 +9,7 @@ import { placeOrder } from "@/lib/actions/orders";
 import { EXPRESS_PCT, expressSurcharge } from "@/lib/money";
 
 type EnabledService = { key: string; flag: string; label: string };
+type Slot = { startAt: string; endAt: string; dateStr: string; timeLabel: string; left: number; full: boolean };
 
 export default function OrderNewClient({
   enabledServices,
@@ -17,6 +18,8 @@ export default function OrderNewClient({
   gstPct,
   expressEnabled,
   reorderItems,
+  slots,
+  slotDayLabels,
 }: {
   enabledServices: EnabledService[];
   currentService: string;
@@ -24,6 +27,8 @@ export default function OrderNewClient({
   gstPct: number;
   expressEnabled: boolean;
   reorderItems: { label: string; qty: number }[];
+  slots: Slot[];
+  slotDayLabels: Record<string, string>;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -37,6 +42,7 @@ export default function OrderNewClient({
     return q;
   });
   const [express, setExpress] = useState(false);
+  const [dropSlotAt, setDropSlotAt] = useState<string>("");
   const [loading, setLoading] = useState(false);
 
   // Calculate totals
@@ -69,6 +75,7 @@ export default function OrderNewClient({
         .filter(([label]) => quantities[label] > 0)
         .map(([label]) => ({ label, qty: quantities[label] })),
       express,
+      dropSlotAt: dropSlotAt || undefined,
     });
     setLoading(false);
 
@@ -134,6 +141,59 @@ export default function OrderNewClient({
               </div>
             </div>
             <Switch on={express} onToggle={() => setExpress(!express)} />
+          </div>
+        </>
+      )}
+
+      {/* Drop-off slot — only shown when the campus has windows configured */}
+      {slots.length > 0 && (
+        <>
+          <div className="sec-title mt20">Drop-off slot</div>
+          <div className="muted" style={{ fontSize: "12.5px", padding: "0 4px 10px" }}>
+            Pick a window to bring your clothes in — skips the counter queue. Optional.
+          </div>
+          <div className="card pad">
+            {Object.entries(
+              slots.reduce<Record<string, Slot[]>>((acc, s) => {
+                (acc[s.dateStr] ||= []).push(s);
+                return acc;
+              }, {}),
+            ).map(([dateStr, daySlots]) => (
+              <div key={dateStr} style={{ marginBottom: 12 }}>
+                <div className="label" style={{ marginBottom: 8 }}>{slotDayLabels[dateStr] || dateStr}</div>
+                <div className="row wrap gap8">
+                  {daySlots.map((s) => {
+                    const selected = dropSlotAt === s.startAt;
+                    return (
+                      <button
+                        key={s.startAt}
+                        disabled={s.full}
+                        onClick={() => setDropSlotAt(selected ? "" : s.startAt)}
+                        className="card"
+                        style={{
+                          padding: "9px 12px", textAlign: "left", cursor: s.full ? "not-allowed" : "pointer",
+                          opacity: s.full ? 0.45 : 1,
+                          borderColor: selected ? "var(--teal)" : "var(--line)",
+                          background: selected ? "var(--teal-tint)" : "var(--card)",
+                        }}
+                      >
+                        <div className="h-sm" style={{ fontSize: 13, color: selected ? "var(--teal-dark)" : undefined }}>
+                          {s.timeLabel}
+                        </div>
+                        <div className="muted" style={{ fontSize: 11 }}>
+                          {s.full ? "Full" : `${s.left} left`}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            {dropSlotAt && (
+              <button className="btn xs sec" onClick={() => setDropSlotAt("")} style={{ width: "auto" }}>
+                Clear slot
+              </button>
+            )}
           </div>
         </>
       )}

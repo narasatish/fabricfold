@@ -23,6 +23,24 @@ model College {
   staff    Staff[]
   orders   Order[]
   plans    Plan[]
+  slots    SlotWindow[]
+}
+
+/* A recurring weekly drop-off window for one campus, e.g. Mon 09:00–11:00 cap 15.
+   Students book a concrete date against one of these; capacity caps how many
+   orders may be dropped in that window so the counter queue stays spread. */
+model SlotWindow {
+  id        String   @id @default(cuid())
+  collegeId String
+  college   College  @relation(fields: [collegeId], references: [id], onDelete: Cascade)
+  weekday   Int // 0=Sun .. 6=Sat (IST)
+  startMin  Int // minutes from midnight IST, e.g. 540 = 09:00
+  endMin    Int // e.g. 660 = 11:00
+  capacity  Int      @default(15)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([collegeId, weekday, active])
 }
 
 // Subscription plan offered by ONE college. A plan bundles one or more
@@ -130,6 +148,8 @@ model Order {
   ratingComment  String?
   ratedAt        DateTime?
   intakePhotos   Json? // storage keys of photos taken at drop-off (pre-existing damage)
+  dropSlotAt     DateTime? // booked drop-off window START (null = no slot booked)
+  dropSlotEndAt  DateTime? // booked drop-off window END
   cancelledAt    DateTime?
   createdAt      DateTime  @default(now())
   receivedAt     DateTime? // SLA: due = receivedAt + (express ? 1 : 2) days
@@ -141,6 +161,7 @@ model Order {
 
   @@index([studentId])
   @@index([collegeId, status])
+  @@index([collegeId, dropSlotAt]) // slot capacity counts + staff slot board
 }
 
 model OrderEvent {

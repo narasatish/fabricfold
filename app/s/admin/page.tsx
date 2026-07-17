@@ -23,6 +23,10 @@ export default async function StaffAdminPage() {
     db.attendance.groupBy({ by: ["staffId"], where: { date: { startsWith: month } }, _count: true }),
   ]);
 
+  const slotWindows = await db.slotWindow.findMany({
+    orderBy: [{ collegeId: "asc" }, { weekday: "asc" }, { startMin: "asc" }],
+  });
+
   const recentErrors = staff.role >= 4
     ? await db.errorLog.findMany({ orderBy: { at: "desc" }, take: 15 })
     : [];
@@ -54,6 +58,7 @@ export default async function StaffAdminPage() {
         month={month}
         payslips={payslips.map((p) => ({ id: p.id, number: p.number, month: p.month, net: N(p.net), staffName: p.staff.name }))}
         errors={recentErrors.map((e) => ({ id: e.id, kind: e.kind, message: e.message, url: e.url, seen: e.seen, at: e.at.getTime() }))}
+        slotWindows={slotWindows.map((w) => ({ id: w.id, collegeId: w.collegeId, weekday: w.weekday, startMin: w.startMin, endMin: w.endMin, capacity: w.capacity, active: w.active }))}
         currentRole={staff.role}
       />
     </div>

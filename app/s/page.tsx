@@ -62,6 +62,7 @@ export default async function StaffHomePage() {
     paid: o.paid,
     createdAt: o.createdAt.getTime(),
     receivedAt: o.receivedAt ? o.receivedAt.getTime() : null,
+    dropSlotAt: o.dropSlotAt ? o.dropSlotAt.getTime() : null,
     student: { id: o.student.id, name: o.student.name, phone: o.student.phone },
   }));
 

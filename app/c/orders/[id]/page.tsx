@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { fmt, timeAgo, dateStr, STATUS_LABEL } from "@/lib/format";
 import { orderDueAt } from "@/lib/money";
+import { dayLabel, hhmm, istDateStr, istMinutes } from "@/lib/slots";
 import Link from "next/link";
 import { Svg } from "@/components/icons";
 import { notFound } from "next/navigation";
@@ -59,6 +60,20 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             #{order.id}
           </span>
         </div>
+
+        {/* Booked drop-off window */}
+        {order.dropSlotAt && order.status === "draft" && (
+          <div className="card pad mt16" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ color: "var(--teal-dark)" }}><Svg name="clock" size={20} /></span>
+            <div>
+              <div className="muted" style={{ fontSize: "11.5px", textTransform: "uppercase", letterSpacing: ".04em" }}>Drop-off slot</div>
+              <div className="h-sm">
+                {dayLabel(istDateStr(order.dropSlotAt))} · {hhmm(istMinutes(order.dropSlotAt))}
+                {order.dropSlotEndAt ? `–${hhmm(istMinutes(order.dropSlotEndAt))}` : ""}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Draft warning */}
         {order.status === "draft" && (

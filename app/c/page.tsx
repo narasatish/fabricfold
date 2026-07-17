@@ -92,9 +92,12 @@ export default async function CustomerHome() {
                 background: "rgba(255,255,255,.15)",
                 display: "grid",
                 placeItems: "center",
+                overflow: "hidden", // belt-and-braces: never let the QR escape the chip
+                flex: "none",
               }}
             >
-              <Qr text={student.id} size={180} dark="#fff" light="transparent" />
+              {/* must fit the 52px chip — a larger size overflows the whole ID card */}
+              <Qr text={student.id} size={40} dark="#fff" light="transparent" />
             </div>
           </div>
           <div className="between" style={{ marginTop: "12px" }}>

@@ -24,7 +24,8 @@ export default function Privacy() {
           <p>
             This policy explains what personal data FabricFold collects when you use our app or website, why we collect
             it, who we share it with, and what control you have over it. It applies to the FabricFold customer app, the
-            FabricFold Android app, and fabricfold.in. We are the data fiduciary for this data.
+            FabricFold Android app, and fabricfold.in. FabricFold is operated by{" "}
+            <strong>FabricFold Laundry Solutions</strong>, Telangana, India, and we are the data fiduciary for this data.
           </p>
 
           <h2 className="m-h2">What we collect</h2>

@@ -1,0 +1,57 @@
+{
+  "packageId": "in.fabricfold.app",
+  "host": "fabricfold.in",
+  "name": "FabricFold — Campus Laundry",
+  "launcherName": "FabricFold",
+  "display": "standalone",
+  "themeColor": "#0e9271",
+  "themeColorDark": "#0e9271",
+  "navigationColor": "#0e9271",
+  "navigationColorDark": "#0e9271",
+  "navigationDividerColor": "#0e9271",
+  "navigationDividerColorDark": "#0e9271",
+  "backgroundColor": "#f4f7f5",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "https://fabricfold.in/icon-512.png",
+  "maskableIconUrl": "https://fabricfold.in/icon-maskable-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./upload-keystore.jks",
+    "alias": "upload"
+  },
+  "appVersionName": "1.0.0",
+  "appVersion": "1.0.0",
+  "appVersionCode": 1,
+  "shortcuts": [
+    {
+      "name": "New order",
+      "shortName": "New order",
+      "url": "/c/order/new",
+      "chosenIconUrl": "https://fabricfold.in/icon-192.png"
+    },
+    {
+      "name": "My orders",
+      "shortName": "Orders",
+      "url": "/c/orders",
+      "chosenIconUrl": "https://fabricfold.in/icon-192.png"
+    }
+  ],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://fabricfold.in/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://fabricfold.in/",
+  "minSdkVersion": 23,
+  "orientation": "portrait",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "appVersionCodeAuto": false
+}

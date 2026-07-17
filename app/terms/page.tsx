@@ -29,7 +29,9 @@ export default function Terms() {
 
           <h2 className="m-h2">1. Who we are, and who can use FabricFold</h2>
           <p>
-            FabricFold runs managed laundry counters at partner campuses and communities in Telangana, India. The service
+            FabricFold is operated by <strong>FabricFold Laundry Solutions</strong> (&ldquo;FabricFold&rdquo;,
+            &ldquo;we&rdquo;, &ldquo;us&rdquo;), and in these terms &ldquo;you&rdquo; means the person whose account
+            placed the order. We run managed laundry counters at partner campuses and communities in Telangana, India. The service
             is available only to students, residents and staff of a campus or community we operate at, and you must be 18
             or over to hold an account. We may ask you to prove you belong to that campus.
           </p>

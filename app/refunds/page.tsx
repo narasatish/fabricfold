@@ -23,7 +23,8 @@ export default function Refunds() {
         <div className="mx m-prose">
           <p>
             If we get your laundry wrong, we fix it. This page says exactly how — what we do, what we pay, how quickly,
-            and what to do if you&apos;re not happy with our answer. It sits alongside our{" "}
+            and what to do if you&apos;re not happy with our answer. It applies to services provided by{" "}
+            <strong>FabricFold Laundry Solutions</strong> and sits alongside our{" "}
             <a href="/terms">Terms &amp; Conditions</a>.
           </p>
 

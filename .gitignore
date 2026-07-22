@@ -30,3 +30,5 @@ android/assetlinks.json
 android/gradle-out.txt
 android/local.properties
 android-tmp/
+android/*.idsig
+android/gradle-apk.txt

@@ -7,6 +7,7 @@ import { fmt, upiLink } from "@/lib/format";
 import { Qr } from "@/components/qr";
 import { payOrder } from "@/lib/actions/orders";
 import { createGatewayOrder, confirmGatewayPayment } from "@/lib/actions/payments";
+import { simulateGatewayPayment } from "@/lib/actions/testing";
 
 declare global {
   interface Window { Razorpay?: new (opts: Record<string, unknown>) => { open: () => void }; }
@@ -25,7 +26,7 @@ function loadRazorpay(): Promise<boolean> {
 
 export default function PayClient({
   orderId, orderTotal, orderService, orderPieces, studentCredits,
-  paymentUpiId, paymentPayeeName, gatewayEnabled,
+  paymentUpiId, paymentPayeeName, gatewayEnabled, testPay,
 }: {
   orderId: string;
   orderTotal: number;
@@ -35,6 +36,7 @@ export default function PayClient({
   paymentUpiId: string;
   paymentPayeeName: string;
   gatewayEnabled: boolean;
+  testPay?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -140,6 +142,24 @@ export default function PayClient({
               <div style={{ flex: 1 }}>
                 <div className="h-sm">{loading ? "Opening…" : "Pay online"}</div>
                 <div className="muted" style={{ fontSize: "12.5px" }}>UPI · card · netbanking — instant confirmation</div>
+              </div>
+              <Svg name="chevR" size={18} />
+            </button>
+          )}
+          {!gatewayEnabled && testPay && (
+            <button className="card-btn" style={{ borderColor: "var(--amber)" }} disabled={loading}
+              onClick={async () => {
+                setLoading(true);
+                const r = await simulateGatewayPayment(orderId, applied > 0);
+                setLoading(false);
+                if (!r.ok) return toast(r.error || "Failed", true);
+                toast("Test payment successful");
+                router.push(`/c/orders/${orderId}`);
+              }}>
+              <div className="icon-tile"><Svg name="card" size={22} /></div>
+              <div style={{ flex: 1 }}>
+                <div className="h-sm" style={{ color: "var(--amber)" }}>{loading ? "Processing…" : "Simulate online payment (TEST)"}</div>
+                <div className="muted" style={{ fontSize: "12.5px" }}>Runs the real settle + invoice path — no card charged</div>
               </div>
               <Svg name="chevR" size={18} />
             </button>

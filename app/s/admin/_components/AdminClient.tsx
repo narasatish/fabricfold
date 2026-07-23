@@ -13,6 +13,7 @@ import {
 import { markErrorsSeen, syncSheetsNow } from "@/lib/actions/ops";
 import { saveSlotWindow, toggleSlotWindow, deleteSlotWindow } from "@/lib/actions/slots";
 import { hhmm as slotTime } from "@/lib/slots"; // local `hhmm` below formats a timestamp — don't collide
+import { TestOtpPanel } from "@/components/test-otp-panel";
 
 const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFold: "Wash & Fold", ironOnly: "Iron Only", dryClean: "Dry Clean" };
 type PlanBucket = { service: string; cycles: number; kgPerCycle: number };
@@ -86,6 +87,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
 
   return (
     <div className="pad">
+      {currentRole >= 4 && <TestOtpPanel />}
       {currentRole >= 4 && errors.length > 0 && (
         <>
           <div className="between" style={{ padding: "0 4px 10px" }}>

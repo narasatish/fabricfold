@@ -32,6 +32,7 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
           paymentUpiId={payment?.upiId || ""}
           paymentPayeeName={payment?.payeeName || "FabricFold"}
           gatewayEnabled={!!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET)}
+          testPay={process.env.TEST_TOOLS === "on"}
         />
       </div>
     </div>

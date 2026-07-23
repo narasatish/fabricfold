@@ -3,7 +3,8 @@
    rows ever cross into a Google Sheet (see lib/sheets.ts for the contract). */
 import { db } from "./db";
 import { computeReport, parsePeriod } from "./report";
-import { writeSheet, sheetsConfigured } from "./sheets";
+import { writeSheet, readSheet, sheetsConfigured } from "./sheets";
+import { audit } from "./notify";
 
 const N = (x: unknown) => Number(x || 0);
 const money = (n: number) => Math.round(n * 100) / 100;
@@ -12,11 +13,63 @@ function istDate(offsetDays = 0) {
   return new Date(Date.now() + 5.5 * 3600_000 - offsetDays * 86_400_000).toISOString().slice(0, 10);
 }
 
+/* ---- Config round-trip ----
+   The ONLY tab the app reads back from. The owner may edit prices / GST here and
+   the change is validated and applied to the live app. Deliberately excludes
+   orders, payments and invoices — those are the tamper-proof ledger and must
+   never be writable from a spreadsheet. Every applied change is audited. */
+async function applyConfigEdits(): Promise<string[]> {
+  const rows = await readSheet("Config");
+  if (!rows.length) return [];
+
+  const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
+  const rates = structuredClone(cfg.rates as Record<string, { label: string; items: [string, number][] }>);
+  const settings = { ...(cfg.settings as Record<string, unknown>) };
+  let gstPct = Number(cfg.gstPct);
+  const changes: string[] = [];
+
+  // Rows are: [Setting, Value]. We recognise a fixed, safe allow-list of keys.
+  for (const [rawKey, rawVal] of rows) {
+    const key = (rawKey || "").trim();
+    const val = (rawVal ?? "").toString().trim();
+    if (!key || val === "") continue;
+
+    if (key === "GST %") {
+      const n = Number(val);
+      if (Number.isFinite(n) && n >= 0 && n <= 28 && n !== gstPct) { changes.push(`GST ${gstPct}%→${n}%`); gstPct = n; }
+    } else if (key === "GST billing") {
+      const on = /^(on|yes|true|1)$/i.test(val);
+      if (on !== settings.gstEnabled) { changes.push(`GST billing ${on ? "ON" : "OFF"}`); settings.gstEnabled = on; }
+    } else {
+      // "<service> · <item>" price cells, e.g. "washIron · Regular garment"
+      const m = key.split("·").map((s) => s.trim());
+      if (m.length === 2 && rates[m[0]]) {
+        const items = rates[m[0]].items;
+        const idx = items.findIndex((it) => it[0] === m[1]);
+        const price = Number(val);
+        if (idx >= 0 && Number.isFinite(price) && price > 0 && price <= 100000 && price !== items[idx][1]) {
+          changes.push(`${m[0]}·${m[1]} ₹${items[idx][1]}→₹${price}`);
+          items[idx] = [items[idx][0], price];
+        }
+      }
+    }
+  }
+
+  if (changes.length) {
+    await db.appConfig.update({ where: { id: "main" }, data: { rates: rates as object, gstPct, settings: settings as object } });
+    await audit("Config edited via Sheet", changes.join("; ").slice(0, 480), "sheet");
+  }
+  return changes;
+}
+
 export async function runSheetsSync() {
   if (!sheetsConfigured()) {
     return { ok: false as const, error: "Google Sheets not configured — set GOOGLE_SA_EMAIL, GOOGLE_SA_PRIVATE_KEY, GOOGLE_SHEET_ID" };
   }
   const stamp = new Date(Date.now() + 5.5 * 3600_000).toISOString().replace("T", " ").slice(0, 16) + " IST";
+
+  // 1) Pull any owner edits from the Config tab and apply them (validated + audited).
+  const applied = await applyConfigEdits();
 
   /* ---- Live ---- */
   const today = await computeReport(parsePeriod({ p: "day" }));
@@ -110,5 +163,23 @@ export async function runSheetsSync() {
   }
   await writeSheet("Staff", staffRows);
 
-  return { ok: true as const, at: stamp, tabs: ["Live", "Daily", "Plans", "Staff"] };
+  /* ---- Config (editable) — the current live values, ready to change ---- */
+  const fresh = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
+  const fRates = fresh.rates as Record<string, { label: string; items: [string, number][] }>;
+  const fSettings = fresh.settings as Record<string, unknown>;
+  const cfgRows: (string | number)[][] = [
+    ["Setting", "Value", "← edit the Value column, then it applies on the next sync"],
+    ["GST %", Number(fresh.gstPct), "0–28"],
+    ["GST billing", fSettings.gstEnabled === false ? "off" : "on", "on / off"],
+    [],
+    ["PRICES (₹ per piece)", "", ""],
+  ];
+  for (const [svc, r] of Object.entries(fRates)) {
+    for (const [item, price] of r.items) {
+      cfgRows.push([`${svc} · ${item}`, price, r.label]);
+    }
+  }
+  await writeSheet("Config", cfgRows);
+
+  return { ok: true as const, at: stamp, tabs: ["Live", "Daily", "Plans", "Staff", "Config"], applied };
 }

@@ -46,6 +46,20 @@ async function accessToken(): Promise<string> {
   return ((await res.json()) as { access_token: string }).access_token;
 }
 
+/** Read a tab's values. Returns [] when the tab doesn't exist yet. */
+export async function readSheet(tab: string): Promise<string[][]> {
+  if (!sheetsConfigured()) return [];
+  const id = process.env.GOOGLE_SHEET_ID!;
+  const token = await accessToken();
+  const range = encodeURIComponent(`${tab}!A1:F200`);
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${range}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return []; // missing tab -> 400; treat as empty
+  const j = (await res.json()) as { values?: string[][] };
+  return j.values || [];
+}
+
 /** Overwrite a tab with `rows` (row 0 = headers). Creates the tab if missing. */
 export async function writeSheet(tab: string, rows: (string | number)[][]) {
   if (!sheetsConfigured()) return { ok: false as const, error: "Google Sheets not configured" };

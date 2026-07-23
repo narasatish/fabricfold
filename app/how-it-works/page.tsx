@@ -15,9 +15,24 @@ const STEPS = [
   ["Collect with your code", "The moment your laundry is ready, you get a notification and a 4-digit pickup code. Show the code at the counter, grab your clothes, done. Standard orders are ready in about 48 hours; same-day express is available."],
 ];
 
+/* FAQPage structured data — the answers here MUST match the visible <details>
+   text below verbatim, or Google will ignore (and can penalise) the markup. */
+const faqLd = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: [
+    { "@type": "Question", name: "Do I need to download an app?", acceptedAnswer: { "@type": "Answer", text: "No. FabricFold runs in your phone's web browser. You can add it to your home screen so it feels like an app, but there's nothing to install from an app store." } },
+    { "@type": "Question", name: "How do I sign up?", acceptedAnswer: { "@type": "Answer", text: "With your phone number. You'll get a one-time code by SMS, pick your campus or community, and you're in. No email or password to remember." } },
+    { "@type": "Question", name: "What if a garment is damaged or missing?", acceptedAnswer: { "@type": "Answer", text: "Every piece is QR-tagged at drop-off, so missing items are rare. If something is damaged or lost, our staff issue compensation as store credit (or cash, at a manager's discretion) after checking the order." } },
+    { "@type": "Question", name: "What if I'm not happy with the cleaning?", acceptedAnswer: { "@type": "Answer", text: "We'll re-do it free. Just tell the counter or raise it in the app — no forms, no argument." } },
+    { "@type": "Question", name: "How fast is it?", acceptedAnswer: { "@type": "Answer", text: "Standard orders come back in about 48 hours. Need it sooner? Same-day express is available for a small surcharge." } },
+  ],
+};
+
 export default function HowItWorks() {
   return (
     <MarketingShell active="/how-it-works">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqLd) }} />
       <header className="mx m-sec tight" style={{ textAlign: "center" }}>
         <span className="m-kicker">For students &amp; residents</span>
         <h1 className="m-h1" style={{ maxWidth: 760, margin: "18px auto 0" }}>From your room to clean clothes, in four steps</h1>

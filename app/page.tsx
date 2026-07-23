@@ -21,14 +21,28 @@ export const metadata: Metadata = {
 
 const jsonLd = {
   "@context": "https://schema.org",
-  "@type": "LocalBusiness",
+  // DryCleaningOrLaundry is the exact schema.org type for a laundry business —
+  // more specific than LocalBusiness, which helps local + service search.
+  "@type": "DryCleaningOrLaundry",
   name: "FabricFold",
+  legalName: "FabricFold Laundry Solutions",
   url: "https://fabricfold.in",
+  logo: "https://fabricfold.in/icon-512.png",
+  image: "https://fabricfold.in/icon-512.png",
   description: "Campus and community laundry & dry-cleaning service. On-site counter, QR-tagged garments, live order tracking, and digital records for colleges, hostels and communities.",
-  areaServed: "Telangana, India",
+  areaServed: { "@type": "State", name: "Telangana", containedInPlace: { "@type": "Country", name: "India" } },
+  address: { "@type": "PostalAddress", addressRegion: "Telangana", addressCountry: "IN" },
   telephone: "+918019121966",
   email: "support@fabricfold.in",
-  knowsAbout: ["campus laundry", "hostel laundry", "community laundry", "dry cleaning", "garment tracking"],
+  priceRange: "₹₹",
+  currenciesAccepted: "INR",
+  paymentAccepted: "Cash, UPI",
+  openingHoursSpecification: {
+    "@type": "OpeningHoursSpecification",
+    dayOfWeek: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+    opens: "09:00", closes: "19:00",
+  },
+  knowsAbout: ["campus laundry", "hostel laundry", "community laundry", "dry cleaning", "wash and fold", "wash and iron", "garment tracking"],
 };
 
 export default async function Root() {

@@ -15,7 +15,11 @@ export async function POST(req: Request) {
   const body = await req.text();
   const sig = req.headers.get("x-razorpay-signature") || "";
   const expected = crypto.createHmac("sha256", secret).update(body).digest("hex");
-  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+  // timingSafeEqual THROWS on a length mismatch, so a malformed/absent signature
+  // would 500 instead of 400. Compare lengths first, then constant-time.
+  const a = Buffer.from(sig, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
     return new Response("bad signature", { status: 400 });
   }
 

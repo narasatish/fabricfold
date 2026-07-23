@@ -10,7 +10,7 @@ import {
   saveRates, savePlan, togglePlan, savePaymentConfig, saveSettings,
   toggleFeature, saveCollege, deleteCollege, saveStaff, createPayslip,
 } from "@/lib/actions/admin";
-import { markErrorsSeen } from "@/lib/actions/ops";
+import { markErrorsSeen, syncSheetsNow } from "@/lib/actions/ops";
 import { saveSlotWindow, toggleSlotWindow, deleteSlotWindow } from "@/lib/actions/slots";
 import { hhmm as slotTime } from "@/lib/slots"; // local `hhmm` below formats a timestamp — don't collide
 
@@ -51,6 +51,7 @@ const FEATURES: [string, string][] = [
 export default function StaffAdminClient({ config, colleges, staff, payslips, plans, attendance, month, errors, slotWindows, currentRole }: Props) {
   const hhmm = (t: number) => new Date(t).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
   const unseenErrors = errors.filter((e) => !e.seen).length;
+  const [syncingSheet, setSyncingSheet] = useState(false);
   const router = useRouter();
   const toast = useToast();
 
@@ -129,6 +130,23 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
           <div className="grow"><div className="h-sm">Download full backup</div><div className="muted" style={{ fontSize: 12 }}>Complete data snapshot (JSON) · runs nightly automatically too</div></div>
           <Svg name="chevR" size={18} />
         </a>
+      )}
+
+      {currentRole >= 4 && (
+        <button
+          className="card-btn mt8"
+          disabled={syncingSheet}
+          onClick={async () => {
+            setSyncingSheet(true);
+            const r = await syncSheetsNow();
+            setSyncingSheet(false);
+            toast(r.ok ? "Google Sheet updated" : (r.error || "Sheet not configured"), !r.ok);
+          }}
+        >
+          <div className="icon-tile" style={{ background: "var(--teal-soft)", color: "var(--teal-dark)" }}><Svg name="list" size={20} /></div>
+          <div className="grow"><div className="h-sm">{syncingSheet ? "Syncing…" : "Sync to Google Sheet"}</div><div className="muted" style={{ fontSize: 12 }}>Business figures only · also auto-syncs every 10 min</div></div>
+          <Svg name="chevR" size={18} />
+        </button>
       )}
 
       {/* Colleges + feature flags */}

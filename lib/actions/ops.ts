@@ -62,6 +62,15 @@ export async function todayClose() {
   return rec ? { closed: true as const, variance: Number(rec.variance) } : { closed: false as const };
 }
 
+/* ---------- Google Sheets sync (Owner) ---------- */
+export async function syncSheetsNow() {
+  const st = await requireStaff(4);
+  const { runSheetsSync } = await import("../sheets-sync");
+  const r = await runSheetsSync();
+  if (r.ok) await audit("Sheets sync", `manual · ${r.tabs.join(", ")}`, st.id);
+  return r;
+}
+
 /* ---------- Error log (Owner) ---------- */
 export async function markErrorsSeen() {
   await requireStaff(4);

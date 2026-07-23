@@ -40,6 +40,7 @@ export default function MarketingShell({ active, children }: { active?: string; 
             <div>
               <h4>Company</h4>
               <Link href="/how-it-works">How it works</Link>
+              <Link href="/hostel-laundry">Hostel &amp; campus laundry guide</Link>
               <Link href="/partners">For colleges &amp; communities</Link>
               <Link href="/about">About us</Link>
               <Link href="/contact">Contact</Link>

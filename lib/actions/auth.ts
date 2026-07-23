@@ -1,6 +1,7 @@
 "use server";
 /* Phone-OTP auth. DEV_OTP fallback prints the code to the server console;
    swap `sendSms` for Twilio/MSG91 behind the same interface in production. */
+import crypto from "node:crypto";
 import { db } from "../db";
 import { createSession, clearSession, requireStudent } from "../auth";
 import { notifyOwner } from "../mail";
@@ -54,9 +55,31 @@ async function sendSms(phone: string, code: string) {
   console.log(`[SMS -> ${phone}] ${text}`);
 }
 
-function genCode() {
-  if (process.env.DEV_OTP) return process.env.DEV_OTP;
-  return String(Math.floor(100000 + Math.random() * 900000));
+/* Numbers allowed to use the fixed DEV_OTP code. Comma-separated, last 10
+   digits, e.g. TEST_PHONES="8019121966,7799661888". */
+function testPhones(): string[] {
+  return (process.env.TEST_PHONES || "")
+    .split(",")
+    .map((p) => p.replace(/\D/g, "").slice(-10))
+    .filter((p) => p.length === 10);
+}
+
+function randomCode() {
+  // crypto RNG — Math.random() is predictable and must never mint a login code.
+  return String(100000 + (crypto.randomInt(0, 900000)));
+}
+
+/* A fixed code is a master key for EVERY account, so it is only ever honoured
+   when the number is explicitly allowlisted. Outside production a bare DEV_OTP
+   still works for convenience; in production it is ignored entirely unless the
+   number is in TEST_PHONES. */
+function genCode(phone: string) {
+  const dev = process.env.DEV_OTP;
+  if (!dev) return randomCode();
+  const allowed = testPhones();
+  if (allowed.includes(phone)) return dev;
+  if (process.env.NODE_ENV !== "production" && allowed.length === 0) return dev;
+  return randomCode();
 }
 
 export async function requestOtp(phone: string, mode: "customer" | "staff") {
@@ -74,7 +97,7 @@ export async function requestOtp(phone: string, mode: "customer" | "staff") {
     return { ok: false as const, error: "OTP just sent — wait 30 seconds before requesting again" };
   }
 
-  const code = genCode();
+  const code = genCode(phone);
   await db.otp.deleteMany({ where: { phone, purpose: "login" } });
   await db.otp.create({ data: { phone, purpose: "login", code, expiresAt: new Date(Date.now() + OTP_TTL) } });
   await sendSms(phone, code);

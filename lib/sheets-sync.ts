@@ -27,6 +27,13 @@ async function applyConfigEdits(): Promise<string[]> {
   const settings = { ...(cfg.settings as Record<string, unknown>) };
   let gstPct = Number(cfg.gstPct);
   const changes: string[] = [];
+  const planUpdates: { id: string; price: number; label: string }[] = [];
+
+  // Plan lookups for "Plan · <College> · <Name>" rows
+  const [allColleges, allPlans] = await Promise.all([
+    db.college.findMany({ select: { id: true, name: true } }),
+    db.plan.findMany({ select: { id: true, name: true, price: true, collegeId: true } }),
+  ]);
 
   // Rows are: [Setting, Value]. We recognise a fixed, safe allow-list of keys.
   for (const [rawKey, rawVal] of rows) {
@@ -40,6 +47,18 @@ async function applyConfigEdits(): Promise<string[]> {
     } else if (key === "GST billing") {
       const on = /^(on|yes|true|1)$/i.test(val);
       if (on !== settings.gstEnabled) { changes.push(`GST billing ${on ? "ON" : "OFF"}`); settings.gstEnabled = on; }
+    } else if (/^plan\s*·/i.test(key)) {
+      // "Plan · <College> · <Plan name>" -> that plan's price
+      const parts = key.split("·").map((s) => s.trim());
+      if (parts.length === 3) {
+        const col = allColleges.find((c) => c.name.toLowerCase() === parts[1].toLowerCase());
+        const matches = col ? allPlans.filter((p) => p.collegeId === col.id && p.name.toLowerCase() === parts[2].toLowerCase()) : [];
+        const price = Number(val);
+        // exactly one match, sane bounds — ambiguity or unknown names are ignored
+        if (matches.length === 1 && Number.isFinite(price) && price >= 100 && price <= 100000 && price !== Number(matches[0].price)) {
+          planUpdates.push({ id: matches[0].id, price, label: `${parts[1]}·${parts[2]} ₹${Number(matches[0].price)}→₹${price}` });
+        }
+      }
     } else {
       // "<service> · <item>" price cells, e.g. "washIron · Regular garment"
       const m = key.split("·").map((s) => s.trim());
@@ -57,8 +76,12 @@ async function applyConfigEdits(): Promise<string[]> {
 
   if (changes.length) {
     await db.appConfig.update({ where: { id: "main" }, data: { rates: rates as object, gstPct, settings: settings as object } });
-    await audit("Config edited via Sheet", changes.join("; ").slice(0, 480), "sheet");
   }
+  for (const u of planUpdates) {
+    await db.plan.update({ where: { id: u.id }, data: { price: u.price } });
+    changes.push(u.label);
+  }
+  if (changes.length) await audit("Config edited via Sheet", changes.join("; ").slice(0, 480), "sheet");
   return changes;
 }
 
@@ -178,6 +201,11 @@ export async function runSheetsSync() {
     for (const [item, price] of r.items) {
       cfgRows.push([`${svc} · ${item}`, price, r.label]);
     }
+  }
+  cfgRows.push([], ["PLAN PRICES (₹ per plan)", "", ""]);
+  const freshPlans = await db.plan.findMany({ select: { name: true, price: true, collegeId: true, active: true } });
+  for (const p of freshPlans) {
+    cfgRows.push([`Plan · ${colName(p.collegeId)} · ${p.name}`, N(p.price), p.active ? "active" : "inactive"]);
   }
   await writeSheet("Config", cfgRows);
 

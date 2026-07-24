@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
+import SignOut from "../_components/SignOut";
 import StaffAdminClient from "./_components/AdminClient";
 
 export default async function StaffAdminPage() {
@@ -34,7 +35,7 @@ export default async function StaffAdminPage() {
   const N = (x: unknown) => Number(x || 0);
   return (
     <div className="screen">
-      <TopBar title="Admin" sub={staff.role >= 4 ? "Owner" : "Admin"} />
+      <TopBar title="Admin" sub={staff.role >= 4 ? "Owner" : "Admin"} right={<SignOut />} />
       <StaffAdminClient
         config={{
           gstPct: N(cfg.gstPct),

@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import StaffHomeClient from "./_components/HomeClient";
+import SignOut from "./_components/SignOut";
 
 export default async function StaffHomePage() {
   const s = await getSession();
@@ -68,7 +69,7 @@ export default async function StaffHomePage() {
 
   return (
     <div className="screen">
-      <TopBar title="Counter" sub={`Welcome, ${staff.name.split(" ")[0]}`} />
+      <TopBar title="Counter" sub={`Welcome, ${staff.name.split(" ")[0]}`} right={<SignOut />} />
       <StaffHomeClient
         staff={{ name: staff.name, role: staff.role }}
         orders={plainOrders}

@@ -146,7 +146,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
           }}
         >
           <div className="icon-tile" style={{ background: "var(--teal-soft)", color: "var(--teal-dark)" }}><Svg name="list" size={20} /></div>
-          <div className="grow"><div className="h-sm">{syncingSheet ? "Syncing…" : "Sync to Google Sheet"}</div><div className="muted" style={{ fontSize: 12 }}>Business figures only · also auto-syncs every 10 min</div></div>
+          <div className="grow"><div className="h-sm">{syncingSheet ? "Syncing…" : "Sync to Google Sheet"}</div><div className="muted" style={{ fontSize: 12 }}>Business figures only · also auto-syncs daily at 9pm IST</div></div>
           <Svg name="chevR" size={18} />
         </button>
       )}

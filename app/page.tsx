@@ -1,6 +1,4 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth";
 import Home from "./_components/marketing/Home";
 
 export const metadata: Metadata = {
@@ -45,10 +43,12 @@ const jsonLd = {
   knowsAbout: ["campus laundry", "hostel laundry", "community laundry", "dry cleaning", "wash and fold", "wash and iron", "garment tracking"],
 };
 
-export default async function Root() {
-  const s = await getSession();
-  if (s?.mode === "customer") redirect("/c");
-  if (s?.mode === "staff") redirect("/s");
+/* fabricfold.in always shows the marketing site — even for a logged-in staff or
+   customer. The app is reached via the "Open app" button (which /login forwards
+   to /c or /s when a session exists). Previously this redirected logged-in users
+   straight into the app, so the owner's own device opened the staff console
+   instead of the public website. */
+export default function Root() {
   return (
     <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />

@@ -2,7 +2,7 @@
   "name": "FabricFold — Campus Laundry",
   "short_name": "FabricFold",
   "description": "Book, track and collect your campus laundry from your phone.",
-  "start_url": "/",
+  "start_url": "/login",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",

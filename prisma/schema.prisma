@@ -14,10 +14,11 @@ datasource db {
 
 // ───────────── Org ─────────────
 model College {
-  id       String    @id @default(cuid())
-  name     String
-  address  String    @default("")
-  active   Boolean   @default(true)
+  id            String    @id @default(cuid())
+  name          String
+  address       String    @default("")
+  active        Boolean   @default(true)
+  closedWeekday Int? // this college's fixed weekly holiday, 0=Sun..6=Sat; null = none
   features Json // per-college flags: svc_wash, svc_iron, svc_dryclean, svc_washfold, subscriptions, credits, express, chat
   students Student[]
   staff    Staff[]
@@ -69,6 +70,7 @@ model Student {
   college        College  @relation(fields: [collegeId], references: [id])
   credits        Decimal  @default(0)
   lifetimePieces Int      @default(0)
+  washDay        Int? // assigned weekly drop-off day, 0=Sun..6=Sat; spreads load evenly across the week (soft guidance, not enforced)
   createdAt      DateTime @default(now())
 
   subscription  Subscription?

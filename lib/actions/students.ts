@@ -3,6 +3,7 @@
 import { db } from "../db";
 import { requireStaff } from "../auth";
 import { audit } from "../notify";
+import { washDayDistribution } from "../washday-server";
 
 const rid = () => String(Math.floor(100000 + Math.random() * 900000));
 async function uniqueId() {
@@ -34,6 +35,19 @@ export async function bulkRegisterStudents(text: string, collegeId: string) {
   if (!lines.length) return { ok: false as const, error: "Paste at least one student" };
   if (lines.length > 500) return { ok: false as const, error: "Please import 500 or fewer at a time" };
 
+  // Wash-day spread: start from this college's CURRENT distribution (not a
+  // fresh count), so a bulk import continues the round-robin rather than
+  // resetting it — otherwise every batch would pile onto the same weekdays.
+  const closedWeekday = (await db.college.findUnique({ where: { id: collegeId }, select: { closedWeekday: true } }))?.closedWeekday ?? null;
+  const load = await washDayDistribution(collegeId); // index 0-6 -> count
+  const openDays = [0, 1, 2, 3, 4, 5, 6].filter((d) => d !== closedWeekday);
+  const nextDay = () => {
+    let best = openDays[0], bestCount = load[best];
+    for (const d of openDays) if (load[d] < bestCount) { best = d; bestCount = load[d]; }
+    load[best]++; // reserve it in-memory so the next student in this batch gets a different day
+    return best;
+  };
+
   let created = 0;
   const skipped: { line: string; reason: string }[] = [];
   const seen = new Set<string>();
@@ -43,7 +57,7 @@ export async function bulkRegisterStudents(text: string, collegeId: string) {
     if (seen.has(phone)) { skipped.push({ line, reason: "duplicate in list" }); continue; }
     seen.add(phone);
     if (await db.student.findUnique({ where: { phone } })) { skipped.push({ line, reason: "already registered" }); continue; }
-    await db.student.create({ data: { id: await uniqueId(), phone, name, collegeId } });
+    await db.student.create({ data: { id: await uniqueId(), phone, name, collegeId, washDay: nextDay() } });
     created++;
   }
   await audit("Bulk student import", `${created} added to ${college.name}${skipped.length ? `, ${skipped.length} skipped` : ""}`, st.id);

@@ -6,6 +6,7 @@ import { requireStaff } from "../auth";
 import { audit } from "../notify";
 import { publish } from "../realtime";
 import { notifyOwner } from "../mail";
+import { assignWashDay } from "../washday-server";
 
 /* ----- Register a student at the counter (any staff) -----
    Students cannot self-register — this is the ONLY way a student account is
@@ -28,6 +29,9 @@ export async function registerStudent(input: { name: string; phone: string; coll
     if (!(await db.student.findUnique({ where: { id } }))) break;
   }
   const stu = await db.student.create({ data: { id, phone, name, collegeId: college.id } });
+  // Assign a wash day now, spreading load evenly across the campus's week
+  // (soft guidance — shown to the student, not enforced at drop-off).
+  await assignWashDay(stu.id, college.id);
   await audit("Student registered", `${name} · +91 ${phone} · ${college.name}`, st.id);
   void notifyOwner("New student registered", `${name} (+91 ${phone}) registered at the counter (${college.name}) by ${st.name} — ID ${stu.id}.`);
   return { ok: true as const, id: stu.id };
@@ -122,15 +126,16 @@ export async function toggleFeature(collegeId: string, key: string) {
 
 const DEFAULT_FEATURES = { svc_wash: true, svc_iron: true, svc_dryclean: true, subscriptions: true, credits: true, express: false, chat: true };
 
-export async function saveCollege(input: { id?: string; name: string; address: string }) {
+export async function saveCollege(input: { id?: string; name: string; address: string; closedWeekday?: number | null }) {
   const st = await requireStaff(4); // Owner only add/edit
   const name = input.name.trim();
   if (!name) return { ok: false as const, error: "Name required" };
+  const closedWeekday = input.closedWeekday === undefined || input.closedWeekday === null ? null : Number(input.closedWeekday);
   if (input.id) {
-    await db.college.update({ where: { id: input.id }, data: { name, address: input.address.trim() } });
+    await db.college.update({ where: { id: input.id }, data: { name, address: input.address.trim(), closedWeekday } });
     await audit("College updated", name, st.id);
   } else {
-    await db.college.create({ data: { name, address: input.address.trim(), features: DEFAULT_FEATURES } });
+    await db.college.create({ data: { name, address: input.address.trim(), closedWeekday, features: DEFAULT_FEATURES } });
     await audit("College added", name, st.id);
   }
   return { ok: true as const };

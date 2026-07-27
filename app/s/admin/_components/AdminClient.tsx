@@ -14,6 +14,7 @@ import { markErrorsSeen, syncSheetsNow } from "@/lib/actions/ops";
 import { saveSlotWindow, toggleSlotWindow, deleteSlotWindow } from "@/lib/actions/slots";
 import { hhmm as slotTime } from "@/lib/slots"; // local `hhmm` below formats a timestamp — don't collide
 import { TestOtpPanel } from "@/components/test-otp-panel";
+import { WEEKDAY_NAMES, WEEKDAY_SHORT } from "@/lib/washday";
 
 const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFold: "Wash & Fold", ironOnly: "Iron Only", dryClean: "Dry Clean" };
 type PlanBucket = { service: string; cycles: number; kgPerCycle: number };
@@ -28,7 +29,8 @@ type Props = {
     payment: { upiId: string; payeeName: string; bankName: string; accountName: string; accountNo: string; ifsc: string; gatewayKey: string };
     settings: { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number; gstEnabled?: boolean; garmentTagsEnabled?: boolean };
   };
-  colleges: { id: string; name: string; address: string; features: Record<string, boolean> }[];
+  colleges: { id: string; name: string; address: string; closedWeekday: number | null; features: Record<string, boolean> }[];
+  washDayByCollege: Record<string, number[]>;
   staff: { id: string; name: string; phone: string; role: number; collegeId: string | null }[];
   payslips: { id: string; number: string; month: string; net: number; staffName: string }[];
   plans: PlanRow[];
@@ -49,7 +51,7 @@ const FEATURES: [string, string][] = [
   ["express", "Express (same-day)"], ["chat", "Chat & complaints"],
 ];
 
-export default function StaffAdminClient({ config, colleges, staff, payslips, plans, attendance, month, errors, slotWindows, currentRole }: Props) {
+export default function StaffAdminClient({ config, colleges, staff, payslips, plans, attendance, month, errors, slotWindows, washDayByCollege, currentRole }: Props) {
   const hhmm = (t: number) => new Date(t).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
   const unseenErrors = errors.filter((e) => !e.seen).length;
   const [syncingSheet, setSyncingSheet] = useState(false);
@@ -65,7 +67,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   const [planEdit, setPlanEdit] = useState<ReturnType<typeof emptyPlan>>(emptyPlan(colleges[0]?.id || ""));
   const [pay, setPay] = useState({ ...config.payment });
   const [settings, setSettings] = useState({ reportEmail: config.settings.reportEmail || "", dailyEmail: !!config.settings.dailyEmail, sendHour: config.settings.sendHour ?? 21, openingFloat: config.settings.openingFloat ?? 0, garmentTagsEnabled: config.settings.garmentTagsEnabled === true });
-  const [colEdit, setColEdit] = useState<{ id?: string; name: string; address: string }>({ name: "", address: "" });
+  const [colEdit, setColEdit] = useState<{ id?: string; name: string; address: string; closedWeekday: number | null }>({ name: "", address: "", closedWeekday: null });
   const [stEdit, setStEdit] = useState<{ id?: string; name: string; phone: string; role: number }>({ name: "", phone: "", role: 1 });
   const [slip, setSlip] = useState({ staffId: staff[0]?.id || "", month: new Date().toISOString().slice(0, 7), basic: 0, allowances: 0, deductions: 0, postExpense: true });
   const emptySlot = (collegeId: string) => ({ id: undefined as string | undefined, collegeId, weekday: 1, startMin: 540, endMin: 660, capacity: 15 });
@@ -158,13 +160,15 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
           <div className="between">
             <div>
               <div className="h-sm">{c.name}</div>
-              <div className="muted" style={{ fontSize: 12 }}>{c.address}</div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                {c.address}{c.closedWeekday !== null ? ` · ${WEEKDAY_NAMES[c.closedWeekday]}s closed` : ""}
+              </div>
             </div>
             <div className="row gap6">
               <a className="btn xs sec" href={`/api/export/college-statement?collegeId=${c.id}&m=${month}`} target="_blank">Statement</a>
               {currentRole >= 4 && (
                 <>
-                  <button className="btn xs sec" onClick={() => { setColEdit({ id: c.id, name: c.name, address: c.address }); setSheet("college"); }}><Svg name="edit" size={13} /></button>
+                  <button className="btn xs sec" onClick={() => { setColEdit({ id: c.id, name: c.name, address: c.address, closedWeekday: c.closedWeekday }); setSheet("college"); }}><Svg name="edit" size={13} /></button>
                   {colleges.length > 1 && (
                     <button className="btn xs sec" style={{ color: "var(--red)" }} onClick={() => { if (confirm(`Remove ${c.name}?`)) run(() => deleteCollege(c.id), "College removed"); }}><Svg name="trash" size={13} /></button>
                   )}
@@ -190,10 +194,40 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
         </div>
       ))}
       {currentRole >= 4 && (
-        <button className="btn ghost mt12" onClick={() => { setColEdit({ name: "", address: "" }); setSheet("college"); }}>
+        <button className="btn ghost mt12" onClick={() => { setColEdit({ name: "", address: "", closedWeekday: null }); setSheet("college"); }}>
           <Svg name="plus" size={17} /> Add college
         </button>
       )}
+
+      {/* Wash-day spread — target quota vs. actual distribution, recalculated
+          from whoever is actually registered right now (not a fixed headcount) */}
+      <div className="sec-title mt20">Wash-day spread</div>
+      {colleges.map((c) => {
+        const dist = washDayByCollege[c.id] || new Array(7).fill(0);
+        const openDays = [0, 1, 2, 3, 4, 5, 6].filter((d) => d !== c.closedWeekday);
+        const total = dist.reduce((s, n) => s + n, 0);
+        const target = openDays.length ? Math.ceil(total / openDays.length) : 0;
+        return (
+          <div key={c.id} className="card pad mt10">
+            <div className="between">
+              <div className="h-sm">{c.name}</div>
+              <span className="pill gray" style={{ fontSize: 11 }}>{total} assigned · target ~{target}/day</span>
+            </div>
+            <div className="row gap6 mt10" style={{ flexWrap: "wrap" }}>
+              {openDays.map((d) => {
+                const n = dist[d];
+                const over = target > 0 && n > target * 1.15;
+                return (
+                  <div key={d} className="card" style={{ padding: "8px 12px", textAlign: "center", minWidth: 64, borderColor: over ? "var(--amber)" : undefined }}>
+                    <div className="muted" style={{ fontSize: 11 }}>{WEEKDAY_SHORT[d]}</div>
+                    <div className="h-sm" style={{ color: over ? "var(--amber)" : undefined }}>{n}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
 
       {/* Subscription plans per college */}
       <div className="sec-title mt20">Subscription plans</div>
@@ -404,6 +438,17 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
         <div className="h-md" style={{ padding: "0 4px 12px" }}>{colEdit.id ? "Edit college" : "Add college"}</div>
         <div className="field"><label>Name</label><input className="input" value={colEdit.name} onChange={(e) => setColEdit({ ...colEdit, name: e.target.value })} /></div>
         <div className="field"><label>Address</label><input className="input" value={colEdit.address} onChange={(e) => setColEdit({ ...colEdit, address: e.target.value })} /></div>
+        <div className="field">
+          <label>Weekly holiday (closed)</label>
+          <select
+            className="input"
+            value={colEdit.closedWeekday === null ? "" : colEdit.closedWeekday}
+            onChange={(e) => setColEdit({ ...colEdit, closedWeekday: e.target.value === "" ? null : Number(e.target.value) })}
+          >
+            <option value="">None</option>
+            {WEEKDAY_NAMES.map((n, i) => <option key={i} value={i}>{n}</option>)}
+          </select>
+        </div>
         <button className="btn" onClick={() => run(() => saveCollege(colEdit), "College saved")}>{colEdit.id ? "Save" : "Create college"}</button>
       </Sheet>
 

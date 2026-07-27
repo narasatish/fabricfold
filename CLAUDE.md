@@ -2,7 +2,7 @@
 
 Campus laundry platform. Customer app `/c` + staff app `/s`. Read `HANDOFF.md` before non-trivial work.
 
-- Stack: Next.js 16 (async cookies/params, Turbopack) + TS + Prisma 7. LIVE on Supabase Postgres (project atbmrnplttnbssgwhrkl, Session Pooler/IPv4). lib/db.ts + seed.ts auto-pick the adapter from DATABASE_URL: postgres:// → PrismaPg (prod), file: → better-sqlite3 (legacy dev). Schema provider is postgresql. Money tests run in an isolated `ff_test` schema on the same DB.
+- Stack: Next.js 16 (async cookies/params, Turbopack) + TS + Prisma 7. LIVE on Supabase Postgres (project vhwjdnjsruuarcoqduuu, Mumbai/ap-south-1, Session Pooler/IPv4). Migrated from the original Sydney project (atbmrnplttnbssgwhrkl, now rollback-only) — Vercel compute region moved from syd1 to bom1 to match. lib/db.ts + seed.ts auto-pick the adapter from DATABASE_URL: postgres:// → PrismaPg (prod), file: → better-sqlite3 (legacy dev). Schema provider is postgresql. Money tests run in an isolated `ff_test` schema on the same DB.
 - Copy/business rules: the prototype `C:\Users\naras\Downloads\ff_design\design_handoff_fabricfold\FabricFold.html` + its README. UI is now design-system v2 (owner-approved restyle, Jul 2026): tokens + motion system live in app/globals.css — keep the class contract, don't reintroduce prototype-flat styles.
 - Money rules are sacred: GST is payment-method driven (UPI→invoice, cash only w/ staff override, credit never); per-FY gap-free numbering via FySequence; refunds→proportional credit notes. Tests: `npm test` (must stay green).
 - Never pass Prisma objects (Decimal) to client components — serialize to plain numbers in the page.

@@ -17,6 +17,7 @@ import {
   scanTag,
 } from "@/lib/actions/orders";
 import { submitCompensation } from "@/lib/actions/credits";
+import { WEEKDAY_NAMES, isOffWashDay } from "@/lib/washday";
 
 type Order = {
   id: string;
@@ -52,6 +53,7 @@ type Order = {
   received: number;
   student: {
     id: string; name: string; phone: string; credits: number; lifetimePieces: number;
+    washDay: number | null;
     subscription: { active: boolean; cyclesTotal: number; cyclesUsed: number; kgPerCycle: number } | null;
   };
   college: { id: string; name: string } | null;
@@ -500,6 +502,16 @@ export default function StaffOrderClient({
       <Sheet open={showAcceptSheet} onClose={() => setShowAcceptSheet(false)}>
         <div className="pad">
           <h2 style={{ marginBottom: "16px" }}>Accept order</h2>
+          {isOffWashDay(order.student.washDay) && (
+            <div className="card pad mt12" style={{ background: "var(--amber-soft)", borderColor: "#f2e2c4", marginBottom: "16px" }}>
+              <div className="row gap8">
+                <span style={{ color: "var(--amber)" }}><Svg name="alert" size={18} /></span>
+                <span style={{ color: "var(--amber)", fontSize: "12.5px" }}>
+                  Heads up — {order.student.name}&apos;s usual wash day is {WEEKDAY_NAMES[order.student.washDay as number]}. Fine to accept anyway, just flagging it.
+                </span>
+              </div>
+            </div>
+          )}
           <div className="field">
             <label>Weight (kg)</label>
             <input

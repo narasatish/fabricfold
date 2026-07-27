@@ -6,6 +6,7 @@ import { fmt, timeAgo, dateStr, loyaltyBadge, STATUS_LABEL } from "@/lib/format"
 import Link from "next/link";
 import { Qr } from "@/components/qr";
 import HomeClient from "./_components/HomeClient";
+import { WEEKDAY_NAMES } from "@/lib/washday";
 
 export default async function CustomerHome() {
   const student = await requireStudent();
@@ -107,6 +108,17 @@ export default async function CustomerHome() {
             </span>
           </div>
         </div>
+
+        {/* Wash day — soft guidance only, spreads the counter's daily load evenly */}
+        {student.washDay !== null && student.washDay !== undefined && (
+          <div className="card pad mt12" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ color: "var(--teal-dark)" }}><Svg name="clock" size={20} /></span>
+            <div>
+              <div className="muted" style={{ fontSize: "11.5px", textTransform: "uppercase", letterSpacing: ".04em" }}>Your wash day</div>
+              <div className="h-sm">{WEEKDAY_NAMES[student.washDay]}</div>
+            </div>
+          </div>
+        )}
 
         {/* Subscription expiry warning */}
         {subExpiryWarning && (

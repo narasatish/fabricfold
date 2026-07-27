@@ -64,7 +64,9 @@ describe("students cannot self-register", () => {
 
   it("passing a name/collegeId payload (the old registration shape) does NOT create an account", async () => {
     const code = await mkOtp(NEW_NUMBER);
-    // @ts-expect-error - old call shape some stale client bundle might still send
+    // The 4th param is kept in the signature for stale client bundles, but the
+    // server ignores it for registration purposes — this call shape is
+    // type-valid, it just must not actually create an account.
     const r = await auth.verifyOtp(NEW_NUMBER, code, "customer", { name: "Sneaky", collegeId: "reg-test-college" });
     expect(r.ok).toBe(false);
     expect(await db.student.findUnique({ where: { phone: NEW_NUMBER } })).toBeNull();

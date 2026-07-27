@@ -32,6 +32,17 @@ export default async function StaffAdminPage() {
     ? await db.errorLog.findMany({ orderBy: { at: "desc" }, take: 15 })
     : [];
 
+  // Wash-day spread: per-college distribution of assigned days + a live
+  // target (total students ÷ open working days), so the admin can see the
+  // quota and the actual spread side by side — recalculated from whoever is
+  // actually registered right now, never a fixed headcount.
+  const washDayCounts = await db.student.groupBy({ by: ["collegeId", "washDay"], where: { washDay: { not: null } }, _count: true });
+  const washDayByCollege: Record<string, number[]> = {};
+  for (const c of colleges) washDayByCollege[c.id] = new Array(7).fill(0);
+  for (const row of washDayCounts) {
+    if (row.washDay !== null && washDayByCollege[row.collegeId]) washDayByCollege[row.collegeId][row.washDay] = row._count;
+  }
+
   const N = (x: unknown) => Number(x || 0);
   return (
     <div className="screen">
@@ -44,7 +55,8 @@ export default async function StaffAdminPage() {
           payment: cfg.payment as { upiId: string; payeeName: string; bankName: string; accountName: string; accountNo: string; ifsc: string; gatewayKey: string },
           settings: cfg.settings as { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number; garmentTagsEnabled?: boolean },
         }}
-        colleges={colleges.map((c) => ({ id: c.id, name: c.name, address: c.address, features: c.features as Record<string, boolean> }))}
+        colleges={colleges.map((c) => ({ id: c.id, name: c.name, address: c.address, closedWeekday: c.closedWeekday, features: c.features as Record<string, boolean> }))}
+        washDayByCollege={washDayByCollege}
         staff={staffList.map((x) => ({ id: x.id, name: x.name, phone: x.phone, role: x.role, collegeId: x.collegeId }))}
         plans={plans.map((p) => ({ id: p.id, collegeId: p.collegeId, name: p.name, price: N(p.price), gstFree: p.gstFree, active: p.active, buckets: p.buckets as { service: string; cycles: number; kgPerCycle: number }[] }))}
         attendance={staffList.map((x) => {

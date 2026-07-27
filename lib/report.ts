@@ -115,3 +115,49 @@ export async function reportText(p: Period) {
     `Complaints: ${r.complaints.length}`,
   ].join("\n");
 }
+
+/** Point-in-time snapshot — not period-scoped, always "right now": the current
+    order backlog and open complaints, regardless of when they were created. */
+export async function currentBacklog() {
+  const [inProgress, ready, openComplaints] = await Promise.all([
+    db.order.count({ where: { status: { in: ["received", "processing"] } } }),
+    db.order.count({ where: { status: "ready" } }),
+    db.complaint.count({ where: { status: "open" } }),
+  ]);
+  return { inProgress, ready, pending: inProgress + ready, openComplaints };
+}
+
+/** The actual daily owner email: today + this week + this month + the current
+    backlog snapshot, all in one message — so the owner sees today's activity
+    and the wider trend without opening the app. */
+export async function dailyEmailReport() {
+  const [backlog, today, week, month] = await Promise.all([
+    currentBacklog(),
+    computeReport(parsePeriod({ p: "day" })),
+    computeReport(parsePeriod({ p: "week" })),
+    computeReport(parsePeriod({ p: "month" })),
+  ]);
+  const f = (n: number) => "Rs " + n.toLocaleString("en-IN");
+  const todayLabel = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+
+  const section = (label: string, r: Awaited<ReturnType<typeof computeReport>>) => [
+    label,
+    `Orders received: ${r.ordersIn}  Completed: ${r.ordersDone}  Collected: ${f(r.total)}  Complaints: ${r.complaints.length}`,
+  ].join("\n");
+
+  return [
+    `FabricFold — Daily Report — ${todayLabel}`,
+    ``,
+    `RIGHT NOW`,
+    `In progress: ${backlog.inProgress}  Ready to collect: ${backlog.ready}  Pending total: ${backlog.pending}  Open complaints: ${backlog.openComplaints}`,
+    ``,
+    section("TODAY", today),
+    ``,
+    section("THIS WEEK", week),
+    ``,
+    section("THIS MONTH", month),
+    ``,
+    `Cash: ${f(today.cash)}  UPI: ${f(today.upi)}  Credits: ${f(today.credit)}  (today)`,
+    `GST collected (today): ${f(today.gstCollected)}  Net GST payable (month): ${f(month.netGst)}`,
+  ].join("\n");
+}

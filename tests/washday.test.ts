@@ -1,0 +1,106 @@
+/* Wash-day allocation tests — proves the round-robin spread and the pure
+   off-day check, against the isolated ff_test schema. */
+import "dotenv/config";
+import { beforeAll, afterEach, describe, expect, it } from "vitest";
+import { execSync } from "node:child_process";
+import path from "node:path";
+
+const BASE = process.env.DIRECT_URL || process.env.DATABASE_URL || "";
+const IS_PG = /^postgres(ql)?:\/\//.test(BASE);
+const TEST_URL = IS_PG ? BASE.split("?")[0] + "?schema=ff_test" : "file:" + path.resolve(__dirname, "../test.db");
+process.env.DATABASE_URL = TEST_URL;
+
+let db: typeof import("../lib/db").db;
+let assignWashDay: typeof import("../lib/washday-server").assignWashDay;
+let washDayDistribution: typeof import("../lib/washday-server").washDayDistribution;
+let isOffWashDay: typeof import("../lib/washday").isOffWashDay;
+
+let n = 0;
+const nextPhone = () => `88888${String(++n).padStart(5, "0")}`;
+const nextId = () => `wd${String(n).padStart(4, "0")}`;
+
+beforeAll(async () => {
+  execSync("npx prisma db push", { env: { ...process.env, DATABASE_URL: TEST_URL }, stdio: "ignore" });
+  db = (await import("../lib/db")).db;
+  ({ assignWashDay, washDayDistribution } = await import("../lib/washday-server"));
+  ({ isOffWashDay } = await import("../lib/washday"));
+}, 120_000);
+
+afterEach(async () => {
+  await db.student.deleteMany({ where: { id: { startsWith: "wd" } } });
+  await db.college.deleteMany({ where: { id: { startsWith: "wdcol" } } });
+});
+
+async function mkCollege(closedWeekday: number | null) {
+  const id = `wdcol${n}`;
+  return db.college.create({ data: { id, name: "Wash Day College " + n, closedWeekday, features: {} } });
+}
+async function mkStudent(collegeId: string, washDay: number | null = null) {
+  const id = nextId(), phone = nextPhone();
+  return db.student.create({ data: { id, phone, name: "Test " + id, collegeId, washDay } });
+}
+
+describe("wash-day allocation spreads students evenly", () => {
+  it("assigns the least-loaded open weekday, not a fixed day", async () => {
+    const col = await mkCollege(null);
+    // stack up Monday(1) and Tuesday(2) artificially, leaving Sunday(0) empty
+    for (let i = 0; i < 5; i++) await mkStudent(col.id, 1);
+    for (let i = 0; i < 3; i++) await mkStudent(col.id, 2);
+
+    const newStudent = await mkStudent(col.id);
+    const assigned = await assignWashDay(newStudent.id, col.id);
+
+    // Sunday (0) has 0 students, far below Monday/Tuesday — must win
+    expect(assigned).toBe(0);
+    const fresh = await db.student.findUnique({ where: { id: newStudent.id } });
+    expect(fresh?.washDay).toBe(0);
+  });
+
+  it("never assigns the college's closed weekday", async () => {
+    const col = await mkCollege(4); // Thursday closed
+    for (let i = 0; i < 30; i++) {
+      const s = await mkStudent(col.id);
+      const day = await assignWashDay(s.id, col.id);
+      expect(day).not.toBe(4);
+    }
+  }, 60_000);
+
+  it("self-corrects toward equal spread as more students are added", async () => {
+    const col = await mkCollege(4); // Thursday closed, 6 open days
+    for (let i = 0; i < 60; i++) {
+      const s = await mkStudent(col.id);
+      await assignWashDay(s.id, col.id);
+    }
+    const dist = await washDayDistribution(col.id);
+    // 60 students over 6 open days should land at exactly 10 each with pure
+    // least-loaded assignment (deterministic round robin, no randomness)
+    for (let d = 0; d < 7; d++) {
+      if (d === 4) expect(dist[d]).toBe(0);
+      else expect(dist[d]).toBe(10);
+    }
+  }, 90_000);
+
+  it("does not care about total headcount — the same logic works for 6 or 600", async () => {
+    const small = await mkCollege(null);
+    for (let i = 0; i < 6; i++) {
+      const s = await mkStudent(small.id);
+      await assignWashDay(s.id, small.id);
+    }
+    const dist = await washDayDistribution(small.id);
+    expect(dist.reduce((a, b) => a + b, 0)).toBe(6);
+    expect(Math.max(...dist) - Math.min(...dist)).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("isOffWashDay — pure, no DB", () => {
+  it("null washDay is never 'off' (unassigned students aren't flagged)", () => {
+    expect(isOffWashDay(null)).toBe(false);
+  });
+
+  it("flags when today's IST weekday differs from the assigned day", () => {
+    // 2026-07-27 is a Monday; IST offset baked into isOffWashDay
+    const monday = new Date("2026-07-27T06:00:00Z"); // ~11:30 IST Monday
+    expect(isOffWashDay(1, monday)).toBe(false); // assigned Monday, is Monday
+    expect(isOffWashDay(2, monday)).toBe(true); // assigned Tuesday, is Monday
+  });
+});

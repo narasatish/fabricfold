@@ -1,5 +1,5 @@
 {
-  "regions": ["syd1"],
+  "regions": ["bom1"],
   "crons": [
     { "path": "/api/report/daily", "schedule": "30 15 * * *" },
     { "path": "/api/backup", "schedule": "0 20 * * *" },

@@ -26,7 +26,7 @@ type Props = {
     plan: { price: number; cycles: number; kgPerCycle: number };
     rates: Rates;
     payment: { upiId: string; payeeName: string; bankName: string; accountName: string; accountNo: string; ifsc: string; gatewayKey: string };
-    settings: { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number; gstEnabled?: boolean };
+    settings: { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number; gstEnabled?: boolean; garmentTagsEnabled?: boolean };
   };
   colleges: { id: string; name: string; address: string; features: Record<string, boolean> }[];
   staff: { id: string; name: string; phone: string; role: number; collegeId: string | null }[];
@@ -64,7 +64,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
     ({ id: undefined, collegeId, name: "", price: 0, gstFree: false, buckets: [{ service: "washIron", cycles: 34, kgPerCycle: 7 }] });
   const [planEdit, setPlanEdit] = useState<ReturnType<typeof emptyPlan>>(emptyPlan(colleges[0]?.id || ""));
   const [pay, setPay] = useState({ ...config.payment });
-  const [settings, setSettings] = useState({ reportEmail: config.settings.reportEmail || "", dailyEmail: !!config.settings.dailyEmail, sendHour: config.settings.sendHour ?? 21, openingFloat: config.settings.openingFloat ?? 0 });
+  const [settings, setSettings] = useState({ reportEmail: config.settings.reportEmail || "", dailyEmail: !!config.settings.dailyEmail, sendHour: config.settings.sendHour ?? 21, openingFloat: config.settings.openingFloat ?? 0, garmentTagsEnabled: config.settings.garmentTagsEnabled === true });
   const [colEdit, setColEdit] = useState<{ id?: string; name: string; address: string }>({ name: "", address: "" });
   const [stEdit, setStEdit] = useState<{ id?: string; name: string; phone: string; role: number }>({ name: "", phone: "", role: 1 });
   const [slip, setSlip] = useState({ staffId: staff[0]?.id || "", month: new Date().toISOString().slice(0, 7), basic: 0, allowances: 0, deductions: 0, postExpense: true });
@@ -393,6 +393,10 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
           <Switch on={settings.dailyEmail} onToggle={() => setSettings({ ...settings, dailyEmail: !settings.dailyEmail })} />
         </div>
         <div className="field"><label>Opening cash float (₹)</label><input className="input" type="number" value={settings.openingFloat} onChange={(e) => setSettings({ ...settings, openingFloat: Number(e.target.value) })} /></div>
+        <div className="chip-toggle" style={{ marginBottom: 15 }}>
+          <div><div className="h-sm">Per-garment QR tagging</div><div className="muted" style={{ fontSize: 12 }}>Parked feature — off by default, safe to switch on anytime</div></div>
+          <Switch on={settings.garmentTagsEnabled} onToggle={() => setSettings({ ...settings, garmentTagsEnabled: !settings.garmentTagsEnabled })} />
+        </div>
         <button className="btn" onClick={() => run(() => saveSettings(settings), "Settings saved")}>Save settings</button>
       </Sheet>
 

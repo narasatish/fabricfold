@@ -42,7 +42,7 @@ export default async function StaffAdminPage() {
           plan: cfg.plan as { price: number; cycles: number; kgPerCycle: number },
           rates: cfg.rates as Record<string, { label: string; items: [string, number][] }>,
           payment: cfg.payment as { upiId: string; payeeName: string; bankName: string; accountName: string; accountNo: string; ifsc: string; gatewayKey: string },
-          settings: cfg.settings as { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number },
+          settings: cfg.settings as { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number; garmentTagsEnabled?: boolean },
         }}
         colleges={colleges.map((c) => ({ id: c.id, name: c.name, address: c.address, features: c.features as Record<string, boolean> }))}
         staff={staffList.map((x) => ({ id: x.id, name: x.name, phone: x.phone, role: x.role, collegeId: x.collegeId }))}

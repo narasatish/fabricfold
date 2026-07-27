@@ -19,7 +19,12 @@ async function getConfig() {
   // gstEnabled: owner can turn GST billing off entirely (not mandatory for
   // unregistered businesses). Default ON for backwards compatibility.
   const gstEnabled = (cfg.settings as Record<string, unknown>)?.gstEnabled !== false;
-  return { ...cfg, rates: cfg.rates as unknown as Rates, gstPct: Number(cfg.gstPct), gstEnabled };
+  // Per-garment QR tagging: parked for now (not in use), default OFF. Flip
+  // settings.garmentTagsEnabled = true in Admin to bring it back — the
+  // scanning UI on the staff order screen only renders when tags exist, so
+  // turning this back on is the only step needed.
+  const garmentTagsEnabled = (cfg.settings as Record<string, unknown>)?.garmentTagsEnabled === true;
+  return { ...cfg, rates: cfg.rates as unknown as Rates, gstPct: Number(cfg.gstPct), gstEnabled, garmentTagsEnabled };
 }
 
 function bcast(o: { id: string; collegeId: string; studentId: string }, type = "order.updated") {
@@ -142,9 +147,11 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
     const noGst = !usedCycle && (!!input.noGst || !cfg.gstEnabled);
     const { gst, total } = computeBill(sub, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });
 
-    // per-garment QR tags — one per piece
+    // per-garment QR tags — one per piece. Parked feature, off by default.
     let ti = 0;
-    const tags = items.flatMap((it) => Array.from({ length: it.qty }, () => ({ code: o.id.slice(-6) + "-" + String(++ti).padStart(2, "0"), label: it.label })));
+    const tags = cfg.garmentTagsEnabled
+      ? items.flatMap((it) => Array.from({ length: it.qty }, () => ({ code: o.id.slice(-6) + "-" + String(++ti).padStart(2, "0"), label: it.label })))
+      : [];
 
     const updated = await tx.order.update({
       where: { id: o.id },
@@ -231,7 +238,9 @@ export async function walkInOrder(
       const declaredPieces = items.reduce((s, i) => s + i.qty, 0);
       const id = orderCode();
       let ti = 0;
-      const tags = items.flatMap((it) => Array.from({ length: it.qty }, () => ({ code: id.slice(-6) + "-" + String(++ti).padStart(2, "0"), label: it.label })));
+      const tags = cfg.garmentTagsEnabled
+        ? items.flatMap((it) => Array.from({ length: it.qty }, () => ({ code: id.slice(-6) + "-" + String(++ti).padStart(2, "0"), label: it.label })))
+        : [];
 
       const o = await tx.order.create({
         data: {

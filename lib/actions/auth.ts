@@ -4,7 +4,6 @@
 import crypto from "node:crypto";
 import { db } from "../db";
 import { createSession, clearSession, requireStudent } from "../auth";
-import { notifyOwner } from "../mail";
 
 const OTP_TTL = 5 * 60_000;
 
@@ -108,7 +107,9 @@ export async function verifyOtp(
   phone: string,
   code: string,
   mode: "customer" | "staff",
-  reg?: { name: string; collegeId: string },
+  // registration is staff-only now (see registerStudent); this param is kept
+  // only so old client bundles calling with a 4th arg don't hard-error.
+  _reg?: { name: string; collegeId: string },
 ) {
   phone = phone.replace(/\D/g, "").slice(-10);
   const otp = await db.otp.findFirst({
@@ -139,19 +140,12 @@ export async function verifyOtp(
     return { ok: true as const };
   }
 
-  let stu = await db.student.findUnique({ where: { phone } });
+  // No self-registration: a student account can only be created by staff at
+  // the counter (registerStudent, Admin>=1). An unrecognised number is turned
+  // away here rather than allowed to create its own account.
+  const stu = await db.student.findUnique({ where: { phone } });
   if (!stu) {
-    // Don't consume the OTP yet — the registration step re-submits the same code.
-    if (!reg?.name || !reg?.collegeId) return { ok: false as const, error: "NEEDS_REGISTRATION" };
-    // permanent random 6-digit FabricFold code, unique
-    let id = "";
-    for (let i = 0; i < 20; i++) {
-      id = String(Math.floor(100000 + Math.random() * 900000));
-      if (!(await db.student.findUnique({ where: { id } }))) break;
-    }
-    stu = await db.student.create({ data: { id, phone, name: reg.name.trim(), collegeId: reg.collegeId } });
-    const college = await db.college.findUnique({ where: { id: reg.collegeId } });
-    void notifyOwner("New student registered", `${stu.name} (+91 ${phone}) signed up at ${college?.name || "?"} — ID ${stu.id}.`);
+    return { ok: false as const, error: "This number isn't registered yet — please visit the counter to be registered." };
   }
   await db.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
   await createSession({ mode: "customer", studentId: stu.id });

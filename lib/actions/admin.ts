@@ -7,7 +7,10 @@ import { audit } from "../notify";
 import { publish } from "../realtime";
 import { notifyOwner } from "../mail";
 
-/* ----- Register a student at the counter (any staff) ----- */
+/* ----- Register a student at the counter (any staff) -----
+   Students cannot self-register — this is the ONLY way a student account is
+   created. verifyOtp() will reject an unrecognised number with a message to
+   come to the counter. */
 export async function registerStudent(input: { name: string; phone: string; collegeId: string }) {
   const st = await requireStaff(1);
   const name = input.name.trim();
@@ -28,6 +31,23 @@ export async function registerStudent(input: { name: string; phone: string; coll
   await audit("Student registered", `${name} · +91 ${phone} · ${college.name}`, st.id);
   void notifyOwner("New student registered", `${name} (+91 ${phone}) registered at the counter (${college.name}) by ${st.name} — ID ${stu.id}.`);
   return { ok: true as const, id: stu.id };
+}
+
+/* ----- Change a student's registered mobile number (Admin+ only) -----
+   Students have no self-service way to change their number — by design, so a
+   lost/stolen phone can't be used to silently take over an account. They must
+   come to the counter and an Admin makes the change here. */
+export async function updateStudentPhone(studentId: string, newPhone: string) {
+  const st = await requireStaff(3);
+  const phone = newPhone.replace(/\D/g, "").slice(-10);
+  if (phone.length !== 10) return { ok: false as const, error: "Enter a valid 10-digit mobile number" };
+  const existing = await db.student.findUnique({ where: { phone } });
+  if (existing && existing.id !== studentId) return { ok: false as const, error: "This number is already registered to another student" };
+  const stu = await db.student.findUnique({ where: { id: studentId } });
+  if (!stu) return { ok: false as const, error: "Student not found" };
+  await db.student.update({ where: { id: studentId }, data: { phone } });
+  await audit("Student phone changed", `${stu.name} (${stu.id}) · +91 ${stu.phone} -> +91 ${phone}`, st.id);
+  return { ok: true as const };
 }
 
 /* ----- Subscription plans per college (Admin+) ----- */

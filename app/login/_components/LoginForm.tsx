@@ -1,22 +1,23 @@
 "use client";
-/* Login screen — phone + OTP entry → customer/staff mode toggle → registration flow for new customers. */
+/* Login screen — phone + OTP entry, customer/staff mode toggle.
+   No self-registration: a student account can only be created by staff at
+   the counter (see lib/actions/admin.ts registerStudent). An unrecognised
+   customer number gets a clear message instead of a signup form. */
 import { useState } from "react";
 import { Svg } from "@/components/icons";
 import { useToast } from "@/components/chrome";
-import { requestOtp, verifyOtp, listColleges } from "@/lib/actions/auth";
+import { requestOtp, verifyOtp } from "@/lib/actions/auth";
 import { useRouter } from "next/navigation";
 
 export default function LoginForm() {
   const router = useRouter();
   const toast = useToast();
-  const [step, setStep] = useState<"phone" | "otp" | "register">("phone");
+  const [step, setStep] = useState<"phone" | "otp">("phone");
   const [mode, setMode] = useState<"customer" | "staff">("customer");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [loading, setLoading] = useState(false);
-  const [colleges, setColleges] = useState<Array<{ id: string; name: string }>>([]);
-  const [name, setName] = useState("");
-  const [collegeId, setCollegeId] = useState("");
+  const [notRegistered, setNotRegistered] = useState(false);
 
   const handleRequestOtp = async () => {
     if (!/^\d{10}$/.test(phone.replace(/\D/g, ""))) {
@@ -24,6 +25,7 @@ export default function LoginForm() {
       return;
     }
     setLoading(true);
+    setNotRegistered(false);
     const r = await requestOtp(phone, mode);
     setLoading(false);
     if (!r.ok) {
@@ -40,13 +42,12 @@ export default function LoginForm() {
       return;
     }
     setLoading(true);
-    const r = await verifyOtp(phone, otp, mode, mode === "customer" ? { name: name.trim(), collegeId } : undefined);
+    const r = await verifyOtp(phone, otp, mode);
     setLoading(false);
 
     if (!r.ok) {
-      if (r.error === "NEEDS_REGISTRATION") {
-        setColleges(await listColleges());
-        setStep("register");
+      if (mode === "customer" && /isn't registered/i.test(r.error)) {
+        setNotRegistered(true);
         return;
       }
       toast(r.error, true);
@@ -54,26 +55,6 @@ export default function LoginForm() {
     }
     toast("Signed in");
     router.push(mode === "customer" ? "/c" : "/s");
-  };
-
-  const handleRegisterAndVerify = async () => {
-    if (!name.trim()) {
-      toast("Enter your name", true);
-      return;
-    }
-    if (!collegeId) {
-      toast("Select your campus", true);
-      return;
-    }
-    setLoading(true);
-    const r = await verifyOtp(phone, otp, "customer", { name, collegeId });
-    setLoading(false);
-    if (!r.ok) {
-      toast(r.error, true);
-      return;
-    }
-    toast("Account created — welcome!");
-    router.push("/c");
   };
 
   return (
@@ -120,10 +101,16 @@ export default function LoginForm() {
             <button className="btn" onClick={handleRequestOtp} disabled={loading || phone.length !== 10}>
               {loading ? "Sending…" : "Send OTP"}
             </button>
+
+            {mode === "customer" && (
+              <div className="muted center mt16" style={{ fontSize: "12.5px", lineHeight: 1.5 }}>
+                New here? Visit your campus counter to get registered — you'll then sign in with just your number.
+              </div>
+            )}
           </>
         )}
 
-        {step === "otp" && (
+        {step === "otp" && !notRegistered && (
           <>
             <div className="h-md" style={{ marginBottom: "8px" }}>
               Enter OTP
@@ -170,36 +157,24 @@ export default function LoginForm() {
           </>
         )}
 
-        {step === "register" && (
+        {step === "otp" && notRegistered && (
           <>
             <div className="h-md" style={{ marginBottom: "8px" }}>
-              Complete your profile
+              Not registered yet
             </div>
-            <div className="muted" style={{ fontSize: "13px", marginBottom: "16px" }}>
-              Just a couple more details
+            <div className="card pad" style={{ background: "var(--amber-soft)", borderColor: "#f2e2c4", marginBottom: "16px" }}>
+              <div className="row gap8">
+                <span style={{ color: "var(--amber)" }}>
+                  <Svg name="alert" size={20} />
+                </span>
+                <div style={{ color: "var(--amber)", fontSize: "13px", lineHeight: 1.5 }}>
+                  +91 {phone.slice(-10)} isn't registered. Please visit your campus counter — staff will register you in
+                  a moment, then you can sign in with just your number and a one-time code.
+                </div>
+              </div>
             </div>
-
-            <div className="field">
-              <label>Full name</label>
-              <input className="input" type="text" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} />
-            </div>
-
-            <div className="field">
-              <label>Campus</label>
-              <select
-                className="input"
-                value={collegeId}
-                onChange={(e) => setCollegeId(e.target.value)}
-              >
-                <option value="">Select campus</option>
-                {colleges.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <button className="btn" onClick={handleRegisterAndVerify} disabled={loading || !name.trim() || !collegeId}>
-              {loading ? "Creating…" : "Get started"}
+            <button className="btn sec" onClick={() => { setStep("phone"); setNotRegistered(false); setOtp(""); }}>
+              Back
             </button>
           </>
         )}

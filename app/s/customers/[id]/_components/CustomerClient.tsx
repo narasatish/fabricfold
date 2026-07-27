@@ -9,6 +9,7 @@ import { submitCompensation } from "@/lib/actions/credits";
 import { assignSubscription } from "@/lib/actions/subscription";
 import { walkInOrder } from "@/lib/actions/orders";
 import { topUpCredits } from "@/lib/actions/ops";
+import { updateStudentPhone } from "@/lib/actions/admin";
 
 type Student = {
   id: string;
@@ -37,6 +38,9 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
   const router = useRouter();
   const toast = useToast();
   const tier = loyaltyBadge(student.lifetimePieces);
+  const [showPhoneEdit, setShowPhoneEdit] = useState(false);
+  const [newPhone, setNewPhone] = useState(student.phone);
+  const [phoneLoading, setPhoneLoading] = useState(false);
   const [showComp, setShowComp] = useState(false);
   const [comp, setComp] = useState({ kind: "damage", amount: 0, method: "credit" as "credit" | "cash", comment: "" });
   const [showAssign, setShowAssign] = useState(false);
@@ -112,6 +116,18 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
     router.refresh();
   };
 
+  // Students have no self-service way to change their number — they come to
+  // the counter and an Admin makes the change here.
+  const doPhoneChange = async () => {
+    setPhoneLoading(true);
+    const r = await updateStudentPhone(student.id, newPhone);
+    setPhoneLoading(false);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast("Phone number updated");
+    setShowPhoneEdit(false);
+    router.refresh();
+  };
+
   return (
     <div className="pad">
       {/* Profile card */}
@@ -121,7 +137,19 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
           <div style={{ flex: 1 }}>
             <div className="h-md">{student.name}</div>
             <div className="muted mono">ID {student.id}</div>
-            <div className="muted" style={{ fontSize: "12px" }}>+91 {student.phone}</div>
+            <div className="row gap8" style={{ alignItems: "center" }}>
+              <div className="muted" style={{ fontSize: "12px" }}>+91 {student.phone}</div>
+              {staffRole >= 3 && (
+                <button
+                  className="action"
+                  style={{ padding: "2px 6px" }}
+                  aria-label="Change phone number"
+                  onClick={() => { setNewPhone(student.phone); setShowPhoneEdit(true); }}
+                >
+                  <Svg name="edit" size={13} />
+                </button>
+              )}
+            </div>
           </div>
           <Qr text={student.id} size={64} />
         </div>
@@ -346,6 +374,26 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
             <Svg name="check" size={18} /> {assignLoading ? "Activating…" : `Confirm ${fmt(assignPlan?.gross || 0)} received & activate`}
           </button>
         </div>
+      </Sheet>
+
+      <Sheet open={showPhoneEdit} onClose={() => setShowPhoneEdit(false)}>
+        <div className="h-md" style={{ padding: "0 4px 12px" }}>Change registered number</div>
+        <div className="muted" style={{ fontSize: "12.5px", padding: "0 4px 14px" }}>
+          Students can't change this themselves — verify their identity before updating it.
+        </div>
+        <div className="field">
+          <label>New mobile number</label>
+          <input
+            className="input"
+            inputMode="numeric"
+            maxLength={10}
+            value={newPhone}
+            onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+          />
+        </div>
+        <button className="btn" onClick={doPhoneChange} disabled={phoneLoading || newPhone.length !== 10}>
+          {phoneLoading ? "Saving…" : "Save new number"}
+        </button>
       </Sheet>
 
       <Sheet open={showComp} onClose={() => setShowComp(false)}>

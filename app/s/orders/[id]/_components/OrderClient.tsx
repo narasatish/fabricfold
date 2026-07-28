@@ -531,6 +531,13 @@ export default function StaffOrderClient({
               <Switch on={acceptInput.useCycle} onToggle={() => setAcceptInput({ ...acceptInput, useCycle: !acceptInput.useCycle })} />
             </div>
           )}
+          {acceptInput.useCycle && order.express && (
+            <div className="card pad mt12" style={{ background: "var(--amber-soft)", borderColor: "#f2e2c4", marginBottom: "16px" }}>
+              <span style={{ fontSize: "12.5px", color: "var(--amber)" }}>
+                This order is marked urgent. The cycle covers the wash — collect a 40% premium on its per-cycle plan value in cash before handing it over.
+              </span>
+            </div>
+          )}
           {!acceptInput.useCycle && (
             <div className="chip-toggle" style={{ marginBottom: "16px" }}>
               <div>

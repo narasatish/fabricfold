@@ -64,7 +64,7 @@ export default function WalletClient({ plans, pending }: { plans: Plan[]; pendin
             <span className="pill">{fmt(p.gross)} / yr</span>
           </div>
           <div className="muted mt4" style={{ fontSize: "12px" }}>
-            {p.gstApplies ? `${fmt(p.price)} + ${p.gstPct}% GST` : "No GST — final price"}
+            {p.gstApplies ? `${fmt(p.price)} + ${p.gstPct}% GST` : fmt(p.price)}
           </div>
           <div className="mt8">
             {p.buckets.map((b) => (

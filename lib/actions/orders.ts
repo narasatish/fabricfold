@@ -4,7 +4,7 @@
    prototype does -> realtime broadcast -> notification. */
 import { db } from "../db";
 import { requireStudent, requireStaff } from "../auth";
-import { expressSurcharge, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill } from "../money";
+import { expressSurcharge, urgentCycleCharge, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit } from "../notify";
@@ -94,7 +94,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
   let result;
   try {
     result = await db.$transaction(async (tx) => {
-    const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { student: { include: { subscription: true } } } });
+    const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { student: { include: { subscription: { include: { planRef: true } } } } } });
     if (o.status !== "draft") throw new Error("Order already received");
 
     // staff may adjust quantities at the counter
@@ -110,7 +110,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
     const declaredPieces = items.reduce((s, i) => s + i.qty, 0);
     if (!declaredPieces) throw new Error("Add at least one piece");
 
-    let usedCycle = false, excessCharge = 0;
+    let usedCycle = false, excessCharge = 0, urgentCharge = 0;
     if (input.useCycle) {
       const sub = o.student.subscription;
       if (!sub || !sub.active) throw new Error("No active subscription");
@@ -137,13 +137,20 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
         const rate = cfg.rates.washIron.items[0][1];
         excessCharge = excessKg * rate * 3; // prototype: excess kg billed at 3x base piece rate per kg
       }
+      // Urgent (same-day) on a cycle order: the cycle is already prepaid, so
+      // only the 40% urgent premium on its average value is charged, in cash,
+      // right now — see urgentCycleCharge().
+      if (o.express) {
+        const planPrice = sub.planRef ? Number(sub.planRef.price) : Number((cfg.plan as { price: number }).price);
+        urgentCharge = urgentCycleCharge(planPrice, sub.cyclesTotal);
+      }
     }
 
     // recomputeOrder() — exact prototype math (+ optional no-GST billing).
     // GST is skipped when staff chose 'Bill without GST' OR GST billing is
     // switched off app-wide in Admin.
     const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
-    const surcharge = o.express ? expressSurcharge(sub) : 0;
+    const surcharge = usedCycle ? urgentCharge : (o.express ? expressSurcharge(sub) : 0);
     const noGst = !usedCycle && (!!input.noGst || !cfg.gstEnabled);
     const { gst, total } = computeBill(sub, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });
 
@@ -185,11 +192,11 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
    plan cycle) — so offline drop-offs are tracked exactly like app orders. */
 export async function walkInOrder(
   studentId: string,
-  input: { service: string; items: { label: string; qty: number }[]; weightKg: number | null; useCycle: boolean; noGst?: boolean },
+  input: { service: string; items: { label: string; qty: number }[]; weightKg: number | null; useCycle: boolean; noGst?: boolean; express?: boolean },
 ) {
   const st = await requireStaff(1);
   const cfg = await getConfig();
-  const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: true, college: true } });
+  const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: { include: { planRef: true } }, college: true } });
   if (!stu) return { ok: false as const, error: "Student not found" };
   const rate = cfg.rates[input.service];
   if (!rate) return { ok: false as const, error: "Unknown service" };
@@ -207,7 +214,7 @@ export async function walkInOrder(
   try {
     result = await db.$transaction(async (tx) => {
       // optional plan-cycle burn (same rules as acceptOrder)
-      let usedCycle = false, excessCharge = 0;
+      let usedCycle = false, excessCharge = 0, urgentCharge = 0;
       if (input.useCycle) {
         const sub = stu.subscription;
         if (!sub || !sub.active) throw new Error("No active subscription");
@@ -230,11 +237,18 @@ export async function walkInOrder(
           const excessKg = Math.ceil(input.weightKg - kgLimit);
           excessCharge = excessKg * cfg.rates.washIron.items[0][1] * 3;
         }
+        // Urgent (same-day) on a cycle order: the cycle is already prepaid, so
+        // only the 40% urgent premium on its average value is charged, in cash.
+        if (input.express) {
+          const planPrice = sub.planRef ? Number(sub.planRef.price) : Number((cfg.plan as { price: number }).price);
+          urgentCharge = urgentCycleCharge(planPrice, sub.cyclesTotal);
+        }
       }
 
       const sub2 = items.reduce((s, i) => s + i.rate * i.qty, 0);
+      const surcharge = usedCycle ? urgentCharge : (input.express ? expressSurcharge(sub2) : 0);
       const noGst = !usedCycle && (!!input.noGst || !cfg.gstEnabled);
-      const { gst, total } = computeBill(sub2, 0, cfg.gstPct, { usedCycle, excessCharge, noGst });
+      const { gst, total } = computeBill(sub2, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });
       const declaredPieces = items.reduce((s, i) => s + i.qty, 0);
       const id = orderCode();
       let ti = 0;
@@ -246,7 +260,7 @@ export async function walkInOrder(
         data: {
           id, studentId: stu.id, collegeId: stu.collegeId, service: input.service,
           items, declaredPieces, actualPieces: declaredPieces, weightKg: input.weightKg,
-          express: false, surcharge: 0, usedCycle, noGst,
+          express: !!input.express, surcharge, usedCycle, noGst,
           paid: usedCycle && total === 0, paymentMethod: usedCycle && total === 0 ? "cycle" : null,
           subtotal: sub2, gst, gstPctSnapshot: noGst ? 0 : cfg.gstPct, total,
           status: "received", receivedAt: new Date(),
@@ -300,7 +314,7 @@ export async function collectOrder(orderId: string, code: string) {
   const v = (code || "").replace(/[^0-9]/g, "");
   const ok = (otp && v === otp.code) || v === o.id.slice(-4) || v === o.id.replace(/\D/g, "");
   if (!ok) return { ok: false as const, error: "Code / Order ID does not match" };
-  if (!o.paid && !o.usedCycle) return { ok: false as const, error: "Record payment before collection" };
+  if (!o.paid && Number(o.total) > 0) return { ok: false as const, error: "Record payment before collection" };
 
   await db.$transaction(async (tx) => {
     await tx.order.update({ where: { id: o.id }, data: { status: "collected", timeline: { create: { status: "collected" } } } });

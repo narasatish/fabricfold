@@ -92,6 +92,15 @@ describe("no-GST billing (staff choice at accept)", () => {
     expect(money.computeBill(150, 100, 18, { noGst: true })).toEqual({ gst: 0, total: 250 });
     // cycle orders ignore noGst — they only carry the excess charge
     expect(money.computeBill(150, 0, 18, { usedCycle: true, excessCharge: 45, noGst: true })).toEqual({ gst: 0, total: 45 });
+    // cycle order marked urgent still collects the cash surcharge (bug fix — was silently dropped)
+    expect(money.computeBill(150, 59, 18, { usedCycle: true, excessCharge: 0 })).toEqual({ gst: 0, total: 59 });
+  });
+
+  it("urgentCycleCharge: 40% of the plan's average per-cycle value, rounded, charged in cash", () => {
+    // user's own example: ₹5000 plan / 34 cycles ≈ ₹147.06/cycle × 40% ≈ ₹58.8 → ₹59
+    expect(money.urgentCycleCharge(5000, 34)).toBe(59);
+    expect(money.urgentCycleCharge(0, 34)).toBe(0);
+    expect(money.urgentCycleCharge(5000, 0)).toBe(0);
   });
 
   it("express surcharge is 40% of order value (flat, all colleges)", () => {

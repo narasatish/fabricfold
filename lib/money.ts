@@ -14,6 +14,18 @@ export function expressSurcharge(subtotal: number) {
   return Math.round(subtotal * EXPRESS_PCT);
 }
 
+/* Urgent (same-day) surcharge for an order paid with a subscription cycle.
+   The cycle itself is already prepaid — one of the plan's total cycles — so
+   consuming it costs nothing extra. Urgent is an add-on service on top of
+   that, priced at the same 40% as a normal express order, but since a cycle
+   order has no per-item "order value" to take 40% of, the base is the plan's
+   own average value per cycle (planPrice ÷ totalCycles). Charged in cash. */
+export function urgentCycleCharge(planPrice: number, cyclesTotal: number) {
+  if (!cyclesTotal) return 0;
+  const perCycle = planPrice / cyclesTotal;
+  return Math.round(perCycle * EXPRESS_PCT);
+}
+
 export function financialYearTag(ts?: number | Date) {
   const dt = ts ? new Date(ts) : new Date();
   const y = dt.getFullYear();
@@ -60,7 +72,12 @@ export function shouldInvoiceOrder(o: { noGst?: boolean }, method: string, staff
 
 /** Bill math shared by acceptOrder and tests. Cycle orders carry only the excess charge. */
 export function computeBill(sub: number, surcharge: number, gstPct: number, opts: { usedCycle?: boolean; excessCharge?: number; noGst?: boolean } = {}) {
-  if (opts.usedCycle) return { gst: 0, total: opts.excessCharge || 0 };
+  // A cycle order carries no GST (the plan was already billed/invoiced when
+  // it was bought), but `surcharge` still has to be collected in cash where
+  // it's non-zero — e.g. the urgent-cycle premium above. Previously this
+  // branch silently dropped `surcharge`, so marking a cycle order express
+  // charged nothing at all.
+  if (opts.usedCycle) return { gst: 0, total: (opts.excessCharge || 0) + surcharge };
   const taxable = sub + surcharge;
   const gst = opts.noGst ? 0 : Math.round(taxable * (gstPct / 100));
   return { gst, total: taxable + gst };

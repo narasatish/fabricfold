@@ -246,7 +246,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
             <div key={p.id} className="between mt10" style={{ alignItems: "flex-start" }}>
               <button style={{ textAlign: "left", flex: 1 }} onClick={() => { setPlanEdit({ id: p.id, collegeId: p.collegeId, name: p.name, price: p.price, gstFree: p.gstFree, buckets: JSON.parse(JSON.stringify(p.buckets)) }); setSheet("plan"); }}>
                 <div className="h-sm" style={{ opacity: p.active ? 1 : 0.45 }}>
-                  {p.name} · {fmt(p.price)}{p.gstFree ? " (no GST)" : ""}
+                  {p.name} · {fmt(p.price)}
                 </div>
                 <div className="muted" style={{ fontSize: "12px", opacity: p.active ? 1 : 0.45 }}>
                   {p.buckets.map((b) => `${b.cycles}× ${SERVICE_LABEL[b.service] || b.service} (${b.kgPerCycle}kg)`).join(" + ")}

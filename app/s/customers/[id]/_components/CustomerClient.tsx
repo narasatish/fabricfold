@@ -57,11 +57,13 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
   const [wiWeight, setWiWeight] = useState(0);
   const [wiUseCycle, setWiUseCycle] = useState(false);
   const [wiNoGst, setWiNoGst] = useState(false);
+  const [wiExpress, setWiExpress] = useState(false);
   const [wiLoading, setWiLoading] = useState(false);
   const wiItems = rates[wiService]?.items || [];
   const wiSubtotal = wiItems.reduce((s, [label, price]) => s + price * (wiQty[label] || 0), 0);
   const wiPieces = wiItems.reduce((s, [label]) => s + (wiQty[label] || 0), 0);
-  const wiGst = wiUseCycle || wiNoGst || !gstEnabled ? 0 : Math.round(wiSubtotal * 0.18);
+  const wiGst = wiUseCycle || wiNoGst || !gstEnabled ? 0 : Math.round((wiSubtotal + (wiExpress ? Math.round(wiSubtotal * 0.4) : 0)) * 0.18);
+  const wiExpressSurcharge = wiExpress && !wiUseCycle ? Math.round(wiSubtotal * 0.4) : 0;
   const subHasCycles = !!student.subscription?.active;
 
   // Wallet top-up (money physically received first)
@@ -88,6 +90,7 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
       weightKg: wiWeight || null,
       useCycle: wiUseCycle,
       noGst: wiNoGst,
+      express: wiExpress,
     });
     setWiLoading(false);
     if (!r.ok) return toast(r.error || "Failed", true);
@@ -328,10 +331,23 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
               <Switch on={wiNoGst} onToggle={() => setWiNoGst(!wiNoGst)} />
             </div>
           )}
+          <div className="chip-toggle" style={{ marginBottom: "12px" }}>
+            <div>
+              <div className="h-sm">Urgent (same day)</div>
+              <div className="muted" style={{ fontSize: "12px" }}>
+                {wiUseCycle ? "Cycle already covers the wash — only a 40% premium on its per-cycle value is charged, in cash" : "+40% of the order value"}
+              </div>
+            </div>
+            <Switch on={wiExpress} onToggle={() => setWiExpress(!wiExpress)} />
+          </div>
           <div className="card pad" style={{ background: "var(--teal-tint)" }}>
             <div className="kv"><span className="k">Pieces</span><span className="mono">{wiPieces}</span></div>
             <div className="kv"><span className="k">Subtotal</span><span className="mono">{fmt(wiSubtotal)}</span></div>
-            <div className="kv total"><span>{wiUseCycle ? "Covered by plan cycle" : "Est. total"}</span><span className="mono">{fmt(wiUseCycle ? 0 : wiSubtotal + wiGst)}</span></div>
+            {wiUseCycle ? (
+              <div className="kv total"><span>{wiExpress ? "Cycle covered + urgent cash premium" : "Covered by plan cycle"}</span><span className="mono">{wiExpress ? "cash on collection" : fmt(0)}</span></div>
+            ) : (
+              <div className="kv total"><span>Est. total</span><span className="mono">{fmt(wiSubtotal + wiExpressSurcharge + wiGst)}</span></div>
+            )}
           </div>
           <button className="btn mt16" onClick={doWalkIn} disabled={wiLoading || wiPieces === 0}>
             <Svg name="check" size={18} /> {wiLoading ? "Creating…" : "Create & receive order"}
@@ -359,7 +375,7 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
               {assignPlan.buckets.map((b) => (
                 <div key={b.service} className="kv"><span className="k">{b.label}</span><span className="mono">{b.cycles} × {b.kgPerCycle} kg</span></div>
               ))}
-              <div className="kv total"><span>To collect {assignPlan.gstApplies ? "(incl. GST)" : "(no GST)"}</span><span className="mono">{fmt(assignPlan.gross)}</span></div>
+              <div className="kv total"><span>To collect{assignPlan.gstApplies ? " (incl. GST)" : ""}</span><span className="mono">{fmt(assignPlan.gross)}</span></div>
             </div>
           )}
           <div className="field mt16">

@@ -120,6 +120,17 @@ export default async function CustomerHome() {
           </div>
         )}
 
+        {/* Remaining subscription cycles */}
+        {sub?.active && (
+          <div className="card pad mt12" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ color: "var(--teal-dark)" }}><Svg name="layers" size={20} /></span>
+            <div>
+              <div className="muted" style={{ fontSize: "11.5px", textTransform: "uppercase", letterSpacing: ".04em" }}>Cycles remaining</div>
+              <div className="h-sm">{sub.cyclesTotal - sub.cyclesUsed} of {sub.cyclesTotal}</div>
+            </div>
+          </div>
+        )}
+
         {/* Subscription expiry warning */}
         {subExpiryWarning && (
           <div className="card pad mt12" style={{ background: "var(--amber-soft)", borderColor: "#f2e2c4" }}>

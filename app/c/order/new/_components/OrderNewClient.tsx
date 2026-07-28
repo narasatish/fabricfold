@@ -17,6 +17,8 @@ export default function OrderNewClient({
   rateItems,
   gstPct,
   expressEnabled,
+  hasActiveSubscription,
+  urgentCyclePreview,
   reorderItems,
   slots,
   slotDayLabels,
@@ -26,6 +28,8 @@ export default function OrderNewClient({
   rateItems: [string, number][];
   gstPct: number;
   expressEnabled: boolean;
+  hasActiveSubscription: boolean;
+  urgentCyclePreview: number;
   reorderItems: { label: string; qty: number }[];
   slots: Slot[];
   slotDayLabels: Record<string, string>;
@@ -142,6 +146,12 @@ export default function OrderNewClient({
             </div>
             <Switch on={express} onToggle={() => setExpress(!express)} />
           </div>
+          {express && hasActiveSubscription && (
+            <div className="muted mt8" style={{ fontSize: "12px", padding: "0 4px" }}>
+              Using a plan cycle for this order? The cycle already covers the wash — you'd pay just a {Math.round(EXPRESS_PCT * 100)}% premium on its per-cycle value in cash at pickup
+              {urgentCyclePreview > 0 ? ` (≈${fmt(urgentCyclePreview)})` : ""}, not the surcharge above.
+            </div>
+          )}
         </>
       )}
 

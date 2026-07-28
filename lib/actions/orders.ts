@@ -181,6 +181,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
 
   await pushNotif(result.studentId, `Order received — ${result.actualPieces} pieces logged for ${cfg.rates[result.service].label}.`, "status");
   if (result.noGst) await audit("No-GST billing", `#${result.id.slice(-4)} ₹${Number(result.total)}`, st.id);
+  if (result.usedCycle && Number(result.surcharge) > 0) await audit("Urgent cycle charge", `#${result.id.slice(-4)} ₹${Number(result.surcharge)} cash (cycle order)`, st.id);
   bcast(result);
   void st;
   return { ok: true as const, error: undefined };
@@ -278,6 +279,7 @@ export async function walkInOrder(
   await pushNotif(stu.id, `Walk-in order received — ${result.actualPieces} pieces logged for ${cfg.rates[result.service].label}.`, "status");
   await audit("Walk-in order", `#${result.id.slice(-4)} · ${stu.name} · ₹${Number(result.total)}${result.usedCycle ? " (cycle)" : ""}${result.noGst ? " (no GST)" : ""}`, st.id);
   if (result.noGst) await audit("No-GST billing", `#${result.id.slice(-4)} ₹${Number(result.total)}`, st.id);
+  if (result.usedCycle && Number(result.surcharge) > 0) await audit("Urgent cycle charge", `#${result.id.slice(-4)} · ${stu.name} · ₹${Number(result.surcharge)} cash (cycle order)`, st.id);
   void notifyOwner(`Walk-in order #${result.id.slice(-4)}`, `${stu.name}: ${result.actualPieces} pieces of ${cfg.rates[result.service].label} — ₹${Number(result.total)}${result.usedCycle ? " (plan cycle)" : ""}. Logged by ${st.name}.`);
   bcast(result, "order.created");
   return { ok: true as const, id: result.id };

@@ -7,6 +7,7 @@ import OrderNewClient from "./_components/OrderNewClient";
 import { listDropSlots } from "@/lib/actions/slots";
 import { dayLabel } from "@/lib/slots";
 import { redirect } from "next/navigation";
+import { urgentCycleCharge } from "@/lib/money";
 
 export default async function OrderNewPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const student = await requireStudent();
@@ -54,6 +55,16 @@ export default async function OrderNewPage({ searchParams }: { searchParams: Pro
   const slotDayLabels: Record<string, string> = {};
   for (const s of slots) slotDayLabels[s.dateStr] ||= dayLabel(s.dateStr);
 
+  // Preview of the urgent cash premium if staff accepts this using a plan cycle
+  // instead of the flat express surcharge (only relevant with an active subscription).
+  let urgentCyclePreview = 0;
+  if (student.subscription?.active) {
+    const planPrice = student.subscription.planId
+      ? Number((await db.plan.findUnique({ where: { id: student.subscription.planId } }))?.price ?? plan.price)
+      : Number(plan.price);
+    urgentCyclePreview = urgentCycleCharge(planPrice, student.subscription.cyclesTotal);
+  }
+
   return (
     <div className="screen">
       <TopBar title="New order" sub="Declare what you'll bring" back="/c" />
@@ -65,6 +76,8 @@ export default async function OrderNewPage({ searchParams }: { searchParams: Pro
           rateItems={rate.items}
           gstPct={gstPct}
           expressEnabled={feat.express}
+          hasActiveSubscription={!!student.subscription?.active}
+          urgentCyclePreview={urgentCyclePreview}
           reorderItems={reorderItems}
           slots={slots}
           slotDayLabels={slotDayLabels}

@@ -9,6 +9,7 @@ import { requireStudent, requireStaff } from "../auth";
 import { publish } from "../realtime";
 import { pushNotif, audit } from "../notify";
 import { notifyOwner } from "../mail";
+import { assignWashDay } from "../washday-server";
 
 const rid = (n: number) => { let s = ""; for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10); return s; };
 
@@ -56,6 +57,11 @@ export async function activateSubscription(studentId: string, method: "cash" | "
   const stu = await db.student.findUniqueOrThrow({ where: { id: studentId }, include: { subscription: { include: { planRef: true } } } });
   if (!stu.subscription) return { ok: false as const, error: "No pending subscription request" };
 
+  // Safety net for students registered before wash-day allocation existed:
+  // give them one now, based on current burden, WITHOUT touching anyone
+  // else's already-assigned day.
+  if (stu.washDay === null) await assignWashDay(stu.id, stu.collegeId);
+
   if (method === "cash") {
     const otp = await db.otp.findFirst({ where: { purpose: "subscription", refId: studentId, usedAt: null } });
     if (!otp || (otpCode || "").trim() !== otp.code) return { ok: false as const, error: "OTP does not match" };
@@ -93,6 +99,10 @@ export async function assignSubscription(studentId: string, planId: string, meth
   const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: true } });
   if (!stu) return { ok: false as const, error: "Student not found" };
   if (stu.subscription?.active) return { ok: false as const, error: "This student already has an active plan" };
+
+  // Same safety net as activateSubscription — only fills a MISSING wash day,
+  // never reassigns an existing one.
+  if (stu.washDay === null) await assignWashDay(stu.id, stu.collegeId);
 
   const plan = await db.plan.findUnique({ where: { id: planId } });
   if (!plan || !plan.active) return { ok: false as const, error: "Pick a plan" };

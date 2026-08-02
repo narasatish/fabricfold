@@ -6,15 +6,10 @@ import { publish } from "../realtime";
 import { pushNotif, audit, sendWhatsAppPhotos } from "../notify";
 import { notifyOwner } from "../mail";
 import { redoOrder } from "./orders";
-
-/* A damage report is evidence for a dispute about someone's clothes, so it has
-   to stand on its own weeks later: at least three photos and a written note of
-   what staff actually saw. More photos are always allowed. */
-export const MIN_DAMAGE_PHOTOS = 3;
-
-function cleanPhotos(photos?: string[] | null) {
-  return (photos || []).map((p) => String(p || "").trim()).filter(Boolean).slice(0, 30);
-}
+// Constants/helpers live outside this module: a "use server" file may only
+// export async functions, and a stray `export const` here silently wipes out
+// every other export in the file.
+import { MIN_DAMAGE_PHOTOS, cleanPhotos } from "../complaint-rules";
 
 export async function submitComplaint(text: string, orderId?: string | null) {
   const stu = await requireStudent();

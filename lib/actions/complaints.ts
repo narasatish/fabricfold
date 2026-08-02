@@ -11,14 +11,17 @@ import { redoOrder } from "./orders";
 // every other export in the file.
 import { MIN_DAMAGE_PHOTOS, cleanPhotos } from "../complaint-rules";
 
-export async function submitComplaint(text: string, orderId?: string | null) {
+export async function submitComplaint(text: string, orderId?: string | null, photos?: string[]) {
   const stu = await requireStudent();
   const t = text.trim();
   if (!t) return { ok: false as const, error: "Please describe the issue" };
+  // Students may attach evidence too — a photo of the damage is worth more than
+  // a paragraph describing it, and it is the same record staff will look at.
+  const pics = cleanPhotos(photos);
   const c = await db.complaint.create({
     data: {
       studentId: stu.id, collegeId: stu.collegeId, text: t, orderId: orderId || null,
-      messages: { create: { from: "student", by: stu.id, text: t } },
+      messages: { create: { from: "student", by: stu.id, text: t, photos: pics.length ? pics : undefined } },
     },
   });
   publish([`orders:${stu.collegeId}`], { type: "complaint.message", payload: { complaintId: c.id } });

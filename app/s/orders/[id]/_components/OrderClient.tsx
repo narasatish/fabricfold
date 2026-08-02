@@ -100,7 +100,7 @@ export default function StaffOrderClient({
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "upi">("cash");
   const [applyCredits, setApplyCredits] = useState(false);
   const [staffInvoice, setStaffInvoice] = useState(false);
-  const [refundInput, setRefundInput] = useState({ amount: order.received || order.total, via: "upi" as "upi" | "cash" | "credit", reason: "" });
+  const [refundInput, setRefundInput] = useState({ amount: order.received || order.total, via: "upi" as "upi" | "cash" | "credit", reason: "", restoreCycle: false });
   const [compInput, setCompInput] = useState({ kind: "damage", amount: 0, method: "credit" as "credit" | "cash", comment: "" });
 
   const late = isOverdue({ status: order.status, receivedAt: order.receivedAt ? new Date(order.receivedAt) : null, express: order.express }) && (order.status === "received" || order.status === "processing");
@@ -236,7 +236,7 @@ export default function StaffOrderClient({
 
   // Handler: refund
   const handleRefund = async () => {
-    const r = await refundOrder(order.id, refundInput.amount, refundInput.via, refundInput.reason);
+    const r = await refundOrder(order.id, refundInput.amount, refundInput.via, refundInput.reason, refundInput.restoreCycle);
     if (!r.ok) {
       toast(r.error || "Failed", true);
       return;
@@ -860,6 +860,17 @@ export default function StaffOrderClient({
               onChange={(e) => setRefundInput({ ...refundInput, reason: e.target.value })}
             />
           </div>
+          {order.usedCycle && (
+            <div className="chip-toggle" style={{ marginBottom: "12px" }}>
+              <div>
+                <div className="h-sm">Also return the plan cycle</div>
+                <div className="muted" style={{ fontSize: "12px" }}>
+                  Only if the wash never happened. Refunding just an urgent premium still used a cycle.
+                </div>
+              </div>
+              <Switch on={refundInput.restoreCycle} onToggle={() => setRefundInput({ ...refundInput, restoreCycle: !refundInput.restoreCycle })} />
+            </div>
+          )}
           <button className="btn mt16" onClick={handleRefund}>
             <Svg name="back" size={18} /> Process refund
           </button>

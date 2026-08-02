@@ -28,6 +28,14 @@ export const BAG_LABEL: Record<BagKind, string> = { bronze: "Bronze", silver: "S
 /** Highest sequence a single kind can issue before the scheme needs widening. */
 export const MAX_PER_KIND = 999;
 
+/** Start warning here. Running out is not recoverable at the counter — bags are
+    printed in advance — so the Owner needs lead time, not a surprise error. */
+export const WARN_AT = 900;
+
+export function codesRemaining(lastIssued: number) {
+  return Math.max(0, MAX_PER_KIND - lastIssued);
+}
+
 export function isTier(v: unknown): v is Tier {
   return typeof v === "string" && (TIERS as readonly string[]).includes(v);
 }

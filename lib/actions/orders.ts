@@ -3,6 +3,7 @@
    Every mutation: validate role -> write (transaction) -> audit where the
    prototype does -> realtime broadcast -> notification. */
 import { db } from "../db";
+import type { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff } from "../auth";
 import { expressSurcharge, urgentCycleCharge, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
@@ -113,7 +114,8 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
     let usedCycle = false, excessCharge = 0, urgentCharge = 0;
     if (input.useCycle) {
       const sub = o.student.subscription;
-      if (!sub || !sub.active) throw new Error("No active subscription");
+      const blocked = subscriptionBlocker(sub);
+      if (blocked || !sub) throw new Error(blocked || "No active subscription");
       type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
       const buckets = (sub.buckets as unknown as Bucket[] | null) || null;
       let kgLimit: number;
@@ -218,7 +220,8 @@ export async function walkInOrder(
       let usedCycle = false, excessCharge = 0, urgentCharge = 0;
       if (input.useCycle) {
         const sub = stu.subscription;
-        if (!sub || !sub.active) throw new Error("No active subscription");
+        const blocked = subscriptionBlocker(sub);
+        if (blocked || !sub) throw new Error(blocked || "No active subscription");
         type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
         const buckets = (sub.buckets as unknown as Bucket[] | null) || null;
         let kgLimit: number;
@@ -389,10 +392,14 @@ export async function recordPay(orderId: string, method: "upi" | "cash", applyCr
 export type ActionResult = { ok: boolean; error?: string; id?: string; status?: string };
 
 /* ---------- Refund (negative payment + proportional GST credit note) ---------- */
-export async function refundOrder(orderId: string, amount: number, via: "upi" | "cash" | "credit", reason: string): Promise<ActionResult> {
+/* `restoreCycle` is deliberately opt-in rather than automatic. A refund is not
+   always a write-off: refunding just the urgent premium on a cycle order still
+   means the wash happened, so handing the cycle back too would pay the student
+   twice. Staff decide. */
+export async function refundOrder(orderId: string, amount: number, via: "upi" | "cash" | "credit", reason: string, restoreCycle = false): Promise<ActionResult> {
   const st = await requireStaff(1);
   if (!amount || amount <= 0) return { ok: false, error: "Enter a valid amount" };
-  const o = await db.order.findUniqueOrThrow({ where: { id: orderId }, include: { invoice: true } });
+  const o = await db.order.findUniqueOrThrow({ where: { id: orderId }, include: { invoice: true, student: { include: { subscription: true } } } });
 
   await db.$transaction(async (tx) => {
     await tx.payment.create({
@@ -401,10 +408,11 @@ export async function refundOrder(orderId: string, amount: number, via: "upi" | 
     if (via === "credit") await tx.student.update({ where: { id: o.studentId }, data: { credits: { increment: amount } } });
     if (o.invoice) await createCreditNote(tx, o.invoice, amount, reason, st.id, via);
     await tx.order.update({ where: { id: o.id }, data: { refunded: true, refundAmount: { increment: amount } } });
+    if (restoreCycle) await restoreCycleFor(tx, o, o.student.subscription);
   });
 
   await pushNotif(o.studentId, via === "credit" ? `₹${amount} refunded to your store credits.${reason ? " " + reason : ""}` : `₹${amount} refunded via ${via.toUpperCase()}.${reason ? " " + reason : ""}`, "status");
-  await audit("Refund", `#${o.id.slice(-4)} ₹${amount} via ${via}${reason ? " — " + reason : ""}`, st.id);
+  await audit("Refund", `#${o.id.slice(-4)} ₹${amount} via ${via}${restoreCycle ? " + cycle returned" : ""}${reason ? " — " + reason : ""}`, st.id);
   bcast(o);
   return { ok: true };
 }
@@ -431,6 +439,52 @@ export async function redoOrder(orderId: string): Promise<ActionResult> {
 }
 
 /* ---------- Cancel ---------- */
+/* Can this subscription pay for a wash right now?
+
+   Unused cycles are forfeited when the plan expires — they do not carry over to
+   the next year and cannot be spent on anything else. That rule only means
+   something if expiry is actually enforced at the moment a cycle is spent,
+   which it previously was not: `active` stayed true past expiresAt, so an
+   expired plan kept working. */
+function subscriptionBlocker(sub: { active: boolean; expiresAt: Date | null } | null) {
+  if (!sub || !sub.active) return "No active subscription";
+  if (sub.expiresAt && sub.expiresAt.getTime() < Date.now()) {
+    const on = sub.expiresAt.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+    return `This plan expired on ${on} — unused cycles are forfeited. Renew to keep using cycles.`;
+  }
+  return null;
+}
+
+/* Give a consumed plan cycle back to the student.
+
+   A cycle is prepaid value (~₹147 on a ₹5,000/34 plan), so losing one to an
+   order that never got washed is real money out of their pocket. Restores the
+   total, the per-service bucket it came from, and clears the log row so the
+   balance and the history agree. Must run inside the caller's transaction — a
+   half-restore is worse than none. */
+async function restoreCycleFor(
+  tx: Prisma.TransactionClient,
+  ord: { id: string; service: string; usedCycle: boolean },
+  sub: { id: string; cyclesUsed: number; buckets: unknown } | null,
+) {
+  if (!ord.usedCycle || !sub) return false;
+  type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
+  const buckets = (sub.buckets as unknown as Bucket[] | null) || null;
+  const data: { cyclesUsed?: { decrement: number }; buckets?: Bucket[] } = {};
+  if (sub.cyclesUsed > 0) data.cyclesUsed = { decrement: 1 };
+  if (buckets && buckets.length) {
+    const idx = buckets.findIndex((b) => b.service === ord.service && b.used > 0);
+    if (idx >= 0) {
+      buckets[idx] = { ...buckets[idx], used: buckets[idx].used - 1 };
+      data.buckets = buckets;
+    }
+  }
+  if (Object.keys(data).length) await tx.subscription.update({ where: { id: sub.id }, data });
+  await tx.cycleUse.deleteMany({ where: { orderId: ord.id } });
+  await tx.order.update({ where: { id: ord.id }, data: { usedCycle: false } });
+  return true;
+}
+
 export async function cancelOrder(orderId: string): Promise<ActionResult> {
   const st = await requireStaff(1);
   const ord = await db.order.findUniqueOrThrow({
@@ -442,26 +496,8 @@ export async function cancelOrder(orderId: string): Promise<ActionResult> {
 
   await db.$transaction(async (tx) => {
     await tx.order.update({ where: { id: ord.id }, data: { status: "cancelled", cancelledAt: new Date(), timeline: { create: { status: "cancelled" } } } });
-
-    // Hand the cycle back. Cancelling after staff burned a cycle used to cost
-    // the student that cycle permanently — real money on a prepaid plan.
-    const sub = ord.student.subscription;
-    if (ord.usedCycle && sub) {
-      type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
-      const buckets = (sub.buckets as unknown as Bucket[] | null) || null;
-      const data: { cyclesUsed?: { decrement: number }; buckets?: Bucket[] } = {};
-      if (sub.cyclesUsed > 0) data.cyclesUsed = { decrement: 1 };
-      if (buckets && buckets.length) {
-        const idx = buckets.findIndex((b) => b.service === ord.service && b.used > 0);
-        if (idx >= 0) {
-          buckets[idx] = { ...buckets[idx], used: buckets[idx].used - 1 };
-          data.buckets = buckets;
-        }
-      }
-      if (Object.keys(data).length) await tx.subscription.update({ where: { id: sub.id }, data });
-      await tx.cycleUse.deleteMany({ where: { orderId: ord.id } });
-      await tx.order.update({ where: { id: ord.id }, data: { usedCycle: false } });
-    }
+    // Cancelling means the wash never happened, so the cycle always goes back.
+    await restoreCycleFor(tx, ord, ord.student.subscription);
   });
   await db.otp.deleteMany({ where: { purpose: "pickup", refId: ord.id } });
   await pushNotif(ord.studentId, `Your order #${ord.id.slice(-4)} was cancelled.`, "status");

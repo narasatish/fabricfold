@@ -12,7 +12,8 @@ import { db } from "../db";
 import { requireStaff } from "../auth";
 import { pushNotif, audit } from "../notify";
 import { publish } from "../realtime";
-import { allocateBagCode, bagKindFor, isTier, BAG_LABEL } from "../bagcode";
+import { notifyOwner } from "../mail";
+import { allocateBagCode, bagKindFor, isTier, BAG_LABEL, parseBagCode, codesRemaining, WARN_AT, MAX_PER_KIND } from "../bagcode";
 
 /** Issue a bag to a student. First one is free; later ones take a price. */
 export async function issueBag(
@@ -37,10 +38,12 @@ export async function issueBag(
   const kind = bagKindFor(tier);
   const isFirstEver = stu.bags.length === 0;
 
-  // Subscribing after carrying a walk-in bag is an UPGRADE, not a replacement.
-  // Their code has to change so it matches the tier staff read off the bag, and
-  // billing them for that swap would be charging a student for upgrading.
-  const upgradingFromWalkIn = !isFirstEver && isTier(tier) && stu.bags.every((b) => !b.tier);
+  // Changing plan is a free SWAP, not a replacement sale. The code letter has
+  // to follow the tier staff read off the bag — a walk-in who subscribes, or a
+  // Bronze who moves to Gold, both need a new label. Charging for that would be
+  // billing a student for upgrading their plan.
+  const lastKind = stu.bags[0] ? bagKindFor(stu.bags[0].tier) : null;
+  const upgradingFromWalkIn = !isFirstEver && lastKind !== null && lastKind !== kind;
 
   const complimentary = isFirstEver || upgradingFromWalkIn;
   const price = complimentary ? 0 : Math.max(0, Math.round(Number(input.price) || 0));
@@ -72,17 +75,28 @@ export async function issueBag(
     isFirstEver
       ? `Your FabricFold bag ${bag.code} is ready — it's on us. Bring it along on your wash day.`
       : upgradingFromWalkIn
-        ? `Your new ${BAG_LABEL[kind]} bag ${bag.code} is ready — no charge for the upgrade.`
+        ? `Your new ${BAG_LABEL[kind]} bag ${bag.code} is ready — no charge for the plan change.`
         : `Replacement bag ${bag.code} issued${price > 0 ? ` (₹${price})` : ""}.`,
     "status",
   );
   await audit(
     "Bag issued",
-    `${bag.code} · ${stu.name} · ${BAG_LABEL[kind]}${complimentary ? (upgradingFromWalkIn ? " · tier upgrade, free" : " · complimentary") : ` · ₹${price}`}`,
+    `${bag.code} · ${stu.name} · ${BAG_LABEL[kind]}${complimentary ? (upgradingFromWalkIn ? " · plan change, free" : " · complimentary") : ` · ₹${price}`}`,
     st.id,
   );
+  // Running out of codes can't be fixed at the counter — bags are printed in
+  // advance — so warn the Owner with lead time rather than failing on bag 1000.
+  const seq = parseBagCode(bag.code)?.n ?? 0;
+  const left = codesRemaining(seq);
+  if (seq >= WARN_AT) {
+    void notifyOwner(
+      `Bag codes running out — ${BAG_LABEL[kind]}`,
+      `Just issued ${bag.code}. Only ${left} of ${MAX_PER_KIND} ${BAG_LABEL[kind]} codes remain. Widen the code scheme before the next print run.`,
+    );
+  }
+
   publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "bag", payload: { studentId, code: bag.code } });
-  return { ok: true as const, code: bag.code, complimentary, price };
+  return { ok: true as const, code: bag.code, complimentary, price, codesLeft: left };
 }
 
 /** Mark a bag lost or replaced. The code is retired, never handed out again. */

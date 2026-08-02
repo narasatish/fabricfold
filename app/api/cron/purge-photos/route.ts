@@ -50,10 +50,24 @@ export async function GET(req: Request) {
   const cutoff = new Date(Date.now() - PHOTO_RETENTION_DAYS * 86_400_000);
   let deleted = 0, failed = 0, orders = 0, messages = 0;
 
+  // Orders and threads with an UNRESOLVED complaint keep their photos however
+  // old they are — deleting the evidence while the dispute is still live is
+  // exactly the wrong moment to free up storage.
+  const disputed = await db.complaint.findMany({
+    where: { status: { not: "resolved" } },
+    select: { id: true, orderId: true },
+  });
+  const disputedOrderIds = disputed.map((c) => c.orderId).filter((x): x is string => !!x);
+  const disputedComplaintIds = disputed.map((c) => c.id);
+
   try {
     // Intake photos on old orders
     const oldOrders = await db.order.findMany({
-      where: { createdAt: { lt: cutoff }, intakePhotos: { not: Prisma.DbNull } },
+      where: {
+        createdAt: { lt: cutoff },
+        intakePhotos: { not: Prisma.DbNull },
+        id: { notIn: disputedOrderIds.length ? disputedOrderIds : ["__none__"] },
+      },
       select: { id: true, intakePhotos: true },
       take: 500,
     });
@@ -68,7 +82,11 @@ export async function GET(req: Request) {
 
     // Photos attached to old complaint messages
     const oldMsgs = await db.complaintMessage.findMany({
-      where: { at: { lt: cutoff }, photos: { not: Prisma.DbNull } },
+      where: {
+        at: { lt: cutoff },
+        photos: { not: Prisma.DbNull },
+        complaintId: { notIn: disputedComplaintIds.length ? disputedComplaintIds : ["__none__"] },
+      },
       select: { id: true, photos: true },
       take: 500,
     });

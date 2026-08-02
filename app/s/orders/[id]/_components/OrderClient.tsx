@@ -17,6 +17,8 @@ import {
   scanTag,
 } from "@/lib/actions/orders";
 import { submitCompensation } from "@/lib/actions/credits";
+import { reportOrderDamage } from "@/lib/actions/complaints";
+import { MIN_DAMAGE_PHOTOS } from "@/lib/complaint-rules";
 import { WEEKDAY_NAMES, isOffWashDay } from "@/lib/washday";
 
 type Order = {
@@ -87,6 +89,12 @@ export default function StaffOrderClient({
   // Sheet state
   const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, useCycle: false, noGst: false, itemQtys: {} as Record<string, number> });
   const [intakePhotos, setIntakePhotos] = useState<string[]>([]);
+  // Damage report — opens a complaint thread the student can see, so it needs
+  // real evidence attached before it can be filed.
+  const [showDamage, setShowDamage] = useState(false);
+  const [damagePhotos, setDamagePhotos] = useState<string[]>([]);
+  const [damageComment, setDamageComment] = useState("");
+  const [damageBusy, setDamageBusy] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [collectCode, setCollectCode] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "upi">("cash");
@@ -144,6 +152,38 @@ export default function StaffOrderClient({
     } finally {
       setUploadingPhoto(false);
     }
+  };
+
+  // Handler: upload a photo for the damage report (same store as intake)
+  const handleDamagePhoto = async (file: File) => {
+    setUploadingPhoto(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload/intake", { method: "POST", body: fd });
+      if (!res.ok) {
+        toast((await res.text()) || "Upload failed", true);
+        return;
+      }
+      const j = (await res.json()) as { key: string };
+      setDamagePhotos((p) => [...p, j.key]);
+    } catch {
+      toast("Upload failed", true);
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const submitDamage = async () => {
+    setDamageBusy(true);
+    const r = await reportOrderDamage(order.id, { comment: damageComment, photos: damagePhotos });
+    setDamageBusy(false);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast("Damage reported — the student has been notified");
+    setShowDamage(false);
+    setDamagePhotos([]);
+    setDamageComment("");
+    router.refresh();
   };
 
   // Handler: advance status
@@ -363,6 +403,20 @@ export default function StaffOrderClient({
         </div>
       </div>
 
+      {/* Raise a damage report the student can see, with evidence attached */}
+      <button className="card-btn mt12" onClick={() => setShowDamage(true)}>
+        <div className="icon-tile" style={{ background: "var(--amber-soft)", color: "var(--amber)" }}>
+          <Svg name="alert" size={20} />
+        </div>
+        <div className="grow">
+          <div className="h-sm">Report damage on these clothes</div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            Needs {MIN_DAMAGE_PHOTOS}+ photos and a note · sent to the student
+          </div>
+        </div>
+        <Svg name="chevR" size={18} />
+      </button>
+
       {/* Intake / damage photos */}
       {order.intakePhotos.length > 0 && (
         <div className="card pad mt12">
@@ -497,6 +551,84 @@ export default function StaffOrderClient({
       </div>
 
       {/* SHEETS */}
+
+      {/* Damage report sheet */}
+      <Sheet open={showDamage} onClose={() => setShowDamage(false)}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "8px" }}>Report damage</h2>
+          <div className="muted" style={{ fontSize: "12.5px", marginBottom: "16px" }}>
+            This opens a complaint the student can see and reply to. It is the record if they
+            dispute it later, so photograph the damage clearly from a few angles.
+          </div>
+
+          <div className="field">
+            <label>What did you find? <span style={{ color: "var(--red)" }}>*</span></label>
+            <textarea
+              className="input"
+              rows={3}
+              placeholder="e.g. Tear on the left sleeve of the blue shirt, already present at drop-off"
+              value={damageComment}
+              onChange={(e) => setDamageComment(e.target.value)}
+            />
+          </div>
+
+          <div className="field">
+            <label>
+              Photos <span style={{ color: "var(--red)" }}>*</span>{" "}
+              <span className="muted">({damagePhotos.length}/{MIN_DAMAGE_PHOTOS} minimum)</span>
+            </label>
+            {damagePhotos.length > 0 && (
+              <div className="row wrap gap8" style={{ marginBottom: "10px" }}>
+                {damagePhotos.map((key, i) => (
+                  <div key={key} style={{ position: "relative" }}>
+                    <img
+                      src={`/api/receipt?key=${encodeURIComponent(key)}`}
+                      alt={`Damage ${i + 1}`}
+                      style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 10, border: "1px solid var(--line)" }}
+                    />
+                    <button
+                      onClick={() => setDamagePhotos((p) => p.filter((k) => k !== key))}
+                      style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%", background: "var(--red)", color: "#fff", border: "none", fontSize: 12, lineHeight: 1, display: "grid", placeItems: "center" }}
+                      aria-label="Remove photo"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <label className="btn sec" style={{ cursor: "pointer" }}>
+              <Svg name="camera" size={16} />{" "}
+              {uploadingPhoto ? "Uploading…" : damagePhotos.length ? "Add another photo" : "Take a photo"}
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                hidden
+                disabled={uploadingPhoto}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void handleDamagePhoto(f);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+
+          <button
+            className="btn mt16"
+            disabled={damageBusy || uploadingPhoto || damagePhotos.length < MIN_DAMAGE_PHOTOS || damageComment.trim().length < 5}
+            onClick={submitDamage}
+          >
+            <Svg name="check" size={18} />{" "}
+            {damageBusy
+              ? "Sending…"
+              : damagePhotos.length < MIN_DAMAGE_PHOTOS
+                ? `Add ${MIN_DAMAGE_PHOTOS - damagePhotos.length} more photo${MIN_DAMAGE_PHOTOS - damagePhotos.length === 1 ? "" : "s"}`
+                : "Send to student"}
+          </button>
+        </div>
+      </Sheet>
 
       {/* Accept sheet */}
       <Sheet open={showAcceptSheet} onClose={() => setShowAcceptSheet(false)}>

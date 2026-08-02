@@ -81,6 +81,7 @@ model Student {
   compensations Compensation[]
   complaints    Complaint[]
   notifications Notification[]
+  bags          Bag[]
 }
 
 model Staff {
@@ -110,13 +111,29 @@ model Subscription {
   cyclesUsed  Int       @default(0)
   kgPerCycle  Decimal
   cycleLog    CycleUse[]
+}
 
-  // Bag code printed on the complimentary bag handed over at signup:
-  // B001–B999 (bronze) / S001–S999 (silver) / G001–G999 (gold).
-  // Allocated once, gap-free, never reused — it identifies a PHYSICAL bag.
-  planCode   String?   @unique
-  bagGiven   Boolean   @default(false)
-  bagGivenAt DateTime?
+// A PHYSICAL bag handed to a student, with its code printed on the outside:
+// B001–B999 bronze · S001–S999 silver · G001–G999 gold · W001–W999 walk-in
+// (no subscription). The first bag is complimentary; replacements are sold.
+//
+// Codes are allocated gap-free and NEVER reused — a reissued code would make an
+// already-printed bag point at two different students over its lifetime. A lost
+// bag is marked lost and the student gets a NEW code, not the old one back.
+model Bag {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  studentId     String
+  student       Student  @relation(fields: [studentId], references: [id])
+  tier          String? // bronze | silver | gold | null (walk-in)
+  complimentary Boolean  @default(false) // first bag free, later ones charged
+  price         Decimal  @default(0)
+  status        String   @default("active") // active | lost | replaced
+  issuedAt      DateTime @default(now())
+  issuedBy      String // staffId
+  note          String?
+
+  @@index([studentId, status])
 }
 
 model CycleUse {
@@ -263,7 +280,8 @@ model Compensation {
   id        String   @id @default(cuid())
   studentId String
   student   Student  @relation(fields: [studentId], references: [id])
-  orderId   String?
+  orderId     String?
+  complaintId String? // set when this payout settles a specific complaint
   kind      String // damage | stain | missing | goodwill | manual
   amount    Decimal
   method    String // credit | cash (cash = Manager+, posts cash_out)
@@ -311,6 +329,9 @@ model Complaint {
   status     String    @default("open") // open | resolved
   at         DateTime  @default(now())
   resolvedAt DateTime?
+  // Remedies granted for this complaint, so a free re-wash or a payout is
+  // always traceable back to the grievance that caused it (and reportable).
+  redoOrderId String? // the free re-service order raised for this complaint
   messages   ComplaintMessage[]
 }
 

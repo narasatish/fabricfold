@@ -23,11 +23,9 @@ const db = new PrismaClient({ adapter: makeAdapter() });
 const COLLEGE_NAME = "St Mary's";
 const KG_PER_CYCLE = 7;
 
-/* Is the headline price the FINAL amount a student pays?
-   true  -> ₹5,000 is what they hand over, no GST added, no tax invoice
-   false -> ₹5,000 + GST% is collected, tax invoice raised on UPI
-   Flip this to match how the tiers are advertised on campus. */
-const GST_FREE = false;
+/* The headline price is the FINAL amount a student pays: ₹4,000 means ₹4,000
+   handed over, no GST added on top and no tax invoice raised. */
+const GST_FREE = true;
 
 const TIERS = [
   { tier: "bronze", name: "Bronze", price: 4000, buckets: [{ service: "washFold", cycles: 34, kgPerCycle: KG_PER_CYCLE }] },

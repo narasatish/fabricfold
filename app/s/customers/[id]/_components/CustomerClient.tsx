@@ -7,6 +7,7 @@ import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, loyaltyBadge } from "@/l
 import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
 import { assignSubscription } from "@/lib/actions/subscription";
+import { issueBag, retireBag } from "@/lib/actions/bags";
 import { walkInOrder } from "@/lib/actions/orders";
 import { topUpCredits } from "@/lib/actions/ops";
 import { updateStudentPhone } from "@/lib/actions/admin";
@@ -23,6 +24,7 @@ type Student = {
     active: boolean; plan: string; cyclesTotal: number; cyclesUsed: number; kgPerCycle: number;
     expiresAt: number | null; cycleLog: { at: number; orderId: string }[];
   } | null;
+  bags: { id: string; code: string; tier: string | null; complimentary: boolean; price: number; status: string; issuedAt: number }[];
   orders: { id: string; status: string; service: string; total: number; createdAt: number }[];
   compensations: { id: string; kind: string; amount: number; method: string; comment: string | null; at: number }[];
   creditUses: { id: string; amount: number; orderId: string; at: number }[];
@@ -65,6 +67,32 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
   const wiGst = wiUseCycle || wiNoGst || !gstEnabled ? 0 : Math.round((wiSubtotal + (wiExpress ? Math.round(wiSubtotal * 0.4) : 0)) * 0.18);
   const wiExpressSurcharge = wiExpress && !wiUseCycle ? Math.round(wiSubtotal * 0.4) : 0;
   const subHasCycles = !!student.subscription?.active;
+
+  // Bags — first is complimentary, replacements are sold at the counter
+  const activeBag = student.bags.find((b) => b.status === "active") || null;
+  const isFirstBag = student.bags.length === 0;
+  const [showBag, setShowBag] = useState(false);
+  const [bagPrice, setBagPrice] = useState(0);
+  const [bagMethod, setBagMethod] = useState<"cash" | "upi">("cash");
+  const [bagBusy, setBagBusy] = useState(false);
+
+  const doIssueBag = async () => {
+    setBagBusy(true);
+    const r = await issueBag(student.id, { price: isFirstBag ? 0 : bagPrice, method: bagMethod });
+    setBagBusy(false);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(`Bag ${r.code} issued${r.complimentary ? " — complimentary" : ` · ₹${r.price}`}`);
+    setShowBag(false);
+    setBagPrice(0);
+    router.refresh();
+  };
+
+  const doRetireBag = async (bagId: string, status: "lost" | "replaced") => {
+    const r = await retireBag(bagId, status);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(`Bag marked ${status}`);
+    router.refresh();
+  };
 
   // Wallet top-up (money physically received first)
   const [showTopUp, setShowTopUp] = useState(false);
@@ -216,6 +244,45 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
       {/* Orders */}
       {student.orders.length > 0 && (
         <>
+          <div className="sec-title mt20">Bag</div>
+          <div className="card pad mt10">
+            {activeBag ? (
+              <>
+                <div className="between">
+                  <span className="h-sm mono" style={{ fontSize: 18 }}>{activeBag.code}</span>
+                  <span className="pill">{activeBag.complimentary ? "Complimentary" : fmt(activeBag.price)}</span>
+                </div>
+                <div className="muted mt4" style={{ fontSize: 12 }}>Issued {dateStr(activeBag.issuedAt)}</div>
+                <div className="row gap8 mt12">
+                  <button className="btn xs sec" onClick={() => doRetireBag(activeBag.id, "lost")}>Mark lost</button>
+                  <button className="btn xs sec" onClick={() => doRetireBag(activeBag.id, "replaced")}>Mark replaced</button>
+                </div>
+                <div className="muted mt8" style={{ fontSize: 11.5 }}>
+                  Retiring a bag frees the student for a new code. The old code is never reissued.
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="muted" style={{ fontSize: 13 }}>
+                  {isFirstBag ? "No bag issued yet — the first one is complimentary." : "No active bag. Issue a replacement below."}
+                </div>
+                <button className="btn xs mt12" onClick={() => setShowBag(true)}>
+                  <Svg name="plus" size={13} /> {isFirstBag ? "Issue complimentary bag" : "Sell a replacement bag"}
+                </button>
+              </>
+            )}
+            {student.bags.filter((b) => b.status !== "active").length > 0 && (
+              <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
+                {student.bags.filter((b) => b.status !== "active").map((b) => (
+                  <div key={b.id} className="kv">
+                    <span className="k mono">{b.code}</span>
+                    <span className="muted" style={{ fontSize: 12 }}>{b.status} · {dateStr(b.issuedAt)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="sec-title mt20">Order history</div>
           {student.orders.slice(0, 12).map((o) => (
             <button key={o.id} className="card-btn mt10" onClick={() => router.push(`/s/orders/${o.id}`)}>
@@ -351,6 +418,35 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
           </div>
           <button className="btn mt16" onClick={doWalkIn} disabled={wiLoading || wiPieces === 0}>
             <Svg name="check" size={18} /> {wiLoading ? "Creating…" : "Create & receive order"}
+          </button>
+        </div>
+      </Sheet>
+
+      {/* Issue / sell a bag */}
+      <Sheet open={showBag} onClose={() => setShowBag(false)}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "6px" }}>{isFirstBag ? "Issue complimentary bag" : "Sell a replacement bag"}</h2>
+          <div className="muted" style={{ fontSize: "12.5px", marginBottom: "16px" }}>
+            The code is allocated automatically from {student.subscription?.active ? "their plan tier" : "the walk-in series"} and
+            printed on the bag. It is never reused, so write it on the bag before handing it over.
+          </div>
+          {!isFirstBag && (
+            <>
+              <div className="field">
+                <label>Price</label>
+                <input className="input" type="number" value={bagPrice || ""} onChange={(e) => setBagPrice(Number(e.target.value))} />
+              </div>
+              <div className="field">
+                <label>Payment method</label>
+                <Seg<"cash" | "upi"> options={[["cash", "Cash"], ["upi", "UPI"]]} value={bagMethod} onChange={setBagMethod} />
+              </div>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+                Posts as a counter payment, so it lands in today&apos;s cash reconciliation.
+              </div>
+            </>
+          )}
+          <button className="btn" onClick={doIssueBag} disabled={bagBusy || (!isFirstBag && bagPrice <= 0)}>
+            <Svg name="check" size={18} /> {bagBusy ? "Issuing…" : isFirstBag ? "Issue bag" : `Take ${fmt(bagPrice)} & issue`}
           </button>
         </div>
       </Sheet>

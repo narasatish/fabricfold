@@ -19,6 +19,7 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
       orders: { orderBy: { createdAt: "desc" } },
       compensations: { orderBy: { at: "desc" } },
       creditUses: { orderBy: { at: "desc" } },
+      bags: { orderBy: { issuedAt: "desc" } },
     },
   });
   if (!student) notFound();
@@ -60,6 +61,7 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
     orders: student.orders.map((o) => ({ id: o.id, status: o.status, service: o.service, total: N(o.total), createdAt: o.createdAt.getTime() })),
     compensations: student.compensations.map((c) => ({ id: c.id, kind: c.kind, amount: N(c.amount), method: c.method, comment: c.comment, at: c.at.getTime() })),
     creditUses: student.creditUses.map((u) => ({ id: u.id, amount: N(u.amount), orderId: u.orderId, at: u.at.getTime() })),
+    bags: student.bags.map((b) => ({ id: b.id, code: b.code, tier: b.tier, complimentary: b.complimentary, price: N(b.price), status: b.status, issuedAt: b.issuedAt.getTime() })),
   };
 
   return (

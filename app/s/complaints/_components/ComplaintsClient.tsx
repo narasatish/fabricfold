@@ -51,7 +51,9 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
 
   const doComp = async () => {
     if (!compFor) return;
-    const r = await submitCompensation({ studentId: compFor.studentId, orderId: compFor.orderId, kind: comp.kind, amount: comp.amount, method: comp.method, comment: comp.comment });
+    // Pass the complaint through so the payout is traceable to the grievance
+    // that justified it, not just to the student.
+    const r = await submitCompensation({ studentId: compFor.studentId, orderId: compFor.orderId, complaintId: compFor.id, kind: comp.kind, amount: comp.amount, method: comp.method, comment: comp.comment });
     if (!r.ok) return toast(r.error || "Failed", true);
     toast("Compensation issued");
     setCompFor(null);

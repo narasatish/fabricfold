@@ -9,7 +9,7 @@ import { pushNotif, audit } from "../notify";
 
 const KIND_LABEL: Record<string, string> = { damage: "Damage", stain: "Stain/re-do", missing: "Missing item", goodwill: "Goodwill", manual: "Adjustment" };
 
-export async function submitCompensation(input: { studentId: string; orderId?: string | null; kind: string; amount: number; method: "credit" | "cash"; comment: string }) {
+export async function submitCompensation(input: { studentId: string; orderId?: string | null; complaintId?: string | null; kind: string; amount: number; method: "credit" | "cash"; comment: string }) {
   const st = await requireStaff(input.method === "cash" ? 2 : 1); // cash comp = Manager+
   const amount = Math.floor(input.amount);
   if (!amount || amount <= 0) return { ok: false as const, error: "Enter a valid amount" };
@@ -17,7 +17,9 @@ export async function submitCompensation(input: { studentId: string; orderId?: s
 
   await db.$transaction(async (tx) => {
     await tx.compensation.create({
-      data: { studentId: stu.id, orderId: input.orderId || null, kind: input.kind, amount, comment: input.comment.trim() || null, by: st.id, method: input.method },
+      // complaintId ties a payout to the grievance that justified it, so the
+      // cost of a service failure is traceable rather than a loose adjustment.
+      data: { studentId: stu.id, orderId: input.orderId || null, complaintId: input.complaintId || null, kind: input.kind, amount, comment: input.comment.trim() || null, by: st.id, method: input.method },
     });
     if (input.method === "credit") {
       await tx.student.update({ where: { id: stu.id }, data: { credits: { increment: amount } } });

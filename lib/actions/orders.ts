@@ -289,13 +289,34 @@ export async function walkInOrder(
 }
 
 /* ---------- Staff: advance status ---------- */
-export async function advanceStatus(orderId: string) {
-  await requireStaff(1);
+/* `countedPieces` is the recount when folding is finished. Missing socks and
+   stray items are the commonest laundry complaint, and the cheapest moment to
+   catch one is BEFORE the student opens the bag — a proactive "we're a piece
+   short" is an apology, the same fact discovered at the counter is a dispute. */
+export async function advanceStatus(orderId: string, input?: { countedPieces?: number | null }) {
+  const st = await requireStaff(1);
   const cfg = await getConfig();
-  const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
+  const o = await db.order.findUniqueOrThrow({ where: { id: orderId }, include: { student: true } });
   const nextMap: Record<string, string> = { received: "processing", processing: "ready" };
   const next = nextMap[o.status];
   if (!next) return { ok: false as const, error: "Use the collect flow for ready orders" };
+
+  // Reconcile the count on the way to ready, against what was logged at intake.
+  let shortBy = 0;
+  const counted = input?.countedPieces;
+  const intakeCount = o.actualPieces ?? o.declaredPieces;
+  if (next === "ready" && counted !== null && counted !== undefined) {
+    const n = Math.max(0, Math.floor(Number(counted)));
+    shortBy = Math.max(0, intakeCount - n);
+    if (n !== intakeCount) {
+      await db.order.update({ where: { id: o.id }, data: { actualPieces: n } });
+      await audit(
+        shortBy > 0 ? "Piece shortfall at ready" : "Piece count corrected at ready",
+        `#${o.id.slice(-4)} · ${o.student.name} · intake ${intakeCount} → counted ${n}`,
+        st.id,
+      );
+    }
+  }
 
   await db.order.update({ where: { id: o.id }, data: { status: next, timeline: { create: { status: next } } } });
 
@@ -304,6 +325,18 @@ export async function advanceStatus(orderId: string) {
     await db.otp.deleteMany({ where: { purpose: "pickup", refId: o.id } });
     await db.otp.create({ data: { phone: "", purpose: "pickup", code, refId: o.id, expiresAt: new Date(Date.now() + 7 * 86_400_000) } });
     await pushNotif(o.studentId, `Your ${cfg.rates[o.service].label} order is ready for collection. Pickup code: ${code}.`, "ready");
+    if (shortBy > 0) {
+      // Tell them ourselves rather than letting them find out at the counter.
+      await pushNotif(
+        o.studentId,
+        `Heads up on order #${o.id.slice(-4)}: we counted ${intakeCount - shortBy} pieces against ${intakeCount} logged at drop-off. We're looking into it — please check when you collect.`,
+        "status",
+      );
+      void notifyOwner(
+        `Piece shortfall — #${o.id.slice(-4)}`,
+        `${o.student.name}: ${intakeCount} logged at intake, ${intakeCount - shortBy} counted at ready (short ${shortBy}). Flagged by ${st.name}.`,
+      );
+    }
   } else {
     await pushNotif(o.studentId, `Your order is now ${next}.`, "status");
   }

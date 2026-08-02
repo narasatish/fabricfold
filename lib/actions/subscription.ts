@@ -129,6 +129,74 @@ export async function assignSubscription(studentId: string, planId: string, meth
   return { ok: true as const };
 }
 
+/* Move a student to a different plan mid-term, paying only the difference.
+
+   Cycles already used are NOT wiped — that would hand back washes they've had.
+   The new plan's buckets are rebuilt and the old usage replayed onto them, so a
+   student who used 8 Wash&Fold keeps having used 8. Where the new plan has
+   fewer cycles of a service than they've already spent, the bucket is simply
+   full rather than negative.
+
+   Only ever charges the difference, and never refunds a downgrade — that's a
+   counter conversation, not something to automate. */
+export async function upgradeSubscription(studentId: string, planId: string, method: "cash" | "upi") {
+  const st = await requireStaff(2); // Manager+ — money changes hands
+  const stu = await db.student.findUnique({
+    where: { id: studentId },
+    include: { subscription: { include: { planRef: true } } },
+  });
+  if (!stu) return { ok: false as const, error: "Student not found" };
+  const cur = stu.subscription;
+  if (!cur || !cur.active) return { ok: false as const, error: "This student has no active plan to change" };
+  if (cur.expiresAt && cur.expiresAt.getTime() < Date.now()) {
+    return { ok: false as const, error: "That plan has expired — assign a fresh one instead" };
+  }
+
+  const plan = await db.plan.findUnique({ where: { id: planId } });
+  if (!plan || !plan.active) return { ok: false as const, error: "Pick a plan" };
+  if (plan.collegeId !== stu.collegeId) return { ok: false as const, error: "That plan belongs to a different campus" };
+  if (cur.planId === plan.id) return { ok: false as const, error: "They're already on that plan" };
+
+  const oldGross = cur.planRef ? await planGross(cur.planRef) : 0;
+  const newGross = await planGross(plan);
+  const difference = newGross - oldGross;
+  if (difference <= 0) {
+    return { ok: false as const, error: "That plan isn't more expensive — handle a downgrade at the counter" };
+  }
+
+  // Rebuild buckets on the new plan, carrying the old usage across.
+  type Used = { service: string; cycles: number; used: number; kgPerCycle: number };
+  const oldBuckets = (cur.buckets as unknown as Used[] | null) || [];
+  const usedByService = new Map<string, number>();
+  for (const b of oldBuckets) usedByService.set(b.service, (usedByService.get(b.service) || 0) + b.used);
+
+  const buckets = usageBuckets(plan.buckets as unknown as PlanBucket[]).map((b) => ({
+    ...b,
+    used: Math.min(b.cycles, usedByService.get(b.service) || 0),
+  }));
+  const cyclesTotal = buckets.reduce((s, b) => s + b.cycles, 0);
+  const cyclesUsed = buckets.reduce((s, b) => s + b.used, 0);
+
+  await db.$transaction(async (tx) => {
+    await tx.subscription.update({
+      where: { studentId },
+      data: {
+        plan: plan.name, planId: plan.id, buckets, cyclesTotal, cyclesUsed,
+        kgPerCycle: buckets[0]?.kgPerCycle ?? Number(cur.kgPerCycle),
+      },
+    });
+    await tx.payment.create({
+      data: { method, amount: difference, collegeId: stu.collegeId, studentId, note: `Plan change: ${cur.plan} → ${plan.name}` },
+    });
+  });
+
+  await pushNotif(studentId, `You're now on the "${plan.name}" plan. ${cyclesTotal - cyclesUsed} cycles left.`, "status");
+  await audit("Plan changed", `${stu.name} · ${cur.plan} → ${plan.name} · ₹${difference} (${method})`, st.id);
+  void notifyOwner("Plan changed", `${stu.name}: ${cur.plan} → ${plan.name}. Collected ₹${difference} by ${method.toUpperCase()} (by ${st.name}).`);
+  publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "subscription", payload: { studentId } });
+  return { ok: true as const, difference, cyclesLeft: cyclesTotal - cyclesUsed, tierChanged: cur.planRef?.tier !== plan.tier };
+}
+
 export async function cancelSubscriptionRequest() {
   const stu = await requireStudent();
   if (stu.subscription && !stu.subscription.active) {

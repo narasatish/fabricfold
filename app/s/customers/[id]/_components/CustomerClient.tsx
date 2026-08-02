@@ -6,7 +6,7 @@ import { Qr } from "@/components/qr";
 import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, loyaltyBadge } from "@/lib/format";
 import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
-import { assignSubscription } from "@/lib/actions/subscription";
+import { assignSubscription, upgradeSubscription } from "@/lib/actions/subscription";
 import { issueBag, retireBag } from "@/lib/actions/bags";
 import { walkInOrder } from "@/lib/actions/orders";
 import { topUpCredits } from "@/lib/actions/ops";
@@ -91,6 +91,26 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
     const r = await retireBag(bagId, status);
     if (!r.ok) return toast(r.error || "Failed", true);
     toast(`Bag marked ${status}`);
+    router.refresh();
+  };
+
+  // Change plan mid-term — pay only the difference, keep cycles already used
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [upgradePlanId, setUpgradePlanId] = useState("");
+  const [upgradeMethod, setUpgradeMethod] = useState<"cash" | "upi">("cash");
+  const [upgradeBusy, setUpgradeBusy] = useState(false);
+  const currentPlanName = student.subscription?.plan || "";
+  const upgradeOptions = plans.filter((p) => p.name !== currentPlanName);
+  const upgradePlan = upgradeOptions.find((p) => p.id === upgradePlanId) || null;
+
+  const doUpgrade = async () => {
+    if (!upgradePlan) return;
+    setUpgradeBusy(true);
+    const r = await upgradeSubscription(student.id, upgradePlan.id, upgradeMethod);
+    setUpgradeBusy(false);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(`Moved to ${upgradePlan.name} — collected ${fmt(r.difference)}${r.tierChanged ? ". Issue a new bag for the new tier." : ""}`);
+    setShowUpgrade(false);
     router.refresh();
   };
 
@@ -222,6 +242,11 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
           </div>
           <div className="kv mt8"><span className="k">Plan</span><span>{student.subscription.plan}</span></div>
           <div className="kv"><span className="k">Cycles used</span><span className="mono">{student.subscription.cyclesUsed} / {student.subscription.cyclesTotal}</span></div>
+          {staffRole >= 2 && upgradeOptions.length > 0 && (
+            <button className="btn xs sec mt12" onClick={() => { setUpgradePlanId(upgradeOptions[0].id); setShowUpgrade(true); }}>
+              <Svg name="layers" size={13} /> Change plan
+            </button>
+          )}
           <div className="kv"><span className="k">Per cycle</span><span>up to {student.subscription.kgPerCycle} kg</span></div>
           {student.subscription.expiresAt && (
             <div className="kv"><span className="k">Expires</span><span>{dateStr(student.subscription.expiresAt)}</span></div>
@@ -418,6 +443,36 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
           </div>
           <button className="btn mt16" onClick={doWalkIn} disabled={wiLoading || wiPieces === 0}>
             <Svg name="check" size={18} /> {wiLoading ? "Creating…" : "Create & receive order"}
+          </button>
+        </div>
+      </Sheet>
+
+      {/* Change plan mid-term */}
+      <Sheet open={showUpgrade} onClose={() => setShowUpgrade(false)}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "6px" }}>Change plan</h2>
+          <div className="muted" style={{ fontSize: "12.5px", marginBottom: "16px" }}>
+            Only the price difference is collected. Cycles they&apos;ve already used stay used —
+            moving plan doesn&apos;t hand back washes they&apos;ve had.
+          </div>
+          <div className="field">
+            <label>New plan</label>
+            <select className="input" style={{ height: 42 }} value={upgradePlanId} onChange={(e) => setUpgradePlanId(e.target.value)}>
+              {upgradeOptions.map((p) => (
+                <option key={p.id} value={p.id}>{p.name} — {fmt(p.gross)}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>Payment method</label>
+            <Seg<"cash" | "upi"> options={[["cash", "Cash"], ["upi", "UPI"]]} value={upgradeMethod} onChange={setUpgradeMethod} />
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+            A downgrade is refused here — handle refunds at the counter rather than automatically.
+            If the tier letter changes, issue a new bag afterwards (that swap is free).
+          </div>
+          <button className="btn" onClick={doUpgrade} disabled={upgradeBusy || !upgradePlan}>
+            <Svg name="check" size={18} /> {upgradeBusy ? "Saving…" : "Collect difference & change plan"}
           </button>
         </div>
       </Sheet>

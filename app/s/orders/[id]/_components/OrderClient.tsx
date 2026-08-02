@@ -102,6 +102,12 @@ export default function StaffOrderClient({
   const [staffInvoice, setStaffInvoice] = useState(false);
   const [refundInput, setRefundInput] = useState({ amount: order.received || order.total, via: "upi" as "upi" | "cash" | "credit", reason: "", restoreCycle: false });
   const [compInput, setCompInput] = useState({ kind: "damage", amount: 0, method: "credit" as "credit" | "cash", comment: "" });
+  // Recount before handing over. Missing items are the commonest complaint and
+  // the cheapest moment to catch one is before the student opens the bag.
+  const intakeCount = order.actualPieces ?? order.declaredPieces ?? 0;
+  const [showReady, setShowReady] = useState(false);
+  const [countedPieces, setCountedPieces] = useState<number>(intakeCount);
+  const [readyBusy, setReadyBusy] = useState(false);
 
   const late = isOverdue({ status: order.status, receivedAt: order.receivedAt ? new Date(order.receivedAt) : null, express: order.express }) && (order.status === "received" || order.status === "processing");
   const isDraft = order.status === "draft";
@@ -187,7 +193,19 @@ export default function StaffOrderClient({
   };
 
   // Handler: advance status
+  const confirmReady = async () => {
+    setReadyBusy(true);
+    const r = await advanceStatus(order.id, { countedPieces });
+    setReadyBusy(false);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(countedPieces < intakeCount ? `Marked ready — shortfall of ${intakeCount - countedPieces} flagged` : "Marked ready for collection");
+    setShowReady(false);
+    router.refresh();
+  };
+
   const handleAdvance = async () => {
+    // Going to ready goes through the recount prompt instead.
+    if (order.status === "processing") return setShowReady(true);
     const r = await advanceStatus(order.id);
     if (!r.ok) {
       toast(r.error || "Failed", true);
@@ -551,6 +569,41 @@ export default function StaffOrderClient({
       </div>
 
       {/* SHEETS */}
+
+      {/* Recount before marking ready */}
+      <Sheet open={showReady} onClose={() => setShowReady(false)}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "6px" }}>Mark ready — confirm the count</h2>
+          <div className="muted" style={{ fontSize: "12.5px", marginBottom: "16px" }}>
+            {intakeCount} pieces were logged at drop-off. Count the folded pile before it goes on
+            the shelf — finding a missing item now is an apology, finding it at the counter is a dispute.
+          </div>
+          <div className="field">
+            <label>Pieces counted</label>
+            <input
+              className="input"
+              type="number"
+              value={countedPieces}
+              onChange={(e) => setCountedPieces(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+            />
+          </div>
+          {countedPieces < intakeCount && (
+            <div className="card pad" style={{ background: "var(--amber-soft)", borderColor: "#f2e2c4", marginBottom: "12px" }}>
+              <span style={{ fontSize: "12.5px", color: "var(--amber)" }}>
+                Short by {intakeCount - countedPieces}. The student is told now, and the Owner is notified.
+              </span>
+            </div>
+          )}
+          {countedPieces > intakeCount && (
+            <div className="muted" style={{ fontSize: "12.5px", marginBottom: "12px" }}>
+              More than logged at intake — the count will be corrected to {countedPieces}.
+            </div>
+          )}
+          <button className="btn" onClick={confirmReady} disabled={readyBusy}>
+            <Svg name="check" size={18} /> {readyBusy ? "Saving…" : "Confirm & mark ready"}
+          </button>
+        </div>
+      </Sheet>
 
       {/* Damage report sheet */}
       <Sheet open={showDamage} onClose={() => setShowDamage(false)}>

@@ -150,3 +150,56 @@ describe("bag codes warn before they run out", () => {
     expect(ba).toMatch(/notifyOwner/);
   });
 });
+
+describe("recount before marking ready", () => {
+  const adv = body("advanceStatus");
+
+  it("compares the recount against what was logged at intake", () => {
+    expect(adv).toMatch(/intakeCount/);
+    expect(adv).toMatch(/o\.actualPieces \?\? o\.declaredPieces/);
+  });
+
+  it("a shortfall can never be negative", () => {
+    expect(adv).toMatch(/Math\.max\(0, intakeCount - n\)/);
+  });
+
+  it("tells the student BEFORE they open the bag, not at the counter", () => {
+    expect(adv).toMatch(/shortBy > 0/);
+    expect(adv).toMatch(/pushNotif/);
+    expect(adv).toMatch(/notifyOwner/);
+  });
+
+  it("records the discrepancy in the audit log", () => {
+    expect(adv).toMatch(/Piece shortfall at ready/);
+  });
+
+  it("skips reconciliation entirely when no count is supplied", () => {
+    expect(adv).toMatch(/counted !== null && counted !== undefined/);
+  });
+});
+
+describe("changing plan mid-term", () => {
+  const sub = fs.readFileSync(path.resolve(__dirname, "../lib/actions/subscription.ts"), "utf8");
+
+  it("charges only the difference in price", () => {
+    expect(sub).toMatch(/const difference = newGross - oldGross/);
+  });
+
+  it("refuses a downgrade rather than automating a refund", () => {
+    expect(sub).toMatch(/difference <= 0/);
+  });
+
+  it("keeps cycles already used — a plan change is not a free reset", () => {
+    expect(sub).toMatch(/usedByService/);
+    expect(sub).toMatch(/used: Math\.min\(b\.cycles, usedByService\.get\(b\.service\) \|\| 0\)/);
+  });
+
+  it("refuses to 'upgrade' an expired plan", () => {
+    expect(sub).toMatch(/cur\.expiresAt\.getTime\(\) < Date\.now\(\)/);
+  });
+
+  it("requires Manager+ because money changes hands", () => {
+    const fn = sub.slice(sub.indexOf("export async function upgradeSubscription"));
+    expect(fn).toMatch(/requireStaff\(2\)/);
+  });
+});

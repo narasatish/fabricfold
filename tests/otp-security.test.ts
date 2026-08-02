@@ -40,7 +40,10 @@ beforeAll(async () => {
     where: { phone: ATTACKER_TARGET }, update: {},
     create: { name: "Sec Test Admin", phone: ATTACKER_TARGET, role: 3 },
   });
-}, 120_000);
+  // `prisma db push` against a remote Postgres is the slow part, and it grows
+  // with the schema — 120s was already marginal and broke once the Bag table
+  // landed. Kept generous on purpose: this hook is setup, not a perf budget.
+}, 300_000);
 
 afterEach(async () => {
   await db.otp.deleteMany({ where: { purpose: "login" } });

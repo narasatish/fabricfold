@@ -62,7 +62,10 @@ beforeAll(async () => {
     where: { id: "222222" }, update: {},
     create: { id: "222222", phone: "9999900002", name: "Gateway Student", collegeId: "gw1" },
   });
-}, 120_000);
+  // Same reason as washday.test.ts: the slow part is `prisma db push` against a
+  // remote Postgres, and it grows with the schema. It crossed the old 120s
+  // budget once the Bag table landed.
+}, 300_000);
 
 async function mkOrder(id: string, opts: { noGst?: boolean; creditApplied?: number } = {}) {
   return db.order.create({

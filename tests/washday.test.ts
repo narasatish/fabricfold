@@ -30,8 +30,19 @@ beforeAll(async () => {
 }, 300_000);
 
 afterEach(async () => {
-  await db.student.deleteMany({ where: { id: { startsWith: "wd" } } });
-  await db.college.deleteMany({ where: { id: { startsWith: "wdcol" } } });
+  // The remote pooler occasionally drops an idle connection during a long run,
+  // which surfaced as an unrelated PURE test failing inside this cleanup. Retry
+  // once so a dropped socket doesn't fail a passing test — a genuine problem
+  // still throws on the second attempt rather than being swallowed.
+  const purge = async () => {
+    await db.student.deleteMany({ where: { id: { startsWith: "wd" } } });
+    await db.college.deleteMany({ where: { id: { startsWith: "wdcol" } } });
+  };
+  try {
+    await purge();
+  } catch {
+    await purge();
+  }
 });
 
 async function mkCollege(closedWeekday: number | null) {

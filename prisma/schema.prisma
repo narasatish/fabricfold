@@ -51,6 +51,7 @@ model Plan {
   collegeId String
   college   College  @relation(fields: [collegeId], references: [id])
   name      String
+  tier      String? // bronze | silver | gold — drives the bag code letter (B/S/G). null = untiered legacy plan
   price     Decimal // base price; GST added on top unless gstFree
   gstFree   Boolean  @default(false) // e.g. BVRIT ₹7,000 flat, no GST
   active    Boolean  @default(true)
@@ -109,6 +110,13 @@ model Subscription {
   cyclesUsed  Int       @default(0)
   kgPerCycle  Decimal
   cycleLog    CycleUse[]
+
+  // Bag code printed on the complimentary bag handed over at signup:
+  // B001–B999 (bronze) / S001–S999 (silver) / G001–G999 (gold).
+  // Allocated once, gap-free, never reused — it identifies a PHYSICAL bag.
+  planCode   String?   @unique
+  bagGiven   Boolean   @default(false)
+  bagGivenAt DateTime?
 }
 
 model CycleUse {
@@ -313,6 +321,7 @@ model ComplaintMessage {
   from        String // student | staff
   by          String
   text        String
+  photos      Json? // storage keys of attached photos (e.g. pre-wash damage evidence)
   at          DateTime  @default(now())
 }
 

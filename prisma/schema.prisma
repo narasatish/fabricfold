@@ -180,6 +180,10 @@ model Order {
   cancelledAt    DateTime?
   createdAt      DateTime  @default(now())
   receivedAt     DateTime? // SLA: due = receivedAt + (express ? 1 : 2) days
+  // How many "please collect" nudges have gone out for this order. Counting
+  // them (rather than a bool) is what stops the daily cron re-sending the same
+  // reminder every run while a bag sits uncollected for a fortnight.
+  collectionRemindersSent Int @default(0)
 
   timeline OrderEvent[]
   tags     GarmentTag[]

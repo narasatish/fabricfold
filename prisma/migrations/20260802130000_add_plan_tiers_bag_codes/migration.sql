@@ -10,6 +10,9 @@ ALTER TABLE "Plan" ADD COLUMN "tier" TEXT;
 -- AlterTable: storage keys of photos attached to a complaint message
 ALTER TABLE "ComplaintMessage" ADD COLUMN "photos" JSONB;
 
+-- AlterTable: count of "please collect" nudges sent for an order
+ALTER TABLE "Order" ADD COLUMN "collectionRemindersSent" INTEGER NOT NULL DEFAULT 0;
+
 -- AlterTable: trace a complaint to the remedies granted for it
 ALTER TABLE "Complaint" ADD COLUMN "redoOrderId" TEXT;
 ALTER TABLE "Compensation" ADD COLUMN "complaintId" TEXT;

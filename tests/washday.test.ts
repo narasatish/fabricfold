@@ -24,7 +24,10 @@ beforeAll(async () => {
   db = (await import("../lib/db")).db;
   ({ assignWashDay, washDayDistribution } = await import("../lib/washday-server"));
   ({ isOffWashDay } = await import("../lib/washday"));
-}, 120_000);
+  // `prisma db push` against a remote Postgres is the slow part here, and it
+  // grows with the schema — it sat right on the old 120s budget once the Bag
+  // table landed, so this hook needs real headroom, not a tight bound.
+}, 300_000);
 
 afterEach(async () => {
   await db.student.deleteMany({ where: { id: { startsWith: "wd" } } });

@@ -36,6 +36,14 @@ export default async function CustomerHome() {
     where: { studentId: student.id, read: false },
   });
 
+  // The bag the student is currently carrying — its code is printed on the bag
+  // and is what staff look for at the counter.
+  const activeBag = await db.bag.findFirst({
+    where: { studentId: student.id, status: "active" },
+    orderBy: { issuedAt: "desc" },
+    select: { code: true },
+  });
+
   // Check subscription expiry
   const sub = student.subscription;
   const subExpiryWarning = sub?.active && sub.expiresAt && sub.expiresAt.getTime() - Date.now() < 30 * 86400000;
@@ -116,6 +124,17 @@ export default async function CustomerHome() {
             <div>
               <div className="muted" style={{ fontSize: "11.5px", textTransform: "uppercase", letterSpacing: ".04em" }}>Your wash day</div>
               <div className="h-sm">{WEEKDAY_NAMES[student.washDay]}</div>
+            </div>
+          </div>
+        )}
+
+        {/* Bag code — what the student quotes at the counter */}
+        {activeBag && (
+          <div className="card pad mt12" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ color: "var(--teal-dark)" }}><Svg name="layers" size={20} /></span>
+            <div>
+              <div className="muted" style={{ fontSize: "11.5px", textTransform: "uppercase", letterSpacing: ".04em" }}>Your bag</div>
+              <div className="h-sm mono">{activeBag.code}</div>
             </div>
           </div>
         )}

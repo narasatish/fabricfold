@@ -131,6 +131,30 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           </div>
         )}
 
+        {/* What the counter actually logged — the student sees the same count
+            and weight the staff recorded, so a discrepancy surfaces early
+            rather than at collection. */}
+        <div className="card pad mt16">
+          <div className="kv">
+            <span className="k">Pieces you declared</span>
+            <span className="mono">{order.declaredPieces}</span>
+          </div>
+          {order.actualPieces !== null && order.actualPieces !== undefined && (
+            <div className="kv">
+              <span className="k">Counted at the counter</span>
+              <span className="mono" style={{ color: order.actualPieces !== order.declaredPieces ? "var(--amber)" : undefined }}>
+                {order.actualPieces}
+              </span>
+            </div>
+          )}
+          {order.weightKg !== null && order.weightKg !== undefined && (
+            <div className="kv">
+              <span className="k">Weight</span>
+              <span className="mono">{Number(order.weightKg)} kg</span>
+            </div>
+          )}
+        </div>
+
         {/* Status timeline */}
         <div className="sec-title mt20">Status timeline</div>
         <div className="card pad tl">

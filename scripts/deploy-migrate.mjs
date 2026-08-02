@@ -32,7 +32,8 @@ const host = (url.match(/@([^/?]+)/) || [])[1] || "unknown";
 console.log(`[deploy-migrate] Syncing schema to ${host} …`);
 
 try {
-  execSync(`npx prisma db push --skip-generate --url "${url}"`, { stdio: "inherit" });
+  // Prisma 7 has no --skip-generate; --url is the supported override.
+  execSync(`npx prisma db push --url "${url}"`, { stdio: "inherit" });
   console.log("[deploy-migrate] Schema in sync.");
 } catch {
   console.error(

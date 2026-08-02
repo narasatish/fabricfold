@@ -63,26 +63,58 @@ export default async function HelpPage() {
                   {c.text}
                 </div>
 
-                {/* Chat messages */}
+                {(c.orderId || c.redoOrderId) && (
+                  <div className="muted mt8" style={{ fontSize: "12px" }}>
+                    {c.orderId && <>About order #{c.orderId.slice(-4)}</>}
+                    {c.redoOrderId && (
+                      <span style={{ color: "var(--teal-dark)" }}>
+                        {c.orderId ? " · " : ""}Free re-wash raised — order #{c.redoOrderId.slice(-4)}, no charge
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Chat messages. NOTE: the field is `from`, not `role` — the
+                    previous `m.role` was always undefined, so every message
+                    rendered as if staff had written it. */}
                 {c.messages && c.messages.length > 0 && (
                   <div style={{ marginTop: "12px", paddingTop: "12px", borderTop: "1px solid var(--line)" }}>
-                    {c.messages.map((m: any) => (
-                      <div key={m.id} style={{ marginBottom: "8px" }}>
-                        <div style={{ fontSize: "11px", color: "var(--muted)", marginBottom: "2px" }}>
-                          {m.role === "student" ? "You" : "Staff"} · {dateStr(m.at)}
+                    {c.messages.map((m) => {
+                      const mine = m.from === "student";
+                      const photos = Array.isArray(m.photos) ? (m.photos as unknown[]).map(String) : [];
+                      return (
+                        <div key={m.id} style={{ marginBottom: "8px" }}>
+                          <div style={{ fontSize: "11px", color: "var(--muted)", marginBottom: "2px" }}>
+                            {mine ? "You" : "Staff"} · {dateStr(m.at)}
+                          </div>
+                          {m.text && (
+                            <div
+                              style={{
+                                background: mine ? "var(--teal-soft)" : "var(--line)",
+                                padding: "8px 12px",
+                                borderRadius: "8px",
+                                fontSize: "13px",
+                              }}
+                            >
+                              {m.text}
+                            </div>
+                          )}
+                          {photos.length > 0 && (
+                            <div className="row wrap gap8" style={{ marginTop: 6 }}>
+                              {photos.map((key) => (
+                                <a key={key} href={`/api/complaint-photo?key=${encodeURIComponent(key)}`} target="_blank" rel="noreferrer">
+                                  <img
+                                    src={`/api/complaint-photo?key=${encodeURIComponent(key)}`}
+                                    alt="Attached photo"
+                                    style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)" }}
+                                  />
+                                </a>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        <div
-                          style={{
-                            background: m.role === "student" ? "var(--teal-soft)" : "var(--line)",
-                            padding: "8px 12px",
-                            borderRadius: "8px",
-                            fontSize: "13px",
-                          }}
-                        >
-                          {m.text}
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

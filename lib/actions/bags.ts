@@ -36,7 +36,14 @@ export async function issueBag(
   const tier = stu.subscription?.active ? stu.subscription.planRef?.tier : null;
   const kind = bagKindFor(tier);
   const isFirstEver = stu.bags.length === 0;
-  const price = isFirstEver ? 0 : Math.max(0, Math.round(Number(input.price) || 0));
+
+  // Subscribing after carrying a walk-in bag is an UPGRADE, not a replacement.
+  // Their code has to change so it matches the tier staff read off the bag, and
+  // billing them for that swap would be charging a student for upgrading.
+  const upgradingFromWalkIn = !isFirstEver && isTier(tier) && stu.bags.every((b) => !b.tier);
+
+  const complimentary = isFirstEver || upgradingFromWalkIn;
+  const price = complimentary ? 0 : Math.max(0, Math.round(Number(input.price) || 0));
 
   let bag;
   try {
@@ -45,7 +52,7 @@ export async function issueBag(
       const b = await tx.bag.create({
         data: {
           code, studentId, tier: isTier(tier) ? tier : null,
-          complimentary: isFirstEver, price, issuedBy: st.id,
+          complimentary, price, issuedBy: st.id,
           note: input.note?.trim() || null,
         },
       });
@@ -64,16 +71,18 @@ export async function issueBag(
     studentId,
     isFirstEver
       ? `Your FabricFold bag ${bag.code} is ready — it's on us. Bring it along on your wash day.`
-      : `Replacement bag ${bag.code} issued${price > 0 ? ` (₹${price})` : ""}.`,
+      : upgradingFromWalkIn
+        ? `Your new ${BAG_LABEL[kind]} bag ${bag.code} is ready — no charge for the upgrade.`
+        : `Replacement bag ${bag.code} issued${price > 0 ? ` (₹${price})` : ""}.`,
     "status",
   );
   await audit(
     "Bag issued",
-    `${bag.code} · ${stu.name} · ${BAG_LABEL[kind]}${isFirstEver ? " · complimentary" : ` · ₹${price}`}`,
+    `${bag.code} · ${stu.name} · ${BAG_LABEL[kind]}${complimentary ? (upgradingFromWalkIn ? " · tier upgrade, free" : " · complimentary") : ` · ₹${price}`}`,
     st.id,
   );
   publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "bag", payload: { studentId, code: bag.code } });
-  return { ok: true as const, code: bag.code, complimentary: isFirstEver, price };
+  return { ok: true as const, code: bag.code, complimentary, price };
 }
 
 /** Mark a bag lost or replaced. The code is retired, never handed out again. */

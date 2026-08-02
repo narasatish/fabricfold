@@ -433,8 +433,36 @@ export async function redoOrder(orderId: string): Promise<ActionResult> {
 /* ---------- Cancel ---------- */
 export async function cancelOrder(orderId: string): Promise<ActionResult> {
   const st = await requireStaff(1);
-  const ord = await db.order.findUniqueOrThrow({ where: { id: orderId } });
-  await db.order.update({ where: { id: ord.id }, data: { status: "cancelled", cancelledAt: new Date(), timeline: { create: { status: "cancelled" } } } });
+  const ord = await db.order.findUniqueOrThrow({
+    where: { id: orderId },
+    include: { student: { include: { subscription: true } } },
+  });
+  if (ord.status === "cancelled") return { ok: false as const, error: "This order is already cancelled" };
+  if (ord.status === "collected") return { ok: false as const, error: "This order has already been collected" };
+
+  await db.$transaction(async (tx) => {
+    await tx.order.update({ where: { id: ord.id }, data: { status: "cancelled", cancelledAt: new Date(), timeline: { create: { status: "cancelled" } } } });
+
+    // Hand the cycle back. Cancelling after staff burned a cycle used to cost
+    // the student that cycle permanently — real money on a prepaid plan.
+    const sub = ord.student.subscription;
+    if (ord.usedCycle && sub) {
+      type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
+      const buckets = (sub.buckets as unknown as Bucket[] | null) || null;
+      const data: { cyclesUsed?: { decrement: number }; buckets?: Bucket[] } = {};
+      if (sub.cyclesUsed > 0) data.cyclesUsed = { decrement: 1 };
+      if (buckets && buckets.length) {
+        const idx = buckets.findIndex((b) => b.service === ord.service && b.used > 0);
+        if (idx >= 0) {
+          buckets[idx] = { ...buckets[idx], used: buckets[idx].used - 1 };
+          data.buckets = buckets;
+        }
+      }
+      if (Object.keys(data).length) await tx.subscription.update({ where: { id: sub.id }, data });
+      await tx.cycleUse.deleteMany({ where: { orderId: ord.id } });
+      await tx.order.update({ where: { id: ord.id }, data: { usedCycle: false } });
+    }
+  });
   await db.otp.deleteMany({ where: { purpose: "pickup", refId: ord.id } });
   await pushNotif(ord.studentId, `Your order #${ord.id.slice(-4)} was cancelled.`, "status");
   await audit("Cancel order", `#${ord.id.slice(-4)}`, st.id);

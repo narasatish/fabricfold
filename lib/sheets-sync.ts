@@ -167,6 +167,40 @@ export async function runSheetsSync() {
   }
   await writeSheet("Plans", planRows);
 
+  /* ---- Complaints ---- Every grievance and what it cost to settle, so the
+     true price of service failures is visible next to the revenue figures
+     rather than buried in the app. Student NAMES are included here because
+     this sheet is the owner's own operational record; no phone numbers or
+     addresses, matching the no-PII-beyond-necessity rule elsewhere. */
+  const complaints = await db.complaint.findMany({
+    orderBy: { at: "desc" },
+    take: 200,
+    include: { student: { select: { name: true } } },
+  });
+  const compRows: (string | number)[][] = [[
+    "Raised", "Student", "Order", "Status", "Issue", "Free re-wash", "Compensation", "Resolved",
+  ]];
+  for (const c of complaints) {
+    const payouts = await db.compensation.findMany({
+      where: { complaintId: c.id },
+      select: { amount: true },
+    });
+    const paid = payouts.reduce((s, p) => s + N(p.amount), 0);
+    compRows.push([
+      c.at.toISOString().slice(0, 10),
+      c.student.name,
+      c.orderId ? "#" + c.orderId.slice(-4) : "—",
+      c.status,
+      c.text.slice(0, 120),
+      c.redoOrderId ? "#" + c.redoOrderId.slice(-4) : "—",
+      paid ? money(paid) : "—",
+      c.resolvedAt ? c.resolvedAt.toISOString().slice(0, 10) : "—",
+    ]);
+  }
+  const openCount = complaints.filter((c) => c.status === "open").length;
+  compRows.push([], ["Open", openCount, "Resolved", complaints.length - openCount]);
+  await writeSheet("Complaints", compRows);
+
   /* ---- Staff (attendance + day-close) ---- */
   const m = istDate().slice(0, 7);
   const staff = await db.staff.findMany({ select: { id: true, name: true, role: true } });

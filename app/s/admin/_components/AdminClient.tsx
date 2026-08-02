@@ -18,7 +18,7 @@ import { WEEKDAY_NAMES, WEEKDAY_SHORT } from "@/lib/washday";
 
 const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFold: "Wash & Fold", ironOnly: "Iron Only", dryClean: "Dry Clean" };
 type PlanBucket = { service: string; cycles: number; kgPerCycle: number };
-type PlanRow = { id: string; collegeId: string; name: string; price: number; gstFree: boolean; active: boolean; buckets: PlanBucket[] };
+type PlanRow = { id: string; collegeId: string; name: string; price: number; gstFree: boolean; tier: string | null; active: boolean; buckets: PlanBucket[] };
 
 type Rates = Record<string, { label: string; items: [string, number][] }>;
 type Props = {
@@ -63,7 +63,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   const [gst, setGst] = useState(config.gstPct);
   const [gstOn, setGstOn] = useState(config.settings.gstEnabled !== false);
   const emptyPlan = (collegeId: string): Omit<PlanRow, "active" | "id"> & { id?: string } =>
-    ({ id: undefined, collegeId, name: "", price: 0, gstFree: false, buckets: [{ service: "washIron", cycles: 34, kgPerCycle: 7 }] });
+    ({ id: undefined, collegeId, name: "", price: 0, gstFree: false, tier: null, buckets: [{ service: "washIron", cycles: 34, kgPerCycle: 7 }] });
   const [planEdit, setPlanEdit] = useState<ReturnType<typeof emptyPlan>>(emptyPlan(colleges[0]?.id || ""));
   const [pay, setPay] = useState({ ...config.payment });
   const [settings, setSettings] = useState({ reportEmail: config.settings.reportEmail || "", dailyEmail: !!config.settings.dailyEmail, sendHour: config.settings.sendHour ?? 21, openingFloat: config.settings.openingFloat ?? 0, garmentTagsEnabled: config.settings.garmentTagsEnabled === true });
@@ -244,7 +244,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
           )}
           {plans.filter((p) => p.collegeId === c.id).map((p) => (
             <div key={p.id} className="between mt10" style={{ alignItems: "flex-start" }}>
-              <button style={{ textAlign: "left", flex: 1 }} onClick={() => { setPlanEdit({ id: p.id, collegeId: p.collegeId, name: p.name, price: p.price, gstFree: p.gstFree, buckets: JSON.parse(JSON.stringify(p.buckets)) }); setSheet("plan"); }}>
+              <button style={{ textAlign: "left", flex: 1 }} onClick={() => { setPlanEdit({ id: p.id, collegeId: p.collegeId, name: p.name, price: p.price, gstFree: p.gstFree, tier: p.tier, buckets: JSON.parse(JSON.stringify(p.buckets)) }); setSheet("plan"); }}>
                 <div className="h-sm" style={{ opacity: p.active ? 1 : 0.45 }}>
                   {p.name} · {fmt(p.price)}
                 </div>
@@ -379,6 +379,19 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
         </div>
         <div className="field"><label>Plan name</label><input className="input" placeholder="e.g. Wash & Iron — Annual" value={planEdit.name} onChange={(e) => setPlanEdit({ ...planEdit, name: e.target.value })} /></div>
         <div className="field"><label>Price (₹{planEdit.gstFree ? ", final" : ", before GST"})</label><input className="input" type="number" value={planEdit.price || ""} onChange={(e) => setPlanEdit({ ...planEdit, price: Number(e.target.value) })} /></div>
+        <div className="field">
+          <label>Tier</label>
+          <select className="input" style={{ height: 42 }} value={planEdit.tier || ""} onChange={(e) => setPlanEdit({ ...planEdit, tier: e.target.value || null })}>
+            <option value="">No tier (bag code W###)</option>
+            <option value="bronze">Bronze — bag code B###</option>
+            <option value="silver">Silver — bag code S###</option>
+            <option value="gold">Gold — bag code G###</option>
+          </select>
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            Sets the letter printed on the bags of students on this plan. Changing it does not
+            re-letter bags already handed out — those codes stay as issued.
+          </div>
+        </div>
         <div className="chip-toggle" style={{ marginBottom: 14 }}>
           <div>
             <div className="h-sm">No GST on this plan</div>

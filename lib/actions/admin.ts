@@ -7,6 +7,7 @@ import { audit } from "../notify";
 import { publish } from "../realtime";
 import { notifyOwner } from "../mail";
 import { assignWashDay } from "../washday-server";
+import { isTier } from "../bagcode";
 
 /* ----- Register a student at the counter (any staff) -----
    Students cannot self-register — this is the ONLY way a student account is
@@ -58,6 +59,7 @@ export async function updateStudentPhone(studentId: string, newPhone: string) {
 const SERVICES = ["washIron", "washFold", "ironOnly", "dryClean"];
 export async function savePlan(input: {
   id?: string; collegeId: string; name: string; price: number; gstFree: boolean;
+  tier?: string | null;
   buckets: { service: string; cycles: number; kgPerCycle: number }[];
 }) {
   const st = await requireStaff(3);
@@ -69,7 +71,10 @@ export async function savePlan(input: {
   const college = await db.college.findUnique({ where: { id: input.collegeId } });
   if (!college) return { ok: false as const, error: "Pick a campus" };
 
-  const data = { collegeId: input.collegeId, name, price: input.price, gstFree: !!input.gstFree, buckets };
+  // The tier decides which letter goes on the student's bag (B/S/G), so an
+  // unrecognised value is stored as null rather than guessed at.
+  const tier = isTier(input.tier) ? input.tier : null;
+  const data = { collegeId: input.collegeId, name, price: input.price, gstFree: !!input.gstFree, tier, buckets };
   if (input.id) await db.plan.update({ where: { id: input.id }, data });
   else await db.plan.create({ data });
   await audit(input.id ? "Plan updated" : "Plan created", `${college.name} · ${name} · ₹${input.price}${input.gstFree ? " (no GST)" : ""}`, st.id);

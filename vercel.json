@@ -3,6 +3,7 @@
   "crons": [
     { "path": "/api/report/daily", "schedule": "30 15 * * *" },
     { "path": "/api/backup", "schedule": "0 20 * * *" },
-    { "path": "/api/sheets/sync", "schedule": "0 21 * * *" }
+    { "path": "/api/sheets/sync", "schedule": "0 21 * * *" },
+    { "path": "/api/cron/purge-photos", "schedule": "0 22 * * *" }
   ]
 }

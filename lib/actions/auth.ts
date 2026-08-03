@@ -11,8 +11,13 @@ const OTP_TTL = 5 * 60_000;
    1. SMS-Gate (free) — the "SMS Gateway" Android app (sms-gate.app) running on
       the owner's spare phone; OTPs go out from its SIM via the app's cloud API.
       Env: SMSGATE_LOGIN + SMSGATE_PASSWORD (shown inside the app).
-   2. MSG91 (paid, DLT) — env: MSG91_AUTHKEY + MSG91_TEMPLATE_ID.
-   3. Console fallback (dev / pre-SMS soft launch). */
+   2. Twilio (testing) — env: TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_FROM.
+   3. MSG91 (paid, DLT) — env: MSG91_AUTHKEY + MSG91_TEMPLATE_ID.
+   4. Console fallback (dev / pre-SMS soft launch).
+
+   Free-first is deliberate: SMS-Gate costs nothing and is tried before any
+   paid provider, so wiring Twilio for testing can't quietly start billing
+   every login once the free gateway is live. */
 async function sendSms(phone: string, code: string) {
   const text = `Your FabricFold login OTP is ${code}. It expires in 5 minutes.`;
 
@@ -28,6 +33,31 @@ async function sendSms(phone: string, code: string) {
     });
     if (!res.ok) {
       console.error("SMS-Gate send failed", res.status, await res.text().catch(() => ""));
+      throw new Error("Couldn't send the OTP — please try again in a moment");
+    }
+    return;
+  }
+
+  /* Twilio — used for TESTING against arbitrary numbers before the free
+     SMS-Gate phone is in place. Trial accounts can only send to numbers
+     verified in the Twilio console, so a failure here is usually "recipient
+     not verified", not a code fault. Indian delivery from a Twilio number also
+     needs DLT registration, same as MSG91 — fine for testing, not for launch.
+     Env: TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_FROM. */
+  const twSid = process.env.TWILIO_ACCOUNT_SID, twTok = process.env.TWILIO_AUTH_TOKEN, twFrom = process.env.TWILIO_FROM;
+  if (twSid && twTok && twFrom) {
+    const body = new URLSearchParams({ To: "+91" + phone, From: twFrom, Body: text });
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twSid}/Messages.json`, {
+      method: "POST",
+      headers: {
+        Authorization: "Basic " + Buffer.from(`${twSid}:${twTok}`).toString("base64"),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      console.error("Twilio send failed", res.status, detail);
       throw new Error("Couldn't send the OTP — please try again in a moment");
     }
     return;

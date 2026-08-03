@@ -4,7 +4,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Svg } from "./icons";
+import { Svg, type IconName } from "./icons";
 
 /* ---------- Toast ---------- */
 const ToastCtx = createContext<(msg: string, isError?: boolean) => void>(() => {});
@@ -59,7 +59,7 @@ export function TopBar({ title, sub, back, right }: { title: string; sub?: strin
 }
 
 /* ---------- TabBar ---------- */
-export function TabBar({ tabs, active }: { tabs: { key: string; label: string; icon: string; href: string; badge?: number }[]; active: string }) {
+export function TabBar({ tabs, active }: { tabs: { key: string; label: string; icon: IconName; href: string; badge?: number }[]; active: string }) {
   return (
     <div className="tabbar">
       {tabs.map((t) => (

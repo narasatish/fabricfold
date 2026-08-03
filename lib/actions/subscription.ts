@@ -26,29 +26,19 @@ function usageBuckets(buckets: PlanBucket[]) {
   return buckets.map((b) => ({ service: b.service, cycles: b.cycles, used: 0, kgPerCycle: b.kgPerCycle }));
 }
 
-/** Student requests a specific plan from their college's list. */
-export async function requestSubscription(planId: string, method: "cash" | "upi") {
-  const stu = await requireStudent();
-  const feat = stu.college.features as Record<string, boolean>;
-  if (feat.subscriptions === false) return { ok: false as const, error: "Subscriptions aren't offered at your campus" };
-  if (stu.subscription?.active) return { ok: false as const, error: "You already have an active plan" };
+/* Students cannot buy a plan themselves — plans are sold at the counter only,
+   by Manager+ (assignSubscription). Money changes hands in person, so the
+   record of it has to be created by whoever took the money.
 
-  const plan = await db.plan.findUnique({ where: { id: planId } });
-  if (!plan || !plan.active || plan.collegeId !== stu.collegeId) return { ok: false as const, error: "That plan isn't available at your campus" };
-  const buckets = usageBuckets(plan.buckets as unknown as PlanBucket[]);
-  const cyclesTotal = buckets.reduce((s, b) => s + b.cycles, 0);
-
-  await db.subscription.upsert({
-    where: { studentId: stu.id },
-    create: { studentId: stu.id, active: false, plan: plan.name, planId: plan.id, buckets, cyclesTotal, kgPerCycle: buckets[0]?.kgPerCycle ?? 7 },
-    update: { active: false, plan: plan.name, planId: plan.id, buckets, cyclesTotal, cyclesUsed: 0, kgPerCycle: buckets[0]?.kgPerCycle ?? 7 },
-  });
-  const code = rid(4);
-  await db.otp.deleteMany({ where: { purpose: "subscription", refId: stu.id } });
-  await db.otp.create({ data: { phone: stu.phone, purpose: "subscription", code, refId: stu.id, expiresAt: new Date(Date.now() + 7 * 86_400_000) } });
-  publish([`orders:${stu.collegeId}`], { type: "subscription", payload: { studentId: stu.id, method } });
-  void notifyOwner("New subscription request", `${stu.name} (${stu.college.name}) wants "${plan.name}" — paying by ${method.toUpperCase()}. Approve it in the staff app.`);
-  return { ok: true as const, code: method === "cash" ? code : undefined };
+   Kept as a refusing stub rather than removed: an older client bundle still
+   calling this gets a clear message instead of a crash, and because the block
+   is on the SERVER it holds regardless of what the browser sends. */
+export async function requestSubscription(_planId: string, _method: "cash" | "upi") {
+  await requireStudent();
+  return {
+    ok: false as const,
+    error: "Plans are activated at the counter. Visit the counter and staff will set yours up.",
+  };
 }
 
 /** Manager+ activates a pending request after payment is confirmed. */

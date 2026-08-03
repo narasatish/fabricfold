@@ -1,5 +1,5 @@
 /* Inline SVG icon set — ported verbatim from the prototype's IC map. */
-export const IC: Record<string, string> = {
+export const IC = {
   home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"/>',
   bag: '<path d="M6 8h12l-1 12a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1L6 8Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>',
   list: '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1.4"/><circle cx="3.5" cy="12" r="1.4"/><circle cx="3.5" cy="18" r="1.4"/>',
@@ -33,9 +33,15 @@ export const IC: Record<string, string> = {
   ready: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
   qr: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M20 14v7M14 20h3"/>',
   shield: '<path d="M12 3 5 6v5c0 4 3 7 7 9 4-2 7-5 7-9V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>',
-};
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7 8.5 6 8.5-6"/>',
+} as const;
 
-export function Svg({ name, size = 24, sw = 2 }: { name: string; size?: number; sw?: number }) {
+/* Deriving the union from IC means a typo is a BUILD error, not a blank square.
+   `name: string` previously let `<Svg name="mail">` compile happily while the
+   icon did not exist — silently rendering nothing in production. */
+export type IconName = keyof typeof IC;
+
+export function Svg({ name, size = 24, sw = 2 }: { name: IconName; size?: number; sw?: number }) {
   return (
     <svg
       viewBox="0 0 24 24"

@@ -41,6 +41,17 @@ export default async function HelpPage() {
           <Svg name="chevR" size={18} />
         </a>
 
+        {/* Email support — slower than WhatsApp, but it leaves the student a
+            written record, which matters for anything about money or damage. */}
+        <a href="mailto:support@fabricfold.in" className="card-btn" style={{ marginBottom: "20px" }}>
+          <div className="icon-tile"><Svg name="mail" size={20} /></div>
+          <div style={{ flex: 1 }}>
+            <div className="h-sm">Email support</div>
+            <div className="muted" style={{ fontSize: "12.5px" }}>support@fabricfold.in</div>
+          </div>
+          <Svg name="chevR" size={18} />
+        </a>
+
         {/* Complaint form */}
         <div className="sec-title">Raise a complaint</div>
         <HelpClient orderId={undefined} />

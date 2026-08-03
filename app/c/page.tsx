@@ -1,7 +1,7 @@
 import { requireStudent } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
-import { Svg } from "@/components/icons";
+import { Svg, type IconName } from "@/components/icons";
 import { fmt, timeAgo, dateStr, loyaltyBadge, STATUS_LABEL } from "@/lib/format";
 import Link from "next/link";
 import { Qr } from "@/components/qr";
@@ -49,7 +49,7 @@ export default async function CustomerHome() {
   const subExpiryWarning = sub?.active && sub.expiresAt && sub.expiresAt.getTime() - Date.now() < 30 * 86400000;
 
   // Build enabled services
-  const services: Array<{ key: string; flag: string; label: string; icon: string }> = [
+  const services: Array<{ key: string; flag: string; label: string; icon: IconName }> = [
     { key: "washIron", flag: "svc_wash", label: "Wash & Iron", icon: "layers" },
     { key: "washFold", flag: "svc_washfold", label: "Wash & Fold", icon: "gift" },
     { key: "ironOnly", flag: "svc_iron", label: "Iron Only", icon: "shirt" },

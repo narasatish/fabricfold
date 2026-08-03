@@ -16,13 +16,29 @@
    numbers only you control.
 
    Run:  npx tsx scripts/demo-accounts.ts
-   Env:  DEMO_STUDENT_PHONE, DEMO_ADMIN_PHONE, DEMO_COLLEGE (name) */
+   Env:  DEMO_COLLEGE (campus name, defaults to St Mary's) */
 import "dotenv/config";
 import { db } from "../lib/db";
 import { assignWashDay } from "../lib/washday-server";
 
-const STUDENT_PHONE = (process.env.DEMO_STUDENT_PHONE || "").replace(/\D/g, "").slice(-10);
-const ADMIN_PHONE = (process.env.DEMO_ADMIN_PHONE || "").replace(/\D/g, "").slice(-10);
+/* The accounts to create. Kept in the file rather than env vars because these
+   are a fixed, reviewable list — you can see at a glance exactly who gets an
+   account and at what level, which matters when one of them can take money. */
+const STUDENTS = [
+  { phone: "7799661888", name: "Demo Student 1" },
+  { phone: "6303972660", name: "Demo Student 2" },
+];
+
+/* Roles: 1 Counter · 2 Manager · 3 Admin · 4 Owner.
+   8019121966 is the Owner and already exists — listed so the script reports
+   it, but an existing staff member's role is NEVER changed here. Silently
+   promoting or demoting someone from a seeding script is how an account ends
+   up with permissions nobody remembers granting. */
+const STAFF = [
+  { phone: "8019121966", name: "Owner", role: 4 },
+  { phone: "9381232723", name: "Demo Admin", role: 3 },
+];
+
 const COLLEGE_NAME = process.env.DEMO_COLLEGE || "St Mary's";
 
 function allowlisted() {
@@ -36,19 +52,20 @@ async function main() {
   const url = process.env.DATABASE_URL || "";
   console.log("target:", (url.match(/@([^/?]+)/) || [])[1] || "unknown");
 
-  if (STUDENT_PHONE.length !== 10 || ADMIN_PHONE.length !== 10) {
-    console.error("Set DEMO_STUDENT_PHONE and DEMO_ADMIN_PHONE to 10-digit numbers.");
-    process.exit(1);
-  }
-
-  // A demo account is a real account. Requiring the allowlist means one can
-  // never be created for a number that isn't already yours to test with.
+  // A demo account is a REAL account: the students can place orders, the admin
+  // can take money. Requiring the allowlist means one can never be created for
+  // a number that isn't already yours to test with.
   const allowed = allowlisted();
-  const missing = [STUDENT_PHONE, ADMIN_PHONE].filter((p) => !allowed.includes(p));
+  const wanted = [...STUDENTS.map((s) => s.phone), ...STAFF.map((s) => s.phone)];
+  const missing = wanted.filter((p) => !allowed.includes(p));
   if (missing.length) {
     console.error(
-      `Refusing: ${missing.join(", ")} not in TEST_PHONES.\n` +
-        `Add them there first — it's what limits the fixed DEV_OTP to numbers you control.`,
+      [
+        `Refusing: ${missing.join(", ")} not in TEST_PHONES.`,
+        "Add them there first — TEST_PHONES is what limits the fixed DEV_OTP to",
+        "numbers you control, so an account outside it could be signed into by",
+        "whoever holds that number.",
+      ].join("\n"),
     );
     process.exit(1);
   }
@@ -58,48 +75,46 @@ async function main() {
     console.error(`No college named "${COLLEGE_NAME}". Set DEMO_COLLEGE to an existing campus.`);
     process.exit(1);
   }
+  console.log("campus:", college.name, "\n");
 
-  // ── Demo student ────────────────────────────────────────────────
-  let student = await db.student.findUnique({ where: { phone: STUDENT_PHONE } });
-  if (student) {
-    console.log(`student  existing  ${student.id}  ${student.name}`);
-  } else {
-    let id = "";
-    for (let i = 0; i < 20; i++) {
-      id = String(Math.floor(100000 + Math.random() * 900000));
-      if (!(await db.student.findUnique({ where: { id } }))) break;
+  for (const spec of STUDENTS) {
+    let stu = await db.student.findUnique({ where: { phone: spec.phone } });
+    if (stu) {
+      console.log(`student  existing  ${stu.id}  ${stu.name}  +91 ${stu.phone}`);
+    } else {
+      let id = "";
+      for (let i = 0; i < 20; i++) {
+        id = String(Math.floor(100000 + Math.random() * 900000));
+        if (!(await db.student.findUnique({ where: { id } }))) break;
+      }
+      stu = await db.student.create({ data: { id, phone: spec.phone, name: spec.name, collegeId: college.id } });
+      console.log(`student  created   ${stu.id}  ${stu.name}  +91 ${stu.phone}`);
     }
-    student = await db.student.create({
-      data: { id, phone: STUDENT_PHONE, name: "Demo Student", collegeId: college.id },
-    });
-    console.log(`student  created   ${student.id}  ${student.name}`);
-  }
-  if (student.washDay === null) {
-    await assignWashDay(student.id, college.id);
-    console.log("         wash day assigned");
+    if (stu.washDay === null) {
+      await assignWashDay(stu.id, college.id);
+      const after = await db.student.findUniqueOrThrow({ where: { id: stu.id } });
+      console.log(`         wash day  ${after.washDay}`);
+    }
   }
 
-  // ── Demo admin (role 3: everything except Owner-only tools) ──────
-  const existingStaff = await db.staff.findUnique({ where: { phone: ADMIN_PHONE } });
-  if (existingStaff) {
-    console.log(`admin    existing  ${existingStaff.name}  role ${existingStaff.role}`);
-  } else {
-    const staff = await db.staff.create({
-      data: { phone: ADMIN_PHONE, name: "Demo Admin", role: 3, collegeId: college.id },
-    });
-    console.log(`admin    created   ${staff.name}  role ${staff.role} (Admin)`);
+  for (const spec of STAFF) {
+    const existing = await db.staff.findUnique({ where: { phone: spec.phone } });
+    if (existing) {
+      const note = existing.role === spec.role ? "" : `  (role is ${existing.role}, left as-is)`;
+      console.log(`staff    existing  ${existing.name}  role ${existing.role}  +91 ${existing.phone}${note}`);
+    } else {
+      const st = await db.staff.create({ data: { phone: spec.phone, name: spec.name, role: spec.role, collegeId: college.id } });
+      console.log(`staff    created   ${st.name}  role ${st.role}  +91 ${st.phone}`);
+    }
   }
 
-  const after = await db.student.findUniqueOrThrow({ where: { id: student.id }, include: { subscription: true, bags: true } });
-  console.log("\nDemo student state:");
-  console.log("  id        ", after.id);
-  console.log("  phone     ", "+91 " + after.phone);
-  console.log("  wash day  ", after.washDay ?? "—");
-  console.log("  plan      ", after.subscription?.active ? after.subscription.plan : "none (assign at the counter)");
-  console.log("  bag       ", after.bags.find((b) => b.status === "active")?.code ?? "none (issue at the counter)");
   console.log(
-    "\nSign in at /login with these numbers. The plan and bag are deliberately NOT\n" +
-      "pre-created — walking through assigning them is the part worth testing.",
+    [
+      "",
+      "Sign in at /login — students under Customer, staff under Staff.",
+      "Plans and bags are deliberately NOT pre-created: assigning them at the",
+      "counter is the part worth testing.",
+    ].join("\n"),
   );
 }
 

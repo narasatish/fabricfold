@@ -7,10 +7,37 @@
 
    Run:  npx tsx scripts/e2e-check.ts */
 import "dotenv/config";
-import { db } from "../lib/db";
-import { assignWashDay } from "../lib/washday-server";
-import { allocateBagCode, bagKindFor, parseBagCode } from "../lib/bagcode";
-import { WEEKDAY_NAMES } from "../lib/washday";
+
+/* NEVER touch the live `public` schema.
+
+   These scripts create students, bags and orders, and allocating a bag code
+   BURNS it from the shared sequence — on production that is a physical label
+   that would then never reach a student. So the script forces the same
+   isolated `ff_test` schema the unit tests use, and refuses to run if it
+   cannot. db is imported lazily, AFTER the URL is rewritten, because lib/db
+   reads DATABASE_URL at import time. */
+const BASE = process.env.DIRECT_URL || process.env.DATABASE_URL || "";
+if (!/^postgres(ql)?:\/\//.test(BASE)) {
+  console.error("Refusing to run: need a Postgres DATABASE_URL/DIRECT_URL.");
+  process.exit(1);
+}
+const TEST_URL = BASE.split("?")[0] + "?schema=ff_test";
+process.env.DATABASE_URL = TEST_URL;
+
+// Bound in init(), after DATABASE_URL is redirected at the isolated schema.
+let db: typeof import("../lib/db").db;
+let assignWashDay: typeof import("../lib/washday-server").assignWashDay;
+let allocateBagCode: typeof import("../lib/bagcode").allocateBagCode;
+let bagKindFor: typeof import("../lib/bagcode").bagKindFor;
+let parseBagCode: typeof import("../lib/bagcode").parseBagCode;
+let WEEKDAY_NAMES: typeof import("../lib/washday").WEEKDAY_NAMES;
+
+async function init() {
+  ({ db } = await import("../lib/db"));
+  ({ assignWashDay } = await import("../lib/washday-server"));
+  ({ allocateBagCode, bagKindFor, parseBagCode } = await import("../lib/bagcode"));
+  ({ WEEKDAY_NAMES } = await import("../lib/washday"));
+}
 
 const TAG = "e2echk";
 let pass = 0, fail = 0;
@@ -36,6 +63,7 @@ async function cleanup() {
 }
 
 async function main() {
+  await init();
   console.log("\nFabricFold end-to-end check\n");
   await cleanup(); // clear anything a previous aborted run left behind
 
@@ -125,4 +153,4 @@ async function main() {
 
 main()
   .catch(async (e) => { console.error("\nERROR:", e); await cleanup().catch(() => {}); process.exitCode = 1; })
-  .finally(() => db.$disconnect());
+  .finally(() => db?.$disconnect());

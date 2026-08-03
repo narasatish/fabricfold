@@ -1,9 +1,10 @@
 "use server";
 /* Issuing the physical bags students carry their laundry in.
 
-   The first bag a student ever receives is complimentary; replacements are
-   sold and posted as a normal counter payment so they show up in the day's
-   cash reconciliation like any other sale.
+   A subscriber's first bag is complimentary — it's a perk of buying a plan, so
+   a walk-in with no subscription buys theirs. Replacements are sold and posted
+   as a normal counter payment so they land in the day's cash reconciliation.
+   Changing plan swaps the bag free, since the code letter must follow the tier.
 
    Codes are never reused — see lib/bagcode.ts. A lost bag is marked lost and
    the student is issued a NEW code, because the old label is still out there
@@ -23,7 +24,9 @@ export async function issueBag(
   const st = await requireStaff(1);
   const stu = await db.student.findUnique({
     where: { id: studentId },
-    include: { subscription: { include: { planRef: true } }, bags: true },
+    // ordered: the free-swap check compares against the MOST RECENT bag, and
+    // unordered rows would make that comparison arbitrary
+    include: { subscription: { include: { planRef: true } }, bags: { orderBy: { issuedAt: "desc" } } },
   });
   if (!stu) return { ok: false as const, error: "Student not found" };
 
@@ -37,15 +40,22 @@ export async function issueBag(
   const tier = stu.subscription?.active ? stu.subscription.planRef?.tier : null;
   const kind = bagKindFor(tier);
   const isFirstEver = stu.bags.length === 0;
+  const subscribed = !!stu.subscription?.active;
 
-  // Changing plan is a free SWAP, not a replacement sale. The code letter has
-  // to follow the tier staff read off the bag — a walk-in who subscribes, or a
-  // Bronze who moves to Gold, both need a new label. Charging for that would be
-  // billing a student for upgrading their plan.
+  // The complimentary bag is a SUBSCRIPTION perk — "one free bag to each
+  // student who subscribes". A walk-in with no plan buys theirs, otherwise
+  // anyone could collect a free bag without ever paying for a plan. They still
+  // get their free one later, on the day they subscribe.
+  const hasHadFreeBag = stu.bags.some((b) => b.complimentary);
+
+  // Changing plan is a free SWAP, not a sale. The code letter has to follow the
+  // tier staff read off the bag — a walk-in who subscribes, or a Bronze who
+  // moves to Gold, both need a new label, and billing for that would be
+  // charging a student for upgrading.
   const lastKind = stu.bags[0] ? bagKindFor(stu.bags[0].tier) : null;
   const upgradingFromWalkIn = !isFirstEver && lastKind !== null && lastKind !== kind;
 
-  const complimentary = isFirstEver || upgradingFromWalkIn;
+  const complimentary = (subscribed && !hasHadFreeBag) || upgradingFromWalkIn;
   const price = complimentary ? 0 : Math.max(0, Math.round(Number(input.price) || 0));
 
   let bag;
@@ -72,7 +82,7 @@ export async function issueBag(
 
   await pushNotif(
     studentId,
-    isFirstEver
+    complimentary && !upgradingFromWalkIn
       ? `Your FabricFold bag ${bag.code} is ready — it's on us. Bring it along on your wash day.`
       : upgradingFromWalkIn
         ? `Your new ${BAG_LABEL[kind]} bag ${bag.code} is ready — no charge for the plan change.`

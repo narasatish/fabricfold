@@ -203,3 +203,28 @@ describe("changing plan mid-term", () => {
     expect(fn).toMatch(/requireStaff\(2\)/);
   });
 });
+
+describe("loopholes closed around walk-ins and plan changes", () => {
+  const bags = fs.readFileSync(path.resolve(__dirname, "../lib/actions/bags.ts"), "utf8");
+  const sub = fs.readFileSync(path.resolve(__dirname, "../lib/actions/subscription.ts"), "utf8");
+
+  it("a walk-in with no plan does NOT get a free bag", () => {
+    // the free bag is a subscription perk; otherwise anyone collects one
+    // without ever buying a plan
+    expect(bags).toMatch(/const subscribed = !!stu\.subscription\?\.active/);
+    expect(bags).toMatch(/subscribed && !hasHadFreeBag/);
+  });
+
+  it("the free bag can only ever be claimed once", () => {
+    expect(bags).toMatch(/hasHadFreeBag = stu\.bags\.some\(\(b\) => b\.complimentary\)/);
+  });
+
+  it("compares against the MOST RECENT bag, not an arbitrary row", () => {
+    expect(bags).toMatch(/bags: \{ orderBy: \{ issuedAt: "desc" \} \}/);
+  });
+
+  it("a legacy plan with no buckets can't be upgraded into a free cycle reset", () => {
+    expect(sub).toMatch(/!oldBuckets\.length && cur\.cyclesUsed > 0/);
+    expect(sub).toMatch(/toSpend -= take/);
+  });
+});

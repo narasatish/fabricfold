@@ -32,7 +32,7 @@ type Student = {
 
 const KIND_LABEL: Record<string, string> = { damage: "Damage", stain: "Stain / re-do", missing: "Missing item", goodwill: "Goodwill", manual: "Adjustment" };
 
-type CollegePlan = { id: string; name: string; price: number; gross: number; gstApplies: boolean; buckets: { service: string; label: string; cycles: number; kgPerCycle: number }[] };
+type CollegePlan = { id: string; name: string; tier: string | null; price: number; gross: number; gstApplies: boolean; buckets: { service: string; label: string; cycles: number; kgPerCycle: number }[] };
 
 type Rates = Record<string, { label: string; items: [string, number][] }>;
 
@@ -70,7 +70,18 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
 
   // Bags — first is complimentary, replacements are sold at the counter
   const activeBag = student.bags.find((b) => b.status === "active") || null;
-  const isFirstBag = student.bags.length === 0;
+  // Mirrors issueBag: the free bag is a subscription perk, and a plan change
+  // swaps the label free. A walk-in with no plan pays for theirs.
+  const bagsNewestFirst = [...student.bags].sort((a, b) => b.issuedAt - a.issuedAt);
+  const subscribedNow = !!student.subscription?.active;
+  const hadFreeBag = student.bags.some((b) => b.complimentary);
+  // Tier of the plan they're on NOW vs the tier stamped on their newest bag.
+  const currentTier = subscribedNow
+    ? (plans.find((p) => p.name === student.subscription!.plan)?.tier ?? null)
+    : null;
+  const lastBagTier = bagsNewestFirst[0]?.tier ?? null;
+  const planTierChanged = bagsNewestFirst.length > 0 && lastBagTier !== currentTier;
+  const bagIsFree = (subscribedNow && !hadFreeBag) || planTierChanged;
   const [showBag, setShowBag] = useState(false);
   const [bagPrice, setBagPrice] = useState(0);
   const [bagMethod, setBagMethod] = useState<"cash" | "upi">("cash");
@@ -78,7 +89,7 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
 
   const doIssueBag = async () => {
     setBagBusy(true);
-    const r = await issueBag(student.id, { price: isFirstBag ? 0 : bagPrice, method: bagMethod });
+    const r = await issueBag(student.id, { price: bagIsFree ? 0 : bagPrice, method: bagMethod });
     setBagBusy(false);
     if (!r.ok) return toast(r.error || "Failed", true);
     toast(`Bag ${r.code} issued${r.complimentary ? " — complimentary" : ` · ₹${r.price}`}`);
@@ -289,10 +300,14 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
             ) : (
               <>
                 <div className="muted" style={{ fontSize: 13 }}>
-                  {isFirstBag ? "No bag issued yet — the first one is complimentary." : "No active bag. Issue a replacement below."}
+                  {bagIsFree
+                    ? "No bag issued yet — complimentary with their plan."
+                    : subscribedNow
+                      ? "No active bag. Issue a replacement below."
+                      : "No active bag. Walk-in bags are sold — the free one comes with a plan."}
                 </div>
                 <button className="btn xs mt12" onClick={() => setShowBag(true)}>
-                  <Svg name="plus" size={13} /> {isFirstBag ? "Issue complimentary bag" : "Sell a replacement bag"}
+                  <Svg name="plus" size={13} /> {bagIsFree ? "Issue complimentary bag" : "Sell a bag"}
                 </button>
               </>
             )}
@@ -480,12 +495,12 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
       {/* Issue / sell a bag */}
       <Sheet open={showBag} onClose={() => setShowBag(false)}>
         <div className="pad">
-          <h2 style={{ marginBottom: "6px" }}>{isFirstBag ? "Issue complimentary bag" : "Sell a replacement bag"}</h2>
+          <h2 style={{ marginBottom: "6px" }}>{bagIsFree ? "Issue complimentary bag" : "Sell a bag"}</h2>
           <div className="muted" style={{ fontSize: "12.5px", marginBottom: "16px" }}>
             The code is allocated automatically from {student.subscription?.active ? "their plan tier" : "the walk-in series"} and
             printed on the bag. It is never reused, so write it on the bag before handing it over.
           </div>
-          {!isFirstBag && (
+          {!bagIsFree && (
             <>
               <div className="field">
                 <label>Price</label>
@@ -500,8 +515,8 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
               </div>
             </>
           )}
-          <button className="btn" onClick={doIssueBag} disabled={bagBusy || (!isFirstBag && bagPrice <= 0)}>
-            <Svg name="check" size={18} /> {bagBusy ? "Issuing…" : isFirstBag ? "Issue bag" : `Take ${fmt(bagPrice)} & issue`}
+          <button className="btn" onClick={doIssueBag} disabled={bagBusy || (!bagIsFree && bagPrice <= 0)}>
+            <Svg name="check" size={18} /> {bagBusy ? "Issuing…" : bagIsFree ? "Issue bag" : `Take ${fmt(bagPrice)} & issue`}
           </button>
         </div>
       </Sheet>

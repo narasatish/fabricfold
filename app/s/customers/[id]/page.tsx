@@ -31,7 +31,7 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
     const price = Number(p.price);
     const gstApplies = gstOn && !p.gstFree;
     return {
-      id: p.id, name: p.name, price,
+      id: p.id, name: p.name, tier: p.tier, price,
       gross: price + (gstApplies ? Math.round(price * Number(cfg.gstPct) / 100) : 0),
       gstApplies,
       buckets: (p.buckets as unknown as { service: string; cycles: number; kgPerCycle: number }[]).map((b) => ({ ...b, label: SERVICE_LABEL[b.service] || b.service })),

@@ -170,10 +170,24 @@ export async function upgradeSubscription(studentId: string, planId: string, met
   const usedByService = new Map<string, number>();
   for (const b of oldBuckets) usedByService.set(b.service, (usedByService.get(b.service) || 0) + b.used);
 
-  const buckets = usageBuckets(plan.buckets as unknown as PlanBucket[]).map((b) => ({
+  let buckets = usageBuckets(plan.buckets as unknown as PlanBucket[]).map((b) => ({
     ...b,
     used: Math.min(b.cycles, usedByService.get(b.service) || 0),
   }));
+
+  // A legacy subscription has no per-service buckets, so the map above is empty
+  // and every bucket would come out unused — handing the student back every
+  // cycle they had already spent. Spend their old total across the new buckets
+  // instead, so a plan change can never be a free reset.
+  if (!oldBuckets.length && cur.cyclesUsed > 0) {
+    let toSpend = cur.cyclesUsed;
+    buckets = buckets.map((b) => {
+      const take = Math.min(b.cycles, toSpend);
+      toSpend -= take;
+      return { ...b, used: take };
+    });
+  }
+
   const cyclesTotal = buckets.reduce((s, b) => s + b.cycles, 0);
   const cyclesUsed = buckets.reduce((s, b) => s + b.used, 0);
 

@@ -70,6 +70,40 @@ try {
     if (had.rowCount) already++; else { added++; console.log(`[guards] ${table}: guard ADDED`); }
   }
   console.log(`[guards] ${host} — ${added} added, ${already} already present, ${absent} skipped`);
+
+  /* Installing a trigger and having it actually STOP a write are different
+     claims. A trigger can exist and still protect nothing — wrong events, a
+     function that returns instead of raising. So attempt a real UPDATE inside
+     a transaction that is always rolled back, and fail the build if it goes
+     through. "The installer said OK" is not evidence. */
+  let verified = 0, unverifiable = 0;
+  for (const table of GUARDED) {
+    const rows = await client.query(`select count(*)::int n from information_schema.tables
+      where table_schema='public' and table_name=$1`, [table]);
+    if (!rows.rowCount || !rows.rows[0].n) continue;
+
+    const any = await client.query(`select count(*)::int n from "${table}"`);
+    if (!any.rows[0].n) { unverifiable++; continue; } // nothing to attempt against
+
+    await client.query("BEGIN");
+    let blocked = false;
+    try {
+      await client.query(`UPDATE "${table}" SET id = id WHERE ctid = (SELECT ctid FROM "${table}" LIMIT 1)`);
+    } catch {
+      blocked = true;
+    }
+    await client.query("ROLLBACK"); // nothing is ever committed either way
+
+    if (!blocked) {
+      console.error(`[guards] VERIFY FAILED: an UPDATE on ${table} was NOT blocked.`);
+      process.exit(1);
+    }
+    verified++;
+  }
+  console.log(
+    `[guards] verified ${verified} table(s) actually reject writes` +
+      (unverifiable ? `; ${unverifiable} empty, nothing to attempt against` : ""),
+  );
 } catch (e) {
   // A deploy without ledger protection is worse than no deploy: fail the build
   // and leave the previous deployment live.

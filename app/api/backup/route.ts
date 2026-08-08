@@ -10,23 +10,46 @@ import { requireStaff } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-const TABLES = [
-  "college", "student", "staff", "subscription", "cycleUse", "order", "orderEvent",
-  "garmentTag", "payment", "invoice", "creditNote", "fySequence", "creditUse",
-  "compensation", "expense", "payslip", "complaint", "complaintMessage",
-  "notification", "auditLog", "appConfig",
-] as const;
+/* Tables are DERIVED from the Prisma schema, never hand-listed.
+
+   The previous hand-maintained list had drifted badly: Plan, Bag, DayClose,
+   Attendance and SlotWindow were all absent, so a restore would have produced
+   students and orders with no plans and no idea which bag belonged to whom.
+   A backup you trust but which silently omits tables is worse than none.
+
+   Deriving means a new model is included the day it is added. */
+const SKIP = new Set([
+  // Login codes, valid for five minutes. Pointless to restore, and a snapshot
+  // full of live OTPs is a liability rather than an asset.
+  "otp",
+]);
+
+/* Enumerated from the live client rather than Prisma.dmmf, which Prisma 7 no
+   longer exposes. Every model delegate is an own key with a findMany, so this
+   picks up a new table the moment it exists. */
+function backupTables(): string[] {
+  return Object.keys(db as object)
+    .filter((k) => !k.startsWith("$") && !k.startsWith("_"))
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .filter((k) => typeof (db as any)[k]?.findMany === "function")
+    .filter((k) => !SKIP.has(k))
+    .sort();
+}
 
 async function snapshot() {
   const out: Record<string, unknown[]> = {};
-  for (const t of TABLES) {
+  for (const key of backupTables()) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    out[t] = await (db as any)[t].findMany();
+    out[key] = await (db as any)[key].findMany();
   }
   return {
     app: "fabricfold",
-    version: 1,
+    version: 2, // v2: table list derived from the schema, not hand-maintained
     takenAt: new Date().toISOString(),
+    // Recorded so an incomplete snapshot is visible on inspection rather than
+    // only discovered during a restore.
+    tables: Object.keys(out).length,
+    skipped: [...SKIP],
     counts: Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.length])),
     data: out,
   };

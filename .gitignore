@@ -32,3 +32,6 @@ android/local.properties
 android-tmp/
 android/*.idsig
 android/gradle-apk.txt
+
+# restore-test snapshots
+snap*.json

@@ -7,7 +7,7 @@
    genCode is module-private, so we exercise it through requestOtp() and read
    back what actually got stored for that number. */
 import "dotenv/config";
-import { beforeAll, afterEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, afterEach, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
 import path from "node:path";
 
@@ -45,9 +45,18 @@ beforeAll(async () => {
   // landed. Kept generous on purpose: this hook is setup, not a perf budget.
 }, 300_000);
 
+beforeEach(() => {
+  /* requestOtp refuses a number it cannot text, so without this these tests
+     would store no code at all — and assertions like `not.toBe("123456")`
+     would pass against `undefined`, guarding nothing. Dry-run keeps delivery
+     "possible" while sending nothing. */
+  process.env.SMS_DRY_RUN = "1";
+});
+
 afterEach(async () => {
   await db.otp.deleteMany({ where: { purpose: "login" } });
   delete process.env.TEST_PHONES;
+  delete process.env.SMS_DRY_RUN;
 });
 
 describe("OTP: a fixed code must never be a master key in production", () => {
@@ -115,5 +124,29 @@ describe("OTP: a fixed code must never be a master key in production", () => {
     }
     // 5 crypto-random codes colliding would be ~1 in 10^24
     expect(seen.size).toBeGreaterThan(1);
+  });
+
+  it("a code is actually generated — so the guards above aren't passing on undefined", async () => {
+    setEnv("NODE_ENV", "production");
+    process.env.DEV_OTP = "123456";
+    process.env.TEST_PHONES = ALLOWED;
+
+    await auth.requestOtp(OWNER, "customer");
+    const code = await storedCode(OWNER);
+    expect(code, "no code stored — every `not.toBe` assertion here would pass vacuously").toBeDefined();
+    expect(code).toMatch(/^\d{6}$/);
+  });
+
+  it("refuses outright when the code could never be delivered", async () => {
+    // no provider, no dry-run, number not allowlisted: pretending to send left
+    // students waiting for an SMS that was only ever a console.log
+    setEnv("NODE_ENV", "production");
+    delete process.env.SMS_DRY_RUN;
+    process.env.DEV_OTP = "123456";
+    process.env.TEST_PHONES = ALLOWED;
+
+    const r = await auth.requestOtp(OWNER, "customer");
+    expect(r.ok).toBe(false);
+    expect(await storedCode(OWNER)).toBeUndefined();
   });
 });

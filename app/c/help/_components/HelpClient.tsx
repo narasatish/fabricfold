@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useToast } from "@/components/chrome";
 import { Svg } from "@/components/icons";
 import { submitComplaint } from "@/lib/actions/complaints";
+import { compressImage } from "@/lib/compress-image";
 
 export default function HelpClient({ orderId }: { orderId?: string }) {
   const router = useRouter();
@@ -23,7 +24,10 @@ export default function HelpClient({ orderId }: { orderId?: string }) {
     setUploading(true);
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      // shrink on-device first: a raw phone photo is 3-12 MB, which is slow to
+      // upload and was exhausting serverless memory on the receiving end
+      const { file: upload } = await compressImage(file);
+      fd.append("file", upload);
       const res = await fetch("/api/upload/complaint", { method: "POST", body: fd });
       if (!res.ok) {
         toast((await res.text()) || "Upload failed", true);

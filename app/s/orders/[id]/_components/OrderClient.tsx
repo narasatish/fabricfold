@@ -19,6 +19,7 @@ import {
 import { submitCompensation } from "@/lib/actions/credits";
 import { reportOrderDamage } from "@/lib/actions/complaints";
 import { MIN_DAMAGE_PHOTOS } from "@/lib/complaint-rules";
+import { compressImage } from "@/lib/compress-image";
 import { WEEKDAY_NAMES, isOffWashDay } from "@/lib/washday";
 
 type Order = {
@@ -145,7 +146,10 @@ export default function StaffOrderClient({
     setUploadingPhoto(true);
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      // shrink on-device first: a raw phone photo is 3-12 MB, which is slow to
+      // upload and was exhausting serverless memory on the receiving end
+      const { file: upload } = await compressImage(file);
+      fd.append("file", upload);
       const res = await fetch("/api/upload/intake", { method: "POST", body: fd });
       if (!res.ok) {
         toast(await res.text() || "Upload failed", true);
@@ -165,7 +169,10 @@ export default function StaffOrderClient({
     setUploadingPhoto(true);
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      // shrink on-device first: a raw phone photo is 3-12 MB, which is slow to
+      // upload and was exhausting serverless memory on the receiving end
+      const { file: upload } = await compressImage(file);
+      fd.append("file", upload);
       const res = await fetch("/api/upload/intake", { method: "POST", body: fd });
       if (!res.ok) {
         toast((await res.text()) || "Upload failed", true);

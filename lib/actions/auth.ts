@@ -21,6 +21,12 @@ const OTP_TTL = 5 * 60_000;
 async function sendSms(phone: string, code: string) {
   const text = `Your FabricFold login OTP is ${code}. It expires in 5 minutes.`;
 
+  // Dry run short-circuits BEFORE any provider, so nothing leaves the machine.
+  if (process.env.SMS_DRY_RUN === "1") {
+    console.log(`[SMS dry-run -> ${phone}] ${text}`);
+    return;
+  }
+
   const sgLogin = process.env.SMSGATE_LOGIN, sgPass = process.env.SMSGATE_PASSWORD;
   if (sgLogin && sgPass) {
     const res = await fetch("https://api.sms-gate.app/3rdparty/v1/message", {
@@ -84,6 +90,25 @@ async function sendSms(phone: string, code: string) {
   console.log(`[SMS -> ${phone}] ${text}`);
 }
 
+/* Is any real SMS provider wired up? Console logging is not delivery.
+
+   NOT exported: a "use server" module may only export async functions, and a
+   plain export here invalidates every other export in the file — the same trap
+   that broke the complaints module earlier today. */
+function smsConfigured() {
+  /* SMS_DRY_RUN=1 means "behave as though delivery works, but don't call out".
+     Without it, tests covering code GENERATION couldn't run at all once
+     requestOtp started refusing undeliverable numbers — and worse, their
+     security assertions passed vacuously against an undefined code. It is also
+     the honest way to exercise the flow on staging without spending messages. */
+  if (process.env.SMS_DRY_RUN === "1") return true;
+  return !!(
+    (process.env.SMSGATE_LOGIN && process.env.SMSGATE_PASSWORD) ||
+    (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM) ||
+    (process.env.MSG91_AUTHKEY && process.env.MSG91_TEMPLATE_ID)
+  );
+}
+
 /* Numbers allowed to use the fixed DEV_OTP code. Comma-separated, last 10
    digits, e.g. TEST_PHONES="8019121966,7799661888". */
 function testPhones(): string[] {
@@ -126,11 +151,44 @@ export async function requestOtp(phone: string, mode: "customer" | "staff") {
     return { ok: false as const, error: "OTP just sent — wait 30 seconds before requesting again" };
   }
 
+  /* Refuse rather than pretend.
+
+     Without an SMS provider, sendSms() only console.logs — so a randomly
+     generated code goes to a server log nobody reads while this returned
+     success. The student then waits for a message that will never arrive and
+     eventually types the fixed code, which only works for allowlisted numbers.
+     That was the intermittent "incorrect OTP": it depended entirely on whether
+     the number happened to be in TEST_PHONES. */
+  const allowlisted = testPhones().includes(phone);
+  const deliverable = smsConfigured() || allowlisted;
+  if (!deliverable) {
+    return {
+      ok: false as const,
+      error:
+        "We can't text a code to this number yet — SMS isn't switched on. " +
+        "Ask at the counter and staff will sign you in.",
+    };
+  }
+
   const code = genCode(phone);
   await db.otp.deleteMany({ where: { phone, purpose: "login" } });
   await db.otp.create({ data: { phone, purpose: "login", code, expiresAt: new Date(Date.now() + OTP_TTL) } });
-  await sendSms(phone, code);
-  return { ok: true as const };
+
+  // A send failure must not look like a success either.
+  if (smsConfigured()) {
+    try {
+      await sendSms(phone, code);
+    } catch (e) {
+      await db.otp.deleteMany({ where: { phone, purpose: "login" } });
+      return { ok: false as const, error: (e as Error).message || "Couldn't send the OTP — please try again" };
+    }
+  } else {
+    await sendSms(phone, code); // allowlisted + no provider: logs, code is the known test one
+  }
+
+  // `fixedCode` lets the sign-in screen say "use your test code" instead of
+  // "check your messages" when no SMS actually went out.
+  return { ok: true as const, fixedCode: !smsConfigured() && allowlisted };
 }
 
 export async function verifyOtp(
@@ -146,7 +204,15 @@ export async function verifyOtp(
     where: { phone, purpose: "login", usedAt: null, expiresAt: { gt: new Date() } },
     orderBy: { expiresAt: "desc" },
   });
-  if (!otp) return { ok: false as const, error: "Incorrect or expired OTP" };
+
+  /* "Incorrect or expired" hid three different problems and sent people round
+     in circles retyping a code that could never work. Separate them, so the
+     message says what to actually do. */
+  if (!otp) {
+    const stale = await db.otp.findFirst({ where: { phone, purpose: "login", usedAt: null } });
+    if (stale) return { ok: false as const, error: "That code has expired — tap Resend to get a new one" };
+    return { ok: false as const, error: "No code was requested for this number — tap Send OTP first" };
+  }
 
   // Brute-force protection: a wrong code burns one of 5 attempts; the 5th kills the OTP.
   if (otp.attempts >= 5) {
@@ -159,7 +225,10 @@ export async function verifyOtp(
       await db.otp.delete({ where: { id: otp.id } }).catch(() => {});
       return { ok: false as const, error: "Too many wrong attempts — request a new OTP" };
     }
-    return { ok: false as const, error: "Incorrect or expired OTP" };
+    // remaining attempts stated plainly: a silent counter that suddenly locks
+    // the account is worse than one you can see running down
+    const left = 5 - updated.attempts;
+    return { ok: false as const, error: `Incorrect code — ${left} attempt${left === 1 ? "" : "s"} left` };
   }
 
   if (mode === "staff") {

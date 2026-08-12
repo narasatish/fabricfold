@@ -6,7 +6,7 @@ import { Qr } from "@/components/qr";
 import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, loyaltyBadge } from "@/lib/format";
 import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
-import { assignSubscription, upgradeSubscription } from "@/lib/actions/subscription";
+import { assignSubscription, upgradeSubscription, cancelSubscription } from "@/lib/actions/subscription";
 import { issueBag, retireBag } from "@/lib/actions/bags";
 import { walkInOrder } from "@/lib/actions/orders";
 import { topUpCredits } from "@/lib/actions/ops";
@@ -122,6 +122,25 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
     if (!r.ok) return toast(r.error || "Failed", true);
     toast(`Moved to ${upgradePlan.name} — collected ${fmt(r.difference)}${r.tierChanged ? ". Issue a new bag for the new tier." : ""}`);
     setShowUpgrade(false);
+    router.refresh();
+  };
+
+  // Cancel a plan (Admin+). The reason is mandatory and shown to the student.
+  const [showCancel, setShowCancel] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const cyclesLeft = student.subscription
+    ? Math.max(0, student.subscription.cyclesTotal - student.subscription.cyclesUsed)
+    : 0;
+
+  const doCancel = async () => {
+    setCancelBusy(true);
+    const r = await cancelSubscription(student.id, cancelReason);
+    setCancelBusy(false);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(`Plan cancelled${r.cyclesForfeited ? ` — ${r.cyclesForfeited} cycle(s) forfeited` : ""}`);
+    setShowCancel(false);
+    setCancelReason("");
     router.refresh();
   };
 
@@ -253,11 +272,18 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
           </div>
           <div className="kv mt8"><span className="k">Plan</span><span>{student.subscription.plan}</span></div>
           <div className="kv"><span className="k">Cycles used</span><span className="mono">{student.subscription.cyclesUsed} / {student.subscription.cyclesTotal}</span></div>
-          {staffRole >= 2 && upgradeOptions.length > 0 && (
-            <button className="btn xs sec mt12" onClick={() => { setUpgradePlanId(upgradeOptions[0].id); setShowUpgrade(true); }}>
-              <Svg name="layers" size={13} /> Change plan
-            </button>
-          )}
+          <div className="row wrap gap8 mt12">
+            {staffRole >= 2 && upgradeOptions.length > 0 && (
+              <button className="btn xs sec" onClick={() => { setUpgradePlanId(upgradeOptions[0].id); setShowUpgrade(true); }}>
+                <Svg name="layers" size={13} /> Change plan
+              </button>
+            )}
+            {staffRole >= 3 && student.subscription.active && (
+              <button className="btn xs sec" onClick={() => setShowCancel(true)}>
+                <Svg name="x" size={13} /> Cancel plan
+              </button>
+            )}
+          </div>
           <div className="kv"><span className="k">Per cycle</span><span>up to {student.subscription.kgPerCycle} kg</span></div>
           {student.subscription.expiresAt && (
             <div className="kv"><span className="k">Expires</span><span>{dateStr(student.subscription.expiresAt)}</span></div>
@@ -458,6 +484,41 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
           </div>
           <button className="btn mt16" onClick={doWalkIn} disabled={wiLoading || wiPieces === 0}>
             <Svg name="check" size={18} /> {wiLoading ? "Creating…" : "Create & receive order"}
+          </button>
+        </div>
+      </Sheet>
+
+      {/* Cancel a plan (Admin+) */}
+      <Sheet open={showCancel} onClose={() => setShowCancel(false)}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "6px" }}>Cancel plan</h2>
+          <div className="muted" style={{ fontSize: "12.5px", marginBottom: "14px" }}>
+            Ends &quot;{student.subscription?.plan}&quot; immediately. The reason is sent to the student
+            and kept on record.
+          </div>
+
+          {cyclesLeft > 0 && (
+            <div className="card pad" style={{ background: "var(--amber-soft)", borderColor: "#f2e2c4", marginBottom: "14px" }}>
+              <span style={{ fontSize: "12.5px", color: "var(--amber)" }}>
+                {cyclesLeft} unused cycle{cyclesLeft === 1 ? "" : "s"} will be forfeited. Cancelling refunds
+                nothing on its own — issue a refund or compensation separately if money is owed back.
+              </span>
+            </div>
+          )}
+
+          <div className="field">
+            <label>Reason <span style={{ color: "var(--red)" }}>*</span></label>
+            <textarea
+              className="input"
+              rows={3}
+              placeholder="e.g. Student left the campus mid-term"
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+            />
+          </div>
+
+          <button className="btn mt12" onClick={doCancel} disabled={cancelBusy || cancelReason.trim().length < 3}>
+            <Svg name="check" size={18} /> {cancelBusy ? "Cancelling…" : "Cancel this plan"}
           </button>
         </div>
       </Sheet>

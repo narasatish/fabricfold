@@ -201,6 +201,54 @@ export async function upgradeSubscription(studentId: string, planId: string, met
   return { ok: true as const, difference, cyclesLeft: cyclesTotal - cyclesUsed, tierChanged: cur.planRef?.tier !== plan.tier };
 }
 
+/* Admin cancels an active plan, for any reason, at any time.
+
+   The reason is mandatory and stored. A plan that merely went inactive with no
+   explanation is indistinguishable from a bug, and the student is owed an
+   answer months later just as much as today.
+
+   Remaining cycles are FORFEITED, consistent with expiry — cancelling is not a
+   refund. Money owed back is a separate, deliberate act (compensation or
+   refund), so that a cancellation can never quietly move cash on its own.
+
+   The subscription row is kept, not deleted: cycle history, past orders and
+   the audit trail all hang off it. */
+export async function cancelSubscription(studentId: string, reason: string) {
+  const st = await requireStaff(3); // Admin+ — this ends something the student paid for
+  const note = (reason || "").trim();
+  if (note.length < 3) return { ok: false as const, error: "Give a reason — it is shown to the student and kept on record" };
+
+  const stu = await db.student.findUnique({
+    where: { id: studentId },
+    include: { subscription: true },
+  });
+  if (!stu) return { ok: false as const, error: "Student not found" };
+  const sub = stu.subscription;
+  if (!sub) return { ok: false as const, error: "This student has no plan" };
+  if (!sub.active) return { ok: false as const, error: "That plan is already inactive" };
+
+  const left = Math.max(0, sub.cyclesTotal - sub.cyclesUsed);
+
+  await db.subscription.update({
+    where: { studentId },
+    data: { active: false, cancelledAt: new Date(), cancelledReason: note, cancelledBy: st.id },
+  });
+
+  await pushNotif(
+    studentId,
+    `Your "${sub.plan}" plan has been cancelled. ${note}` +
+      (left > 0 ? ` ${left} unused cycle${left === 1 ? "" : "s"} closed with it — talk to us at the counter if that seems wrong.` : ""),
+    "status",
+  );
+  await audit("Subscription cancelled", `${stu.name} · ${sub.plan} · ${left} cycles unused · ${note}`, st.id);
+  void notifyOwner(
+    "Subscription cancelled",
+    `${stu.name}: "${sub.plan}" cancelled by ${st.name}. ${left} unused cycle(s) forfeited. Reason: ${note}`,
+  );
+  publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "subscription", payload: { studentId } });
+  return { ok: true as const, cyclesForfeited: left };
+}
+
 export async function cancelSubscriptionRequest() {
   const stu = await requireStudent();
   if (stu.subscription && !stu.subscription.active) {

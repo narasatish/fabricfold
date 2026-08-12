@@ -111,6 +111,13 @@ model Subscription {
   cyclesUsed  Int       @default(0)
   kgPerCycle  Decimal
   cycleLog    CycleUse[]
+
+  // Cancellation is recorded, never erased. A plan that simply went inactive
+  // with no reason is indistinguishable from a bug, and the student is owed an
+  // explanation months later just as much as today.
+  cancelledAt     DateTime?
+  cancelledReason String?
+  cancelledBy     String? // staffId
 }
 
 // A PHYSICAL bag handed to a student, with its code printed on the outside:

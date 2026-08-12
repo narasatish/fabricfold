@@ -40,7 +40,66 @@ async function waPost(body: unknown) {
 
    Register one generic utility template (body: a single {{1}} placeholder) and
    set WHATSAPP_ORDER_TEMPLATE to its name — it then covers every update. */
+/* Twilio as a WhatsApp provider.
+
+   Twilio's WhatsApp SANDBOX needs no Meta business verification — the recipient
+   joins by texting a code once, and messages flow immediately. That makes it
+   the practical way to test on a trial account, where Meta's 1-3 day
+   verification would otherwise block everything.
+
+   The 24-hour rule still applies: it is Meta's, not Twilio's. Inside the window
+   free text is delivered; outside it, only an approved template. In the sandbox
+   the window is all you get, so a student must have messaged recently — fine
+   for testing, not for launch.
+
+   Env: TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_WHATSAPP_FROM
+        (e.g. "whatsapp:+14155238886" for the sandbox) */
+function twilioWaCreds() {
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  const from = process.env.TWILIO_WHATSAPP_FROM;
+  return sid && token && from ? { sid, token, from } : null;
+}
+
+async function twilioWaSend(phone: string, body: string, mediaUrl?: string) {
+  const c = twilioWaCreds();
+  if (!c) return false;
+  const form = new URLSearchParams({
+    To: `whatsapp:+91${phone}`,
+    From: c.from.startsWith("whatsapp:") ? c.from : `whatsapp:${c.from}`,
+    Body: body,
+  });
+  if (mediaUrl) form.append("MediaUrl", mediaUrl);
+  try {
+    const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${c.sid}/Messages.json`, {
+      method: "POST",
+      headers: {
+        Authorization: "Basic " + Buffer.from(`${c.sid}:${c.token}`).toString("base64"),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: form,
+    });
+    if (!res.ok) {
+      // 63016 = outside the 24h window with no template; the commonest sandbox
+      // failure and worth naming rather than logging a bare status code.
+      const detail = await res.text().catch(() => "");
+      console.error("Twilio WhatsApp send failed", res.status, detail);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("Twilio WhatsApp send error", e);
+    return false;
+  }
+}
+
 async function sendWhatsApp(phone: string, text: string) {
+  // Twilio first when configured: on a trial account it is the only path that
+  // works without Meta business verification.
+  if (twilioWaCreds()) {
+    await twilioWaSend(phone, text);
+    return;
+  }
   if (!waCreds()) return;
   const to = "91" + phone;
   const tpl = process.env.WHATSAPP_ORDER_TEMPLATE;
@@ -69,11 +128,45 @@ async function readStorageObject(key: string) {
   return { bytes: new Uint8Array(await res.arrayBuffer()), mime: res.headers.get("content-type") || "image/jpeg" };
 }
 
+/* Twilio fetches media from a URL rather than accepting uploaded bytes, so the
+   Meta path (upload -> media id) doesn't apply. A Supabase signed URL is
+   publicly reachable for its lifetime, which is exactly long enough for Twilio
+   to pull the image — and it expires afterwards, so the photo does not become
+   permanently public. */
+async function signStorageObject(key: string, expiresIn = 600) {
+  const supaUrl = process.env.SUPABASE_URL, supaKey = process.env.SUPABASE_SERVICE_KEY;
+  if (!supaUrl || !supaKey || key.startsWith("local/")) return null;
+  const bucket = process.env.SUPABASE_BUCKET || "receipts";
+  const res = await fetch(`${supaUrl}/storage/v1/object/sign/${bucket}/${encodeURI(key)}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${supaKey}`, apikey: supaKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ expiresIn }),
+  });
+  if (!res.ok) return null;
+  const j = (await res.json()) as { signedURL: string };
+  return supaUrl + "/storage/v1" + j.signedURL;
+}
+
 /** Send stored photos to a student's WhatsApp (damage evidence on a complaint).
     Best-effort: a failed photo is logged, never thrown at the caller. */
 export async function sendWhatsAppPhotos(phone: string, keys: string[], caption?: string) {
+  if (!keys.length) return;
+
+  if (twilioWaCreds()) {
+    for (const [i, key] of keys.entries()) {
+      try {
+        const url = await signStorageObject(key);
+        if (!url) continue;
+        await twilioWaSend(phone, i === 0 && caption ? caption : "", url);
+      } catch (e) {
+        console.error("Twilio WhatsApp photo error", e);
+      }
+    }
+    return;
+  }
+
   const c = waCreds();
-  if (!c || !keys.length) return;
+  if (!c) return;
   for (const [i, key] of keys.entries()) {
     try {
       const obj = await readStorageObject(key);

@@ -8,7 +8,8 @@
     "postinstall": "prisma generate",
     "start": "next start",
     "test": "vitest run",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "verify": "node scripts/verify-all.mjs"
   },
   "dependencies": {
     "@prisma/adapter-better-sqlite3": "^7.8.0",

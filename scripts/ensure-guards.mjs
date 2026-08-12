@@ -22,6 +22,25 @@ try { (await import("dotenv")).config(); } catch { /* not installed: fine on Ver
 
 const GUARDED = ["Payment", "Invoice", "CreditNote", "AuditLog"];
 
+/* Value constraints the DATABASE enforces, not just the app.
+
+   The security audit found these were app-guarded only: plain SQL could set a
+   student's credits to -9999 or mark 99999 cycles used. Application validation
+   is one bug away from being bypassed; a CHECK constraint is not. These are
+   the invariants where being wrong means wrong money.
+
+   Named ff_* so they are recognisable, and added only when the existing data
+   already satisfies them — a deploy must never fail because of historical rows
+   it cannot fix. */
+const CHECKS = [
+  ["Student", "ff_credits_not_negative", `"credits" >= 0`],
+  ["Subscription", "ff_cycles_used_not_negative", `"cyclesUsed" >= 0`],
+  ["Subscription", "ff_cycles_used_within_total", `"cyclesUsed" <= "cyclesTotal"`],
+  ["Order", "ff_total_not_negative", `"total" >= 0`],
+  ["Order", "ff_surcharge_not_negative", `"surcharge" >= 0`],
+  ["Bag", "ff_bag_price_not_negative", `"price" >= 0`],
+];
+
 const FN = `
 CREATE OR REPLACE FUNCTION public.ff_protect_ledger()
  RETURNS trigger
@@ -103,6 +122,36 @@ try {
   console.log(
     `[guards] verified ${verified} table(s) actually reject writes` +
       (unverifiable ? `; ${unverifiable} empty, nothing to attempt against` : ""),
+  );
+
+  /* Value constraints. Added only where current data already complies —
+     failing a deploy over historical rows would mean the safest change is the
+     one nobody can ship. A violation is reported loudly instead. */
+  let checksAdded = 0, checksPresent = 0, checksSkipped = 0;
+  for (const [table, name, expr] of CHECKS) {
+    const exists = await client.query(
+      `select 1 from information_schema.tables where table_schema='public' and table_name=$1`, [table]);
+    if (!exists.rowCount) continue;
+
+    const has = await client.query(
+      // $2::text — Postgres cannot infer a parameter's type inside format()
+      `select 1 from pg_constraint where conname = $1 and conrelid = format('public.%I', $2::text)::regclass`,
+      [name, table]);
+    if (has.rowCount) { checksPresent++; continue; }
+
+    const bad = await client.query(`select count(*)::int n from public."${table}" where NOT (${expr})`);
+    if (bad.rows[0].n > 0) {
+      console.warn(`[guards] ${table}.${name}: ${bad.rows[0].n} existing row(s) violate ${expr} — constraint NOT added, investigate`);
+      checksSkipped++;
+      continue;
+    }
+    await client.query(`ALTER TABLE public."${table}" ADD CONSTRAINT "${name}" CHECK (${expr})`);
+    console.log(`[guards] ${table}.${name}: constraint ADDED`);
+    checksAdded++;
+  }
+  console.log(
+    `[guards] value constraints — ${checksAdded} added, ${checksPresent} already present` +
+      (checksSkipped ? `, ${checksSkipped} SKIPPED due to existing bad data` : ""),
   );
 } catch (e) {
   // A deploy without ledger protection is worse than no deploy: fail the build

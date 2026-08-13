@@ -94,6 +94,13 @@ model Student {
      which costs nothing extra because that request already loads this row. */
   sessionEpoch Int @default(0)
 
+  /* Erasure request. The financial ledger is immutable by law and by trigger,
+     so a student's orders and payments cannot be deleted — what CAN go is
+     everything identifying them: name, phone, notification history. The rows
+     stay so the accounts still balance, but they no longer name a person.
+     Recorded rather than silent, because an erasure must itself be auditable. */
+  anonymisedAt DateTime?
+
   subscription  Subscription?
   orders        Order[]
   payments      Payment[]
@@ -436,6 +443,20 @@ model ErrorLog {
   at      DateTime @default(now())
 
   @@index([at])
+}
+
+/* Fixed-window rate limiting, keyed by whatever the caller chooses (an IP, a
+   phone, a pair of both).
+
+   Kept in the database rather than memory because serverless functions do not
+   share memory — an in-process counter resets on every cold start and each
+   instance counts separately, which is no limit at all. */
+model RateLimit {
+  key         String   @id // e.g. "otp:ip:1.2.3.4"
+  windowStart DateTime
+  count       Int      @default(0)
+
+  @@index([windowStart])
 }
 
 model Otp {

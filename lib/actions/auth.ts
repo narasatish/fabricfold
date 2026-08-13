@@ -2,14 +2,21 @@
 /* Phone-OTP auth. DEV_OTP fallback prints the code to the server console;
    swap `sendSms` for Twilio/MSG91 behind the same interface in production. */
 import crypto from "node:crypto";
+import { headers } from "next/headers";
 import { db } from "../db";
 import { createSession, clearSession, requireStudent } from "../auth";
+import { rateLimit, clientIp } from "../rate-limit";
 import {
   hashPasscode, verifyPasscode, passcodeProblem, lockoutMinutesLeft,
   MAX_PW_ATTEMPTS, LOCKOUT_MS,
 } from "../password";
 
 const OTP_TTL = 5 * 60_000;
+
+/* Caps beyond the 30-second cooldown. A legitimate student needs two or three
+   codes on a bad day; anything approaching these numbers is abuse. */
+const OTP_MAX_PER_NUMBER_HOUR = 5;
+const OTP_MAX_PER_IP_HOUR = 15; // a shared hostel wifi may carry several students
 
 /* Deliver the login code by SMS. Providers, first configured one wins:
    1. SMS-Gate (free) — the "SMS Gateway" Android app (sms-gate.app) running on
@@ -153,6 +160,31 @@ export async function requestOtp(phone: string, mode: "customer" | "staff") {
   const existing = await db.otp.findFirst({ where: { phone, purpose: "login", usedAt: null } });
   if (existing && existing.expiresAt.getTime() - OTP_TTL > Date.now() - 30_000) {
     return { ok: false as const, error: "OTP just sent — wait 30 seconds before requesting again" };
+  }
+
+  /* Per-number and per-IP caps on top of that cooldown.
+
+     The 30-second rule alone only slows one number down. Someone cycling
+     through numbers could still make us send hundreds of texts — every one
+     billed to us, and to strangers who never asked. The IP cap is the one that
+     actually stops that; the hourly per-number cap stops a single victim being
+     woken up all night. */
+  const ip = clientIp(await headers());
+  const perNumber = await rateLimit(`otp:phone:${phone}`, OTP_MAX_PER_NUMBER_HOUR, 3600);
+  if (!perNumber.allowed) {
+    return {
+      ok: false as const,
+      error: `Too many codes requested for this number. Try again in ${Math.ceil(perNumber.retryAfterSec / 60)} minutes.`,
+    };
+  }
+  if (ip !== "unknown") {
+    const perIp = await rateLimit(`otp:ip:${ip}`, OTP_MAX_PER_IP_HOUR, 3600);
+    if (!perIp.allowed) {
+      return {
+        ok: false as const,
+        error: `Too many code requests from this device. Try again in ${Math.ceil(perIp.retryAfterSec / 60)} minutes.`,
+      };
+    }
   }
 
   /* Refuse rather than pretend.

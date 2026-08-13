@@ -6,18 +6,44 @@
 import { useState } from "react";
 import { Svg } from "@/components/icons";
 import { useToast } from "@/components/chrome";
-import { requestOtp, verifyOtp } from "@/lib/actions/auth";
+import { requestOtp, verifyOtp, hasPasscode, loginWithPasscode } from "@/lib/actions/auth";
 import { useRouter } from "next/navigation";
 
 export default function LoginForm() {
   const router = useRouter();
   const toast = useToast();
-  const [step, setStep] = useState<"phone" | "otp">("phone");
+  const [step, setStep] = useState<"phone" | "otp" | "passcode">("phone");
   const [mode, setMode] = useState<"customer" | "staff">("customer");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
+  const [passcode, setPasscodeValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [notRegistered, setNotRegistered] = useState(false);
+
+  /* Students who have set a passcode go straight to it — no waiting for a text,
+     and it works where the signal doesn't. Staff stay OTP-only: a staff account
+     takes payments, so it should not be reachable by a guessable passcode. */
+  const handleContinue = async () => {
+    if (!/^\d{10}$/.test(phone.replace(/\D/g, ""))) {
+      toast("Enter a valid 10-digit number", true);
+      return;
+    }
+    if (mode === "staff") return handleRequestOtp();
+    setLoading(true);
+    const r = await hasPasscode(phone);
+    setLoading(false);
+    if (r.hasPasscode) { setStep("passcode"); return; }
+    return handleRequestOtp();
+  };
+
+  const handlePasscodeLogin = async () => {
+    setLoading(true);
+    const r = await loginWithPasscode(phone, passcode);
+    setLoading(false);
+    if (!r.ok) { toast(r.error, true); return; }
+    toast("Signed in");
+    router.push("/c");
+  };
 
   const handleRequestOtp = async () => {
     if (!/^\d{10}$/.test(phone.replace(/\D/g, ""))) {
@@ -94,12 +120,12 @@ export default function LoginForm() {
                 autoFocus
                 value={phone}
                 onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                onKeyDown={(e) => { if (e.key === "Enter" && phone.length === 10 && !loading) handleRequestOtp(); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && phone.length === 10 && !loading) handleContinue(); }}
                 inputMode="numeric"
               />
             </div>
-            <button className="btn" onClick={handleRequestOtp} disabled={loading || phone.length !== 10}>
-              {loading ? "Sending…" : "Send OTP"}
+            <button className="btn" onClick={handleContinue} disabled={loading || phone.length !== 10}>
+              {loading ? "Checking…" : "Continue"}
             </button>
 
             {mode === "customer" && (
@@ -107,6 +133,42 @@ export default function LoginForm() {
                 New here? Visit your campus counter to get registered — you'll then sign in with just your number.
               </div>
             )}
+          </>
+        )}
+
+        {step === "passcode" && (
+          <>
+            <div className="h-md" style={{ marginBottom: "8px" }}>Enter your passcode</div>
+            <div className="muted" style={{ fontSize: "13px", marginBottom: "16px" }}>
+              +91 {phone.slice(-10)}{" "}
+              <span style={{ color: "var(--teal-dark)", fontWeight: 600, cursor: "pointer" }} onClick={() => { setStep("phone"); setPasscodeValue(""); }}>
+                Change
+              </span>
+            </div>
+            <div className="field">
+              <label>Passcode</label>
+              <input
+                className="input"
+                type="password"
+                placeholder="Your passcode"
+                autoFocus
+                value={passcode}
+                onChange={(e) => setPasscodeValue(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && passcode && !loading) handlePasscodeLogin(); }}
+              />
+            </div>
+            <button className="btn" onClick={handlePasscodeLogin} disabled={loading || !passcode}>
+              {loading ? "Signing in…" : "Sign in"}
+            </button>
+            {/* Always reachable: a forgotten or locked passcode must never be a
+                dead end, and the phone is the thing we can actually verify. */}
+            <button
+              className="btn sec mt12"
+              onClick={() => { setPasscodeValue(""); handleRequestOtp(); }}
+              disabled={loading}
+            >
+              Forgot passcode — sign in with OTP
+            </button>
           </>
         )}
 

@@ -69,7 +69,7 @@ export default async function ProfilePage() {
             <Svg name="chevR" size={18} />
           </Link>
 
-          <ProfileClient studentName={student.name} />
+          <ProfileClient studentName={student.name} hasPasscode={!!student.passwordHash} />
         </div>
 
         <div className="center muted mt16" style={{ fontSize: "11px" }}>

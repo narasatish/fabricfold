@@ -4,6 +4,10 @@
 import crypto from "node:crypto";
 import { db } from "../db";
 import { createSession, clearSession, requireStudent } from "../auth";
+import {
+  hashPasscode, verifyPasscode, passcodeProblem, lockoutMinutesLeft,
+  MAX_PW_ATTEMPTS, LOCKOUT_MS,
+} from "../password";
 
 const OTP_TTL = 5 * 60_000;
 
@@ -247,6 +251,112 @@ export async function verifyOtp(
     return { ok: false as const, error: "This number isn't registered yet — please visit the counter to be registered." };
   }
   await db.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
+  await createSession({ mode: "customer", studentId: stu.id });
+  return { ok: true as const };
+}
+
+/* ─────────────── Passcode: set, change, sign in ───────────────
+
+   OTP stays the root of trust: it proves possession of the phone, which is the
+   only thing we can actually verify. A passcode is a convenience on top —
+   faster, and it works where the signal doesn't. So every path that CREATES or
+   RESETS a passcode requires either a live session or a fresh OTP; a passcode
+   can never be set by knowing only a phone number. */
+
+/** Set or replace the passcode. Requires an already-signed-in student, which
+    means they arrived either by OTP or by their existing passcode. */
+export async function setPasscode(passcode: string) {
+  const stu = await requireStudent();
+  const problem = passcodeProblem(passcode);
+  if (problem) return { ok: false as const, error: problem };
+
+  const { hash, salt } = await hashPasscode(passcode.trim());
+  await db.student.update({
+    where: { id: stu.id },
+    // clear any lockout: setting a new passcode is a deliberate reset
+    data: { passwordHash: hash, passwordSalt: salt, passwordSetAt: new Date(), pwFailedAttempts: 0, pwLockedUntil: null },
+  });
+  return { ok: true as const };
+}
+
+/** Change it while signed in, proving the current one first. Without that
+    check, an unattended phone is a permanent account takeover. */
+export async function changePasscode(current: string, next: string) {
+  const stu = await requireStudent();
+  if (!stu.passwordHash) return { ok: false as const, error: "No passcode set yet — create one instead" };
+
+  const okNow = await verifyPasscode((current || "").trim(), stu.passwordHash, stu.passwordSalt);
+  if (!okNow) return { ok: false as const, error: "Current passcode is wrong" };
+
+  const problem = passcodeProblem(next);
+  if (problem) return { ok: false as const, error: problem };
+  if ((next || "").trim() === (current || "").trim()) {
+    return { ok: false as const, error: "New passcode must be different" };
+  }
+
+  const { hash, salt } = await hashPasscode(next.trim());
+  await db.student.update({
+    where: { id: stu.id },
+    data: { passwordHash: hash, passwordSalt: salt, passwordSetAt: new Date(), pwFailedAttempts: 0, pwLockedUntil: null },
+  });
+  return { ok: true as const };
+}
+
+/** Does this number have a passcode? Lets the sign-in screen offer the right
+    option without revealing whether the number is registered at all. */
+export async function hasPasscode(phone: string) {
+  const p = phone.replace(/\D/g, "").slice(-10);
+  if (p.length !== 10) return { ok: true as const, hasPasscode: false };
+  const stu = await db.student.findUnique({ where: { phone: p }, select: { passwordHash: true } });
+  return { ok: true as const, hasPasscode: !!stu?.passwordHash };
+}
+
+/** Sign in with phone + passcode. Students only — staff stay OTP-only, since a
+    staff account can move money and take payments. */
+export async function loginWithPasscode(phone: string, passcode: string) {
+  const p = phone.replace(/\D/g, "").slice(-10);
+  if (p.length !== 10) return { ok: false as const, error: "Enter a valid 10-digit mobile number" };
+
+  const stu = await db.student.findUnique({ where: { phone: p } });
+
+  /* Deliberately identical wording whether the number is unknown or the
+     passcode is wrong. Distinct messages would turn this into a directory of
+     who is registered. */
+  const generic = "Mobile number or passcode is incorrect";
+  if (!stu || !stu.passwordHash) return { ok: false as const, error: generic };
+
+  const lockedFor = lockoutMinutesLeft(stu.pwLockedUntil);
+  if (lockedFor > 0) {
+    return {
+      ok: false as const,
+      error: `Too many wrong tries — locked for ${lockedFor} more minute${lockedFor === 1 ? "" : "s"}. Use Sign in with OTP instead.`,
+    };
+  }
+
+  const good = await verifyPasscode((passcode || "").trim(), stu.passwordHash, stu.passwordSalt);
+  if (!good) {
+    const attempts = stu.pwFailedAttempts + 1;
+    const lock = attempts >= MAX_PW_ATTEMPTS;
+    await db.student.update({
+      where: { id: stu.id },
+      data: {
+        pwFailedAttempts: lock ? 0 : attempts, // reset the counter when the lock starts
+        pwLockedUntil: lock ? new Date(Date.now() + LOCKOUT_MS) : stu.pwLockedUntil,
+      },
+    });
+    if (lock) {
+      return {
+        ok: false as const,
+        error: `Too many wrong tries — locked for ${Math.round(LOCKOUT_MS / 60_000)} minutes. Use Sign in with OTP instead.`,
+      };
+    }
+    const left = MAX_PW_ATTEMPTS - attempts;
+    return { ok: false as const, error: `${generic} — ${left} attempt${left === 1 ? "" : "s"} left` };
+  }
+
+  if (stu.pwFailedAttempts || stu.pwLockedUntil) {
+    await db.student.update({ where: { id: stu.id }, data: { pwFailedAttempts: 0, pwLockedUntil: null } });
+  }
   await createSession({ mode: "customer", studentId: stu.id });
   return { ok: true as const };
 }

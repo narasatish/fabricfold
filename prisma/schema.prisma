@@ -74,6 +74,19 @@ model Student {
   washDay        Int? // assigned weekly drop-off day, 0=Sun..6=Sat; spreads load evenly across the week (soft guidance, not enforced)
   createdAt      DateTime @default(now())
 
+  /* Optional passcode, so a student who has signed in once by OTP can get back
+     in without waiting for a text — useful on a campus with poor signal.
+
+     NEVER the passcode itself: scrypt hash + per-user salt. OTP remains the way
+     to RESET it, because the phone is the thing we can actually verify.
+     Failures are counted and the account locks briefly, otherwise a 4-6 digit
+     passcode is trivially brute-forced. */
+  passwordHash     String?
+  passwordSalt     String?
+  passwordSetAt    DateTime?
+  pwFailedAttempts Int       @default(0)
+  pwLockedUntil    DateTime?
+
   subscription  Subscription?
   orders        Order[]
   payments      Payment[]

@@ -2,10 +2,9 @@
 /* Phone-OTP auth. DEV_OTP fallback prints the code to the server console;
    swap `sendSms` for Twilio/MSG91 behind the same interface in production. */
 import crypto from "node:crypto";
-import { headers } from "next/headers";
 import { db } from "../db";
 import { createSession, clearSession, requireStudent } from "../auth";
-import { rateLimit, clientIp } from "../rate-limit";
+import { rateLimit, requestIp } from "../rate-limit";
 import {
   hashPasscode, verifyPasscode, passcodeProblem, lockoutMinutesLeft,
   MAX_PW_ATTEMPTS, LOCKOUT_MS,
@@ -169,7 +168,7 @@ export async function requestOtp(phone: string, mode: "customer" | "staff") {
      billed to us, and to strangers who never asked. The IP cap is the one that
      actually stops that; the hourly per-number cap stops a single victim being
      woken up all night. */
-  const ip = clientIp(await headers());
+  const ip = await requestIp();
   const perNumber = await rateLimit(`otp:phone:${phone}`, OTP_MAX_PER_NUMBER_HOUR, 3600);
   if (!perNumber.allowed) {
     return {

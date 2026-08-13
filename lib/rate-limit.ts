@@ -59,6 +59,20 @@ export function clientIp(headers: Headers): string {
   return headers.get("x-real-ip") || "unknown";
 }
 
+/* next/headers throws outside a request scope, which made requestOtp
+   uncallable from tests and scripts — it exploded before reaching any of the
+   logic under test. The IP is best-effort by nature, so a missing one degrades
+   to "unknown" (which skips the IP cap) rather than taking the whole action
+   down. */
+export async function requestIp(): Promise<string> {
+  try {
+    const { headers } = await import("next/headers");
+    return clientIp(await headers());
+  } catch {
+    return "unknown";
+  }
+}
+
 /** Drop windows that closed long ago, so the table can't grow forever. */
 export async function pruneRateLimits(olderThanSec = 24 * 3600) {
   const cutoff = new Date(Date.now() - olderThanSec * 1000);

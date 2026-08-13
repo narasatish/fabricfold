@@ -87,6 +87,13 @@ model Student {
   pwFailedAttempts Int       @default(0)
   pwLockedUntil    DateTime?
 
+  /* Bumped to revoke every existing session at once. A JWT cannot be recalled
+     once issued, so without this a lost phone stays signed in for up to 30
+     days — "sign out everywhere" would be a button that does nothing. The
+     epoch is carried in the token and compared on each authenticated request,
+     which costs nothing extra because that request already loads this row. */
+  sessionEpoch Int @default(0)
+
   subscription  Subscription?
   orders        Order[]
   payments      Payment[]
@@ -106,6 +113,10 @@ model Staff {
   college    College? @relation(fields: [collegeId], references: [id])
   payslips   Payslip[]
   attendance Attendance[]
+
+  // Same revocation mechanism as Student — see the note there. Matters more
+  // here: a staff session can take payments and issue refunds.
+  sessionEpoch Int @default(0)
 }
 
 // ───────────── Subscription (cycle-based) ─────────────

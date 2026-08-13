@@ -239,7 +239,7 @@ export async function verifyOtp(
     const st = await db.staff.findUnique({ where: { phone } });
     if (!st) return { ok: false as const, error: "Not registered as staff" };
     await db.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
-    await createSession({ mode: "staff", staffId: st.id, role: st.role });
+    await createSession({ mode: "staff", staffId: st.id, role: st.role, epoch: st.sessionEpoch });
     return { ok: true as const };
   }
 
@@ -251,7 +251,7 @@ export async function verifyOtp(
     return { ok: false as const, error: "This number isn't registered yet — please visit the counter to be registered." };
   }
   await db.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
-  await createSession({ mode: "customer", studentId: stu.id });
+  await createSession({ mode: "customer", studentId: stu.id, epoch: stu.sessionEpoch });
   return { ok: true as const };
 }
 
@@ -357,7 +357,17 @@ export async function loginWithPasscode(phone: string, passcode: string) {
   if (stu.pwFailedAttempts || stu.pwLockedUntil) {
     await db.student.update({ where: { id: stu.id }, data: { pwFailedAttempts: 0, pwLockedUntil: null } });
   }
-  await createSession({ mode: "customer", studentId: stu.id });
+  await createSession({ mode: "customer", studentId: stu.id, epoch: stu.sessionEpoch });
+  return { ok: true as const };
+}
+
+/* Revoke every session for this account, including the one on a lost phone.
+   Bumping the epoch invalidates all previously issued tokens at once — a JWT
+   cannot be recalled any other way. */
+export async function signOutEverywhere() {
+  const stu = await requireStudent();
+  await db.student.update({ where: { id: stu.id }, data: { sessionEpoch: { increment: 1 } } });
+  await clearSession();
   return { ok: true as const };
 }
 

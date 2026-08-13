@@ -6,8 +6,8 @@ const SECRET = new TextEncoder().encode(process.env.AUTH_SECRET || "dev-secret")
 const COOKIE = "ff_session";
 
 export type Session =
-  | { mode: "customer"; studentId: string }
-  | { mode: "staff"; staffId: string; role: number };
+  | { mode: "customer"; studentId: string; epoch?: number }
+  | { mode: "staff"; staffId: string; role: number; epoch?: number };
 
 export async function createSession(s: Session) {
   const jwt = await new SignJWT(s as unknown as Record<string, unknown>)
@@ -46,6 +46,12 @@ export async function requireStudent() {
   if (!s || s.mode !== "customer") throw new AuthError("Not signed in");
   const stu = await db.student.findUnique({ where: { id: s.studentId }, include: { subscription: true, college: true } });
   if (!stu) throw new AuthError("Account not found");
+  /* Revocation check. Free: this row was loaded anyway. A token issued before
+     the last "sign out everywhere" carries a stale epoch and is refused, which
+     is what makes that button mean something. Tokens predating the feature
+     have no epoch and are treated as epoch 0, so nobody is logged out by the
+     upgrade itself. */
+  if ((s.epoch ?? 0) !== stu.sessionEpoch) throw new AuthError("Session ended — please sign in again");
   return stu;
 }
 
@@ -55,6 +61,9 @@ export async function requireStaff(minRole = 1) {
   if (!s || s.mode !== "staff") throw new AuthError("Not signed in");
   const st = await db.staff.findUnique({ where: { id: s.staffId } });
   if (!st) throw new AuthError("Account not found");
+  if ((s.epoch ?? 0) !== st.sessionEpoch) throw new AuthError("Session ended — please sign in again");
+  /* Role is read from the DATABASE, never from the token. A demoted staff
+     member holding an old token must not keep Admin rights until it expires. */
   if (st.role < minRole) throw new AuthError("Not allowed for your role");
   return st;
 }

@@ -17,7 +17,7 @@ export default function MarketingShell({ active, children }: { active?: string; 
     <div className="mkt">
       <nav className="m-nav">
         <div className="mx">
-          <Link href="/" className="m-logo"><span className="mark">F</span> FabricFold</Link>
+          <Link href="/" className="m-logo"><img src="/logo-mark.png" alt="" className="mark" width={26} height={26} /> FabricFold</Link>
           <div className="m-links">
             {NAV.map((n) => (
               <Link key={n.href} href={n.href} className={active === n.href ? "on" : ""}>{n.label}</Link>
@@ -34,7 +34,7 @@ export default function MarketingShell({ active, children }: { active?: string; 
         <div className="mx">
           <div className="cols">
             <div>
-              <div className="brand"><span className="mark">F</span> FabricFold</div>
+              <div className="brand"><img src="/logo-mark.png" alt="" className="mark" width={26} height={26} /> FabricFold</div>
               <p className="tag">Campus &amp; community laundry, run on-site and managed from your phone. Now serving colleges and communities across Telangana.</p>
             </div>
             <div>

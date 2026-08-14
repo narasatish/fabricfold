@@ -92,11 +92,23 @@ export default function LoginForm() {
       <div className="pad" style={{ paddingTop: "24px" }}>
         {step === "phone" && (
           <>
-            <div className="card pad center" style={{ background: "linear-gradient(135deg,var(--teal),var(--teal-dark))", color: "#fff", border: "none", marginBottom: "20px" }}>
-              <div style={{ fontSize: "12px", opacity: 0.85, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em" }}>
-                Campus laundry & dry-cleaning
+            {/* The logo carries its own wordmark, so it replaces the lettered
+                gradient card rather than sitting on top of one — the artwork's
+                pale sky would have fought the teal. Width and height are set on
+                the element so the box is reserved before the image arrives:
+                this is the first paint of the first screen, and a logo popping
+                in would push the sign-in field down under the user's thumb. */}
+            <div style={{ textAlign: "center", marginBottom: "20px" }}>
+              <img
+                src="/logo-full.png"
+                alt="FabricFold"
+                width={132}
+                height={132}
+                style={{ borderRadius: "22px", boxShadow: "0 8px 24px rgba(14,146,113,.18)" }}
+              />
+              <div style={{ fontSize: "12px", color: "var(--ink-2)", fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em", marginTop: "12px" }}>
+                Campus laundry &amp; dry-cleaning
               </div>
-              <div style={{ fontSize: "24px", fontWeight: 700, marginTop: "8px" }}>FabricFold</div>
             </div>
 
             <div style={{ marginBottom: "16px" }}>

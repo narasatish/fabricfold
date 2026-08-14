@@ -10,8 +10,32 @@ export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, statusBarStyle: "default", title: "FabricFold" },
   icons: {
-    icon: [{ url: "/icon-192.png", sizes: "192x192", type: "image/png" }, { url: "/icon.svg", type: "image/svg+xml" }],
+    /* PNG only. The old icon.svg was a placeholder mark, and browsers prefer
+       SVG when both are offered — so listing it would have kept the wrong
+       logo in the tab no matter what the PNGs contained. */
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
     apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+  },
+  /* Link previews. Students share fabricfold.in on WhatsApp far more than
+     anywhere else, and without these a shared link renders as a bare grey URL.
+     Set on the root layout so every page inherits a preview; pages with their
+     own metadata override the title and description but keep the image. */
+  openGraph: {
+    type: "website",
+    siteName: "FabricFold",
+    title: "FabricFold",
+    description: "Campus laundry & dry-cleaning",
+    url: "https://fabricfold.in",
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "FabricFold" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "FabricFold",
+    description: "Campus laundry & dry-cleaning",
+    images: ["/og.png"],
   },
 };
 

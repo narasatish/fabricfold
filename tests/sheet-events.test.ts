@@ -24,9 +24,22 @@ describe("the outbox never costs an order", () => {
     expect(fn).toMatch(/catch \(e\) \{\s*return \{ ok: false as const/);
   });
 
-  it("the fast path is fire-and-forget, never awaited", () => {
-    expect(events).toMatch(/export function flushSoon\(\) \{\s*void flushSheetOutbox\(\)/);
-    // callers must not await it — that would put Google back on the hot path
+  it("the fast path uses after(), not a bare floating promise", () => {
+    /* A `void flushSheetOutbox()` is abandoned when the serverless instance is
+       frozen at response time — proven on production, where an order sat
+       unsent until the endpoint was called by hand. `after` keeps the function
+       alive until the callback finishes. */
+    expect(events).toMatch(/import \{ after \} from "next\/server"/);
+    expect(events).toMatch(/try \{\s*after\(run\);/);
+    expect(events).not.toMatch(/export function flushSoon\(\) \{\s*void flushSheetOutbox\(\)/);
+  });
+
+  it("falls back gracefully where there is no request scope", () => {
+    // after() throws in scripts, tests and crons; the sweep covers those
+    expect(events).toMatch(/\} catch \{\s*void run\(\);/);
+  });
+
+  it("callers never await it — that would put Google on the hot path", () => {
     expect(orders).not.toMatch(/await flushSoon\(/);
   });
 });

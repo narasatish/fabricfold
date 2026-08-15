@@ -23,6 +23,7 @@
    The aggregate tabs (Live, Daily, Plans…) are untouched and still rebuild on
    the daily sync. This adds an append-only log beside them; it does not
    replace the totals. */
+import { after } from "next/server";
 import { db } from "./db";
 import { appendSheet, sheetsConfigured } from "./sheets";
 import type { Prisma } from "./generated/prisma/client";
@@ -145,12 +146,27 @@ export async function flushSheetOutbox(limit = 200) {
 /**
  * Kick a flush without making the caller wait.
  *
- * Deliberately not awaited by callers. On a serverless host the process may be
- * frozen before this finishes, which is exactly why the cron sweep exists —
- * this is the fast path, not the guarantee.
+ * Uses next/server's `after`, which runs the callback once the response has
+ * been sent AND keeps the serverless function alive until it finishes. A bare
+ * `void flushSheetOutbox()` does not: Vercel freezes the instance the moment
+ * the response goes out, so the promise is abandoned mid-flight.
+ *
+ * That is not theoretical. It was the first implementation, and a real walk-in
+ * order on production sat unsent twenty seconds later — the row only moved
+ * when the flush endpoint was called by hand. Same code, same order, the only
+ * difference being who kept the process alive.
+ *
+ * `after` throws outside a request scope, so scripts, tests and the cron route
+ * fall back to awaiting nothing and rely on the sweep.
  */
 export function flushSoon() {
-  void flushSheetOutbox().catch((e) => console.error("[sheets] flush failed:", (e as Error).message));
+  const run = () =>
+    flushSheetOutbox().catch((e) => console.error("[sheets] flush failed:", (e as Error).message));
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
 }
 
 /** Drop rows that were delivered a while ago; keep failures for inspection. */

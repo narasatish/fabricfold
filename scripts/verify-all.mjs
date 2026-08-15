@@ -52,6 +52,19 @@ const STEPS = [
     needsDb: true,
   },
   {
+    /* Re-arm the test schema's raw guards before anything asserts on them.
+       `prisma db push` drops objects Prisma does not know about — the partial
+       unique index on bag codes among them — and the unit suite pushes to
+       ff_test as part of its setup. Without this the QA pipeline reports "DB
+       refuses to reissue a retired code" as a product failure when the truth
+       is that a previous step disarmed the constraint. Cheap, and idempotent. */
+    name: "re-arm test-schema guards",
+    cmd: "node scripts/ensure-guards.mjs",
+    env: { FF_GUARD_SCHEMA: "ff_test" },
+    proves: "the isolated test schema carries the same constraints as production",
+    needsDb: true,
+  },
+  {
     name: "full QA pipeline",
     cmd: "npx tsx scripts/qa-pipeline.ts",
     proves: "a whole campus lifecycle end to end against a real database",
@@ -67,7 +80,12 @@ for (const step of STEPS) {
 
   process.stdout.write(`\n▶ ${step.name} — ${step.proves}\n`);
   const started = Date.now();
-  const r = spawnSync(step.cmd, { shell: true, stdio: "inherit" });
+  const r = spawnSync(step.cmd, {
+    shell: true,
+    stdio: "inherit",
+    // step.env lets a step target the test schema without affecting the rest
+    env: step.env ? { ...process.env, ...step.env } : process.env,
+  });
   const secs = Math.round((Date.now() - started) / 1000);
   results.push({ ...step, status: r.status === 0 ? "passed" : "FAILED", secs });
 }

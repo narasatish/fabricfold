@@ -32,6 +32,22 @@ const NEW_NUMBER = "9812345670"; // never registered
 
 beforeAll(async () => {
   execSync("npx prisma db push", { env: { ...process.env, DATABASE_URL: TEST_URL }, stdio: "ignore" });
+
+  /* Put back the guards `db push` just removed.
+     Prisma only knows about the schema file, so any raw object — the partial
+     unique index that stops two students holding one bag code — is dropped
+     when it syncs. This hook is the only thing in the suite that pushes, and
+     it silently disarmed that index for everything that ran afterwards: the
+     QA pipeline's "DB refuses to reissue a retired code" failed on every full
+     run, pointing at the product rather than at this line. Restoring it here
+     keeps the fix next to the cause. */
+  if (IS_PG) {
+    execSync("node scripts/ensure-guards.mjs", {
+      env: { ...process.env, FF_GUARD_SCHEMA: "ff_test" },
+      stdio: "ignore",
+    });
+  }
+
   db = (await import("../lib/db")).db;
   auth = await import("../lib/actions/auth");
 

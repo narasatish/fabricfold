@@ -10,9 +10,9 @@
    number.
 
    The owner asked for a live per-order log, so this is a deliberate widening
-   of the original "aggregates only" rule, not an oversight. ACTION REQUIRED:
-   /privacy still does not name Google as a processor of personal data, and it
-   must before this runs against real students.
+   of the original "aggregates only" rule, not an oversight. /privacy names
+   Google as a processor and states exactly which fields are written — keep
+   the two in step if you add a column here.
 
    Env (all required; the sync is a no-op without them):
      GOOGLE_SA_EMAIL        service account address (…@….iam.gserviceaccount.com)

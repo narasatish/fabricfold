@@ -78,6 +78,14 @@ export default function Privacy() {
             <li><strong>Razorpay</strong> — processes online payments, when you choose to pay online.</li>
             <li><strong>SMS and WhatsApp providers</strong> — deliver your login OTP and order updates to your phone.</li>
             <li><strong>Resend</strong> — sends operational email (for example, order and report notifications to the business owner).</li>
+            <li>
+              <strong>Google Sheets</strong> — our own operational record of the business. As each order,
+              payment, collection and complaint happens, a summary line is written to a private spreadsheet
+              the owner uses to run the counter and reconcile the day&apos;s takings. Those lines carry your
+              <strong> name and customer ID</strong> (the code on your bag), the order number, service, piece
+              count and amount. They never carry your <strong>phone number or address</strong>, and never
+              photographs.
+            </li>
             <li><strong>Sentry</strong> — helps us diagnose app errors. Where it records a session, all text and inputs are masked.</li>
           </ul>
           <p>

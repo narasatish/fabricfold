@@ -144,7 +144,10 @@ describe("privacy", () => {
     const sheets = read("lib/sheets.ts");
     // \s+ because the sentence wraps across lines in the comment block
     expect(sheets).toMatch(/Never\s+a\s+phone\s+number,\s+never\s+an\s+address/);
-    expect(sheets).toMatch(/ACTION REQUIRED/); // /privacy must name Google
+    // the outstanding action is done: /privacy now names Google, and the
+    // contract tells the next person to keep the two in step
+    expect(sheets).toMatch(/\/privacy names\s+Google as a processor/);
+    expect(sheets).not.toMatch(/ACTION REQUIRED/);
   });
 });
 

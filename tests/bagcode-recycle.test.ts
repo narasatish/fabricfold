@@ -122,6 +122,30 @@ describe("release is guarded", () => {
     expect(retire).not.toMatch(/status: "released"/);
     expect(retire).not.toMatch(/releasedAt/);
   });
+
+  it("staff can reach it, and it is not confusable with lost/replaced", () => {
+    // an action with no button is a feature nobody has
+    const ui = read("app/s/customers/[id]/_components/CustomerClient.tsx");
+    expect(ui).toMatch(/releaseBagCode/);
+    expect(ui).toMatch(/Student left/);
+    expect(ui).toMatch(/confirm\(/); // spells out that the code is reissued
+    // and the copy tells staff which button keeps the code reserved
+    expect(ui).toMatch(/keeps the old one reserved/);
+  });
+});
+
+describe("the privacy policy matches what is written to the Sheet", () => {
+  const policy = read("app/privacy/page.tsx");
+
+  it("names Google as a processor", () => {
+    // the live log carries student names; the policy has to say so
+    expect(policy).toMatch(/Google Sheets/);
+  });
+
+  it("states the fields, including the ones NOT sent", () => {
+    expect(policy).toMatch(/name and customer ID/);
+    expect(policy).toMatch(/phone number or address/);
+  });
 });
 
 describe("the database enforces it, not just the allocator", () => {

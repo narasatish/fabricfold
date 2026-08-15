@@ -7,7 +7,7 @@ import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, loyaltyBadge } from "@/l
 import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
 import { assignSubscription, upgradeSubscription, cancelSubscription } from "@/lib/actions/subscription";
-import { issueBag, retireBag } from "@/lib/actions/bags";
+import { issueBag, retireBag, releaseBagCode } from "@/lib/actions/bags";
 import { walkInOrder } from "@/lib/actions/orders";
 import { topUpCredits } from "@/lib/actions/ops";
 import { updateStudentPhone } from "@/lib/actions/admin";
@@ -102,6 +102,23 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
     const r = await retireBag(bagId, status);
     if (!r.ok) return toast(r.error || "Failed", true);
     toast(`Bag marked ${status}`);
+    router.refresh();
+  };
+
+  /* Release the customer ID back to the pool — the student has left the campus.
+     Kept apart from "lost" and "replaced" because only this frees the code for
+     somebody else, and the confirm spells out what that means. The action
+     itself refuses while a plan or an open order is live. */
+  const doReleaseBag = async (bagId: string, code: string) => {
+    if (!confirm(
+      `Release customer ID ${code}?\n\n` +
+      `Use this when the student has left the campus. ${code} goes back into the pool and will be issued to a new student. ` +
+      `Their past orders keep this code — only future issuing is affected.\n\n` +
+      `For a bag that was lost or swapped on a plan change, use Lost or Replaced instead: those keep the code reserved.`,
+    )) return;
+    const r = await releaseBagCode(bagId);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(`${r.code} released — free for a new student`);
     router.refresh();
   };
 
@@ -318,9 +335,14 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
                 <div className="row gap8 mt12">
                   <button className="btn xs sec" onClick={() => doRetireBag(activeBag.id, "lost")}>Mark lost</button>
                   <button className="btn xs sec" onClick={() => doRetireBag(activeBag.id, "replaced")}>Mark replaced</button>
+                  <button className="btn xs sec" style={{ color: "var(--red)" }} onClick={() => doReleaseBag(activeBag.id, activeBag.code)}>
+                    Student left
+                  </button>
                 </div>
                 <div className="muted mt8" style={{ fontSize: 11.5 }}>
-                  Retiring a bag frees the student for a new code. The old code is never reissued.
+                  Lost or replaced frees the student for a new code, but keeps the old one reserved — a bag
+                  handed in months later must still name its owner. <strong>Student left</strong> is the only
+                  one that returns {activeBag.code} to the pool for a new student.
                 </div>
               </>
             ) : (

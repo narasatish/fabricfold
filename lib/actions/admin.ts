@@ -179,6 +179,45 @@ export async function saveStaff(input: { id?: string; name: string; phone: strin
   return { ok: true as const };
 }
 
+/**
+ * Remove a staff login, or restore one.
+ *
+ * Deactivates rather than deletes — see the note on Staff.active. The account
+ * stops being able to sign in, but the payslips, attendance and audit trail
+ * naming them stay intact, which is the point of keeping records at all.
+ *
+ * The guards exist because every one of these is a way to lock the business
+ * out of its own admin panel, and none of them is recoverable from inside the
+ * app once it has happened.
+ */
+export async function setStaffActive(staffId: string, active: boolean) {
+  const st = await requireStaff(3); // Admin+
+  const target = await db.staff.findUnique({ where: { id: staffId } });
+  if (!target) return { ok: false as const, error: "Staff member not found" };
+  if (target.active === active) return { ok: true as const, active };
+
+  if (!active) {
+    // You cannot remove yourself: one misclick would end your own session.
+    if (target.id === st.id) return { ok: false as const, error: "You can't remove your own login" };
+    // Only an Owner may remove an Owner — otherwise an Admin can demote the top.
+    if (target.role >= 4 && st.role < 4) return { ok: false as const, error: "Only the owner can remove an owner" };
+    // Never remove the last active Owner, or nobody can grant Owner again.
+    if (target.role >= 4) {
+      const owners = await db.staff.count({ where: { role: { gte: 4 }, active: true } });
+      if (owners <= 1) return { ok: false as const, error: "This is the last owner — promote someone else first" };
+    }
+  }
+
+  await db.staff.update({
+    where: { id: staffId },
+    // Bump the epoch so a signed-in device loses access immediately rather
+    // than at token expiry. requireStaff also checks `active` every request.
+    data: { active, sessionEpoch: { increment: 1 } },
+  });
+  await audit(active ? "Staff restored" : "Staff removed", `${target.name} · ${target.phone}`, st.id);
+  return { ok: true as const, active };
+}
+
 /* ----- Expenses (Manager+), with optional receipt upload key ----- */
 export async function submitExpense(input: { category: string; amount: number; note: string; method: "cash" | "upi"; receiptKey?: string | null; receiptMime?: string | null }) {
   const st = await requireStaff(2);

@@ -9,7 +9,7 @@ import { fmt } from "@/lib/format";
 import { useToast, Sheet, Switch, Seg } from "@/components/chrome";
 import {
   saveRates, savePlan, togglePlan, savePaymentConfig, saveSettings,
-  toggleFeature, saveCollege, deleteCollege, saveStaff, createPayslip,
+  toggleFeature, saveCollege, deleteCollege, saveStaff, setStaffActive, createPayslip,
 } from "@/lib/actions/admin";
 import { markErrorsSeen, syncSheetsNow } from "@/lib/actions/ops";
 import { saveSlotWindow, toggleSlotWindow, deleteSlotWindow } from "@/lib/actions/slots";
@@ -32,7 +32,7 @@ type Props = {
   };
   colleges: { id: string; name: string; address: string; closedWeekday: number | null; features: Record<string, boolean> }[];
   washDayByCollege: Record<string, number[]>;
-  staff: { id: string; name: string; phone: string; role: number; collegeId: string | null }[];
+  staff: { id: string; name: string; phone: string; role: number; collegeId: string | null; active: boolean }[];
   payslips: { id: string; number: string; month: string; net: number; staffName: string }[];
   plans: PlanRow[];
   attendance: { staffId: string; name: string; todayIn: number | null; todayOut: number | null; daysThisMonth: number }[];
@@ -72,7 +72,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   const [pay, setPay] = useState({ ...config.payment });
   const [settings, setSettings] = useState({ reportEmail: config.settings.reportEmail || "", dailyEmail: !!config.settings.dailyEmail, sendHour: config.settings.sendHour ?? 21, openingFloat: config.settings.openingFloat ?? 0, garmentTagsEnabled: config.settings.garmentTagsEnabled === true });
   const [colEdit, setColEdit] = useState<{ id?: string; name: string; address: string; closedWeekday: number | null }>({ name: "", address: "", closedWeekday: null });
-  const [stEdit, setStEdit] = useState<{ id?: string; name: string; phone: string; role: number }>({ name: "", phone: "", role: 1 });
+  const [stEdit, setStEdit] = useState<{ id?: string; name: string; phone: string; role: number; active?: boolean }>({ name: "", phone: "", role: 1 });
   const [slip, setSlip] = useState({ staffId: staff[0]?.id || "", month: new Date().toISOString().slice(0, 7), basic: 0, allowances: 0, deductions: 0, postExpense: true });
   const emptySlot = (collegeId: string) => ({ id: undefined as string | undefined, collegeId, weekday: 1, startMin: 540, endMin: 660, capacity: 15 });
   const [slotEdit, setSlotEdit] = useState<ReturnType<typeof emptySlot>>(emptySlot(colleges[0]?.id || ""));
@@ -303,13 +303,18 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
       <div className="sec-title mt20">Staff roles</div>
       <div className="list">
         {staff.map((x) => (
-          <button key={x.id} className="list-item tap" style={{ width: "100%", textAlign: "left" }} onClick={() => { setStEdit({ id: x.id, name: x.name, phone: x.phone, role: x.role }); setSheet("staff"); }}>
+          /* Removed staff stay listed, dimmed. Hiding them would make it look
+             as though the account never existed, when their name is still on
+             past payslips and payments — and you need a way back if the wrong
+             person was removed. */
+          <button key={x.id} className="list-item tap" style={{ width: "100%", textAlign: "left", opacity: x.active ? 1 : 0.45 }}
+            onClick={() => { setStEdit({ id: x.id, name: x.name, phone: x.phone, role: x.role, active: x.active }); setSheet("staff"); }}>
             <div className="avatar" style={{ width: 38, height: 38, fontSize: 14 }}>{x.name[0]}</div>
             <div className="grow">
               <div className="h-sm">{x.name}</div>
               <div className="muted" style={{ fontSize: 12 }}>{x.phone}</div>
             </div>
-            <span className="pill gray">{ROLE_NAMES[x.role]}</span>
+            <span className={x.active ? "pill gray" : "pill red"}>{x.active ? ROLE_NAMES[x.role] : "Removed"}</span>
           </button>
         ))}
       </div>
@@ -487,6 +492,31 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
         </div>
         <button className="btn" onClick={() => run(() => saveStaff({ ...stEdit, collegeId: null }), "Staff saved")}>{stEdit.id ? "Save" : "Create staff account"}</button>
         <div className="muted center mt8" style={{ fontSize: 12 }}>They sign in to the staff app with this mobile.</div>
+
+        {/* Removal is a separate, explicit action — never a side effect of Save.
+            It ends their session immediately and blocks new sign-ins, but keeps
+            their payslips and the audit trail of payments they took. */}
+        {stEdit.id && (
+          stEdit.active === false ? (
+            <button
+              className="btn sec mt12"
+              onClick={() => run(() => setStaffActive(stEdit.id!, true), "Staff login restored")}
+            >
+              Restore this login
+            </button>
+          ) : (
+            <button
+              className="btn sec mt12"
+              style={{ color: "var(--red)" }}
+              onClick={() => {
+                if (!confirm(`Remove ${stEdit.name}'s login?\n\nThey can no longer sign in with ${stEdit.phone}, and any device they are signed in on loses access immediately. Payslips and past records are kept.`)) return;
+                run(() => setStaffActive(stEdit.id!, false), "Staff login removed");
+              }}
+            >
+              Remove this login
+            </button>
+          )
+        )}
       </Sheet>
 
       <Sheet open={sheet === "payslip"} onClose={() => setSheet(null)}>

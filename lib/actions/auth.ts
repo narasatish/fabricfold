@@ -152,7 +152,10 @@ export async function requestOtp(phone: string, mode: "customer" | "staff") {
 
   if (mode === "staff") {
     const st = await db.staff.findUnique({ where: { phone } });
-    if (!st) return { ok: false as const, error: "This number is not registered as staff" };
+    /* Same wording for "never registered" and "removed" — a rejected sign-in
+       screen should not confirm to an ex-employee that their number was once
+       staff, nor to anyone else which numbers are. */
+    if (!st || !st.active) return { ok: false as const, error: "This number is not registered as staff" };
   }
 
   // Cooldown: at most one OTP per 30 seconds per number (blocks SMS-bombing / spam).
@@ -268,7 +271,7 @@ export async function verifyOtp(
 
   if (mode === "staff") {
     const st = await db.staff.findUnique({ where: { phone } });
-    if (!st) return { ok: false as const, error: "Not registered as staff" };
+    if (!st || !st.active) return { ok: false as const, error: "Not registered as staff" };
     await db.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
     await createSession({ mode: "staff", staffId: st.id, role: st.role, epoch: st.sessionEpoch });
     return { ok: true as const };

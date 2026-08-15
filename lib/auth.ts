@@ -61,6 +61,10 @@ export async function requireStaff(minRole = 1) {
   if (!s || s.mode !== "staff") throw new AuthError("Not signed in");
   const st = await db.staff.findUnique({ where: { id: s.staffId } });
   if (!st) throw new AuthError("Account not found");
+  /* Checked on EVERY request, not just at sign-in. Deactivation bumps the
+     epoch too, but this is the backstop: a removed staff member must lose
+     access mid-session, not whenever their token happens to expire. */
+  if (!st.active) throw new AuthError("This staff account has been removed");
   if ((s.epoch ?? 0) !== st.sessionEpoch) throw new AuthError("Session ended — please sign in again");
   /* Role is read from the DATABASE, never from the token. A demoted staff
      member holding an old token must not keep Admin rights until it expires. */

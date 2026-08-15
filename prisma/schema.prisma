@@ -121,6 +121,13 @@ model Staff {
   payslips   Payslip[]
   attendance Attendance[]
 
+  /* Removing a staff member DEACTIVATES rather than deletes.
+     They own payslips and attendance rows, and their id appears against every
+     payment they took and every audit entry they caused. A hard delete would
+     either fail on those references or erase the record of who handled the
+     money — which is exactly the record you need after someone leaves. */
+  active Boolean @default(true)
+
   // Same revocation mechanism as Student — see the note there. Matters more
   // here: a staff session can take payments and issue refunds.
   sessionEpoch Int @default(0)

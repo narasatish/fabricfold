@@ -57,7 +57,7 @@ export default async function StaffAdminPage() {
         }}
         colleges={colleges.map((c) => ({ id: c.id, name: c.name, address: c.address, closedWeekday: c.closedWeekday, features: c.features as Record<string, boolean> }))}
         washDayByCollege={washDayByCollege}
-        staff={staffList.map((x) => ({ id: x.id, name: x.name, phone: x.phone, role: x.role, collegeId: x.collegeId }))}
+        staff={staffList.map((x) => ({ id: x.id, name: x.name, phone: x.phone, role: x.role, collegeId: x.collegeId, active: x.active }))}
         plans={plans.map((p) => ({ id: p.id, collegeId: p.collegeId, name: p.name, price: N(p.price), gstFree: p.gstFree, tier: p.tier, active: p.active, buckets: p.buckets as { service: string; cycles: number; kgPerCycle: number }[] }))}
         attendance={staffList.map((x) => {
           const today = attToday.find((a) => a.staffId === x.id);

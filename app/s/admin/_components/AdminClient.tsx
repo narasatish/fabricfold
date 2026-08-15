@@ -2,6 +2,7 @@
 /* Admin hub — rates & GST, plan, payment details, colleges + feature flags,
    staff roles, payroll, report settings. All wired to server actions. */
 import { useState } from "react";
+import { featureOn, type FeatureKey } from "@/lib/features";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { fmt } from "@/lib/format";
@@ -45,7 +46,10 @@ type SlotWindowRow = { id: string; collegeId: string; weekday: number; startMin:
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const ROLE_NAMES: Record<number, string> = { 1: "Counter", 2: "Manager", 3: "Admin", 4: "Owner" };
-const FEATURES: [string, string][] = [
+/* Typed as FeatureKey so adding a toggle here without giving it a default in
+   lib/features.ts fails the build instead of rendering a switch that resolves
+   to nothing. */
+const FEATURES: [FeatureKey, string][] = [
   ["svc_wash", "Wash & Iron"], ["svc_washfold", "Wash & Fold"], ["svc_iron", "Iron Only"], ["svc_dryclean", "Dry Clean"],
   ["subscriptions", "Subscriptions"], ["credits", "Credits & compensation"],
   ["express", "Express (same-day)"], ["chat", "Chat & complaints"],
@@ -181,7 +185,10 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
             <div key={key} className="between" style={{ padding: "7px 0" }}>
               <span style={{ fontSize: 14 }}>{label}</span>
               <Switch
-                on={c.features[key] !== false}
+                /* Same reading the student app uses, so this switch shows what
+                   is actually on at that campus. `!== false` drew a missing
+                   flag as enabled even for express, which defaults off. */
+                on={featureOn(c.features, key as FeatureKey)}
                 onToggle={async () => {
                   const r = await toggleFeature(c.id, key);
                   if (!r.ok) return toast("Failed", true);

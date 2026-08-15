@@ -2,6 +2,7 @@
 /* Admin: rates & GST, plan, payment details, colleges + feature flags, staff,
    expenses (Manager+), payroll (Admin+). All sensitive edits audit-logged. */
 import { db } from "../db";
+import { FEATURE_DEFAULTS, featureOn, type FeatureKey } from "../features";
 import { requireStaff } from "../auth";
 import { audit } from "../notify";
 import { publish } from "../realtime";
@@ -121,15 +122,22 @@ export async function saveSettings(settings: Record<string, unknown>) {
 export async function toggleFeature(collegeId: string, key: string) {
   const st = await requireStaff(2); // Manager+ toggle features
   const c = await db.college.findUniqueOrThrow({ where: { id: collegeId } });
+  /* Flip the EFFECTIVE value, not the stored one. When a key was absent the
+     old line wrote `false` regardless of what the admin saw, so the first
+     click on a flag defaulting to on appeared to do nothing — the switch was
+     already drawn as on, and turning it "off" produced the same screen. */
   const features = { ...(c.features as Record<string, boolean>) };
-  features[key] = features[key] === false ? true : false;
+  features[key] = !featureOn(c.features, key as FeatureKey);
   await db.college.update({ where: { id: collegeId }, data: { features } });
   await audit("Feature toggle", `${c.name} · ${key} → ${features[key] ? "on" : "off"}`, st.id);
   publish([`orders:${collegeId}`], { type: "college.updated", payload: { collegeId } });
   return { ok: true as const, on: features[key] };
 }
 
-const DEFAULT_FEATURES = { svc_wash: true, svc_iron: true, svc_dryclean: true, subscriptions: true, credits: true, express: false, chat: true };
+/* New colleges are stamped with the full documented default set. The old
+   literal here omitted svc_washfold, so every campus added through the UI
+   launched without Wash & Fold — the service Bronze is built on. */
+const DEFAULT_FEATURES = { ...FEATURE_DEFAULTS };
 
 export async function saveCollege(input: { id?: string; name: string; address: string; closedWeekday?: number | null }) {
   const st = await requireStaff(4); // Owner only add/edit

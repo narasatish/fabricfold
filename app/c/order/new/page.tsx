@@ -1,4 +1,5 @@
 import { requireStudent } from "@/lib/auth";
+import { featureOn, serviceOn, type FeatureKey } from "@/lib/features";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { fmt, STATUS_LABEL } from "@/lib/format";
@@ -24,10 +25,9 @@ export default async function OrderNewPage({ searchParams }: { searchParams: Pro
   const serviceParam = sp.service || "washIron";
   const reorderParam = sp.reorder;
 
-  // Validate service is enabled
-  const feat = student.college.features as Record<string, boolean>;
-  const FEAT_KEY: Record<string, string> = { washIron: "svc_wash", washFold: "svc_washfold", ironOnly: "svc_iron", dryClean: "svc_dryclean" };
-  if (feat[FEAT_KEY[serviceParam] || ""] === false || !FEAT_KEY[serviceParam]) {
+  // Validate service is enabled (serviceOn also rejects an unknown service)
+  const feat = student.college.features;
+  if (!serviceOn(feat, serviceParam)) {
     redirect("/c");
   }
 
@@ -46,7 +46,7 @@ export default async function OrderNewPage({ searchParams }: { searchParams: Pro
     { key: "washFold", flag: "svc_washfold", label: "Wash & Fold" },
     { key: "ironOnly", flag: "svc_iron", label: "Iron Only" },
     { key: "dryClean", flag: "svc_dryclean", label: "Dry Clean" },
-  ].filter((s) => feat[s.flag] !== false);
+  ].filter((s) => featureOn(feat, s.flag as FeatureKey));
 
   const rate = rates[serviceParam] || rates.washIron;
 
@@ -75,7 +75,7 @@ export default async function OrderNewPage({ searchParams }: { searchParams: Pro
           currentService={serviceParam}
           rateItems={rate.items}
           gstPct={gstPct}
-          expressEnabled={feat.express}
+          expressEnabled={featureOn(feat, "express")}
           hasActiveSubscription={!!student.subscription?.active}
           urgentCyclePreview={urgentCyclePreview}
           reorderItems={reorderItems}

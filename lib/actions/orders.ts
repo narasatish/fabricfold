@@ -3,6 +3,7 @@
    Every mutation: validate role -> write (transaction) -> audit where the
    prototype does -> realtime broadcast -> notification. */
 import { db } from "../db";
+import { featureOn, serviceOn } from "../features";
 import type { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff } from "../auth";
 import { expressSurcharge, urgentCycleCharge, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill } from "../money";
@@ -38,9 +39,9 @@ export async function placeOrder(input: { service: string; items: { label: strin
   const cfg = await getConfig();
   const rate = cfg.rates[input.service];
   if (!rate) return { ok: false as const, error: "Unknown service" };
-  const feat = stu.college.features as Record<string, boolean>;
-  const FEAT_KEY: Record<string, string> = { washIron: "svc_wash", washFold: "svc_washfold", ironOnly: "svc_iron", dryClean: "svc_dryclean" };
-  if (feat[FEAT_KEY[input.service] || ""] === false) return { ok: false as const, error: "This service is not available at your campus" };
+  if (!serviceOn(stu.college.features, input.service)) {
+    return { ok: false as const, error: "This service is not available at your campus" };
+  }
 
   const items = input.items
     .filter((i) => i.qty > 0)
@@ -64,7 +65,10 @@ export async function placeOrder(input: { service: string; items: { label: strin
   }
 
   const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
-  const express = input.express && feat.express !== false;
+  /* Express defaults OFF. The old `!== false` meant a college whose map
+     lacked the key would have the surcharge applied anyway — a money path
+     turned on by an absent flag rather than a deliberate one. */
+  const express = input.express && featureOn(stu.college.features, "express");
   const surcharge = express ? expressSurcharge(sub) : 0;
   const gst = cfg.gstEnabled ? Math.round((sub + surcharge) * (cfg.gstPct / 100)) : 0;
   const total = sub + surcharge + gst;

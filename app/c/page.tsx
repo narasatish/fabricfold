@@ -1,4 +1,5 @@
 import { requireStudent } from "@/lib/auth";
+import { featureOn, type FeatureKey } from "@/lib/features";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { Svg, type IconName } from "@/components/icons";
@@ -49,14 +50,14 @@ export default async function CustomerHome() {
   const subExpiryWarning = sub?.active && sub.expiresAt && sub.expiresAt.getTime() - Date.now() < 30 * 86400000;
 
   // Build enabled services
-  const services: Array<{ key: string; flag: string; label: string; icon: IconName }> = [
+  const services: Array<{ key: string; flag: FeatureKey; label: string; icon: IconName }> = [
     { key: "washIron", flag: "svc_wash", label: "Wash & Iron", icon: "layers" },
     { key: "washFold", flag: "svc_washfold", label: "Wash & Fold", icon: "gift" },
     { key: "ironOnly", flag: "svc_iron", label: "Iron Only", icon: "shirt" },
     { key: "dryClean", flag: "svc_dryclean", label: "Dry Clean", icon: "bag" },
   ];
 
-  const enabledServices = services.filter((s) => (college.features as Record<string, boolean>)?.[s.flag]);
+  const enabledServices = services.filter((s) => featureOn(college.features, s.flag));
 
   const loyaltyTier = loyaltyBadge(student.lifetimePieces);
 

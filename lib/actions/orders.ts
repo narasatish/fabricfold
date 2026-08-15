@@ -296,6 +296,19 @@ export async function walkInOrder(
         },
       });
       if (usedCycle) await tx.cycleUse.create({ data: { subscriptionId: stu.subscription!.id, orderId: o.id } });
+      await enqueueSheetEvent(tx, "order", [
+        istStamp(),
+        "#" + o.id.slice(-6),
+        await customerIdFor(tx, stu.id),
+        stu.name,
+        (await tx.college.findUnique({ where: { id: stu.collegeId }, select: { name: true } }))?.name ?? "—",
+        cfg.rates[o.service]?.label ?? o.service,
+        declaredPieces,
+        Number(o.total),
+        o.paymentMethod ?? (usedCycle ? "cycle" : "unpaid"),
+        usedCycle ? "yes" : "no",
+        "received (walk-in)",
+      ]);
       return o;
     });
   } catch (e) {
@@ -308,6 +321,7 @@ export async function walkInOrder(
   if (result.usedCycle && Number(result.surcharge) > 0) await audit("Urgent cycle charge", `#${result.id.slice(-4)} · ${stu.name} · ₹${Number(result.surcharge)} cash (cycle order)`, st.id);
   void notifyOwner(`Walk-in order #${result.id.slice(-4)}`, `${stu.name}: ${result.actualPieces} pieces of ${cfg.rates[result.service].label} — ₹${Number(result.total)}${result.usedCycle ? " (plan cycle)" : ""}. Logged by ${st.name}.`);
   bcast(result, "order.created");
+  flushSoon();
   return { ok: true as const, id: result.id };
 }
 
@@ -448,6 +462,7 @@ export async function payOrder(orderId: string, method: "upi" | "cash", applyCre
   try {
     const updated = await payCore(orderId, method, creditApplied, { gatewayRef: gatewayRef || null });
     bcast(updated);
+    flushSoon();
     return { ok: true as const };
   } catch (e) {
     return { ok: false as const, error: (e as Error).message };
@@ -464,6 +479,7 @@ export async function recordPay(orderId: string, method: "upi" | "cash", applyCr
     const updated = await payCore(orderId, method, creditApplied, { staffInvoice });
     if (staffInvoice && method === "cash") await audit("GST bill for cash", `#${o.id.slice(-4)}`, st.id);
     bcast(updated);
+    flushSoon();
     return { ok: true as const };
   } catch (e) {
     return { ok: false as const, error: (e as Error).message };
@@ -515,7 +531,24 @@ export async function redoOrder(orderId: string): Promise<ActionResult> {
   });
   await pushNotif(o.studentId, `A free re-do was created for order #${o.id.slice(-4)} at no charge.`, "status");
   await audit("Free re-do", `from #${o.id.slice(-4)} → #${n.id.slice(-4)}`, st.id);
+  /* Re-dos belong in the log too: they are real work at zero revenue, and the
+     Sheet is where the cost of service failures should be visible. */
+  const stu = await db.student.findUnique({ where: { id: o.studentId }, select: { name: true, collegeId: true } });
+  await enqueueSheetEvent(db, "order", [
+    istStamp(),
+    "#" + n.id.slice(-6),
+    await customerIdFor(db, o.studentId),
+    stu?.name ?? "—",
+    (await db.college.findUnique({ where: { id: o.collegeId }, select: { name: true } }))?.name ?? "—",
+    cfg.rates[n.service]?.label ?? n.service,
+    n.declaredPieces,
+    0,
+    "free re-do",
+    "no",
+    `re-do of #${o.id.slice(-6)}`,
+  ]);
   bcast(n, "order.created");
+  flushSoon();
   return { ok: true as const, id: n.id };
 }
 

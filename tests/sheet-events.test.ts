@@ -39,6 +39,37 @@ describe("rows and the ledger cannot disagree", () => {
     expect(orders).toMatch(/enqueueSheetEvent\(tx, "collection"/);
   });
 
+  it("EVERY path that creates an order logs one", () => {
+    /* The original version of this file only asserted that an "order" event
+       existed somewhere in the module. It passed while walkInOrder — the
+       commonest counter flow — silently logged nothing, and a real order on
+       production was the only thing that caught it. So each creator is now
+       named individually.
+
+       If you add another way to create an order, add it here too. */
+    const creators = ["acceptOrder", "walkInOrder", "redoOrder"];
+    for (const fn of creators) {
+      const start = orders.indexOf(`export async function ${fn}`);
+      expect(start, `${fn} not found`).toBeGreaterThan(-1);
+      // body runs to the next top-level export
+      const rest = orders.slice(start + 1);
+      const end = rest.indexOf("\nexport async function ");
+      const body = end === -1 ? rest : rest.slice(0, end);
+      expect(body, `${fn} does not log a Sheet row`).toMatch(/enqueueSheetEvent\(\s*(tx|db), "order"/);
+      expect(body, `${fn} does not kick a flush`).toMatch(/flushSoon\(\)/);
+    }
+  });
+
+  it("every action that enqueues also kicks a flush", () => {
+    // an enqueue with no flush waits for the daily cron, which is not "live"
+    for (const src of [orders, read("lib/actions/complaints.ts")]) {
+      const enqueues = (src.match(/enqueueSheetEvent\(/g) || []).length;
+      const flushes = (src.match(/flushSoon\(\)/g) || []).length;
+      expect(flushes).toBeGreaterThan(0);
+      expect(enqueues).toBeGreaterThan(0);
+    }
+  });
+
   it("marks rows sent only AFTER Google accepts them", () => {
     // mark-then-send loses rows silently on every failed send
     const sentAt = events.indexOf("sentAt: new Date()");

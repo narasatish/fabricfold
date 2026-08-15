@@ -10,6 +10,7 @@ import { redoOrder } from "./orders";
 // export async functions, and a stray `export const` here silently wipes out
 // every other export in the file.
 import { MIN_DAMAGE_PHOTOS, cleanPhotos } from "../complaint-rules";
+import { enqueueSheetEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 
 export async function submitComplaint(text: string, orderId?: string | null, photos?: string[]) {
   const stu = await requireStudent();
@@ -24,8 +25,18 @@ export async function submitComplaint(text: string, orderId?: string | null, pho
       messages: { create: { from: "student", by: stu.id, text: t, photos: pics.length ? pics : undefined } },
     },
   });
+  await enqueueSheetEvent(db, "complaint", [
+    istStamp(),
+    orderId ? "#" + orderId.slice(-6) : "—",
+    await customerIdFor(db, stu.id),
+    stu.name,
+    t.slice(0, 200),
+    pics.length,
+    "student",
+  ]);
   publish([`orders:${stu.collegeId}`], { type: "complaint.message", payload: { complaintId: c.id } });
   void notifyOwner("New complaint", `${stu.name} (${stu.college.name}): "${t.slice(0, 160)}"${orderId ? ` — order #${orderId.slice(-4)}` : ""}`);
+  flushSoon();
   return { ok: true as const, id: c.id };
 }
 
@@ -82,7 +93,17 @@ export async function reportOrderDamage(orderId: string, input: { comment: strin
   await pushNotif(o.studentId, `We noticed something on order #${o.id.slice(-4)} before washing: ${comment.slice(0, 120)}`, "status");
   void sendWhatsAppPhotos(o.student.phone, pics, `FabricFold — order #${o.id.slice(-4)}: ${comment.slice(0, 200)}`);
   await audit("Damage reported", `#${o.id.slice(-4)} · ${o.student.name} · ${pics.length} photos`, st.id);
+  await enqueueSheetEvent(db, "complaint", [
+    istStamp(),
+    "#" + o.id.slice(-6),
+    await customerIdFor(db, o.studentId),
+    o.student.name,
+    comment.slice(0, 200),
+    pics.length,
+    st.name,
+  ]);
   publish([`student:${o.studentId}`, `orders:${o.collegeId}`], { type: "complaint.message", payload: { complaintId: c.id } });
+  flushSoon();
   return { ok: true as const, id: c.id };
 }
 

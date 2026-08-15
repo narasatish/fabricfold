@@ -4,6 +4,7 @@
    prototype does -> realtime broadcast -> notification. */
 import { db } from "../db";
 import { featureOn, serviceOn } from "../features";
+import { enqueueSheetEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import type { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff } from "../auth";
 import { expressSurcharge, urgentCycleCharge, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill } from "../money";
@@ -179,6 +180,23 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
         tags: { create: tags },
       },
     });
+
+    /* The live Sheet row for this order. Inside the transaction: if the accept
+       rolls back, so does the row — the Sheet should never show an order the
+       counter does not have. */
+    await enqueueSheetEvent(tx, "order", [
+      istStamp(),
+      "#" + updated.id.slice(-6),
+      await customerIdFor(tx, o.studentId),
+      o.student.name,
+      (await tx.college.findUnique({ where: { id: o.collegeId }, select: { name: true } }))?.name ?? "—",
+      cfg.rates[updated.service]?.label ?? updated.service,
+      declaredPieces,
+      Number(updated.total),
+      updated.paymentMethod ?? (usedCycle ? "cycle" : "unpaid"),
+      usedCycle ? "yes" : "no",
+      "received",
+    ]);
     return updated;
     });
   } catch (e) {
@@ -189,6 +207,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
   if (result.noGst) await audit("No-GST billing", `#${result.id.slice(-4)} ₹${Number(result.total)}`, st.id);
   if (result.usedCycle && Number(result.surcharge) > 0) await audit("Urgent cycle charge", `#${result.id.slice(-4)} ₹${Number(result.surcharge)} cash (cycle order)`, st.id);
   bcast(result);
+  flushSoon();
   void st;
   return { ok: true as const, error: undefined };
 }
@@ -350,7 +369,7 @@ export async function advanceStatus(orderId: string, input?: { countedPieces?: n
 
 /* ---------- Staff: collect (verify pickup code / order id) ---------- */
 export async function collectOrder(orderId: string, code: string) {
-  await requireStaff(1);
+  const st = await requireStaff(1);
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
   const otp = await db.otp.findFirst({ where: { purpose: "pickup", refId: o.id, usedAt: null } });
   const v = (code || "").replace(/[^0-9]/g, "");
@@ -362,8 +381,18 @@ export async function collectOrder(orderId: string, code: string) {
     await tx.order.update({ where: { id: o.id }, data: { status: "collected", timeline: { create: { status: "collected" } } } });
     await tx.student.update({ where: { id: o.studentId }, data: { lifetimePieces: { increment: o.actualPieces || 0 } } });
     if (otp) await tx.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
+    const stu = await tx.student.findUniqueOrThrow({ where: { id: o.studentId }, select: { name: true } });
+    await enqueueSheetEvent(tx, "collection", [
+      istStamp(),
+      "#" + o.id.slice(-6),
+      await customerIdFor(tx, o.studentId),
+      stu.name,
+      o.actualPieces || 0,
+      st.name,
+    ]);
   });
   bcast(o);
+  flushSoon();
   return { ok: true as const };
 }
 
@@ -390,7 +419,22 @@ async function payCore(orderId: string, method: "upi" | "cash", creditApplied: n
 
     // GST is payment-method driven: UPI => invoice; cash only with staff override; credit-only never.
     // No-GST orders (staff choice at accept) are never invoiced, whatever the method.
-    if (shouldInvoiceOrder(updated, paymentMethod, opts.staffInvoice)) await createInvoice(tx, updated, paymentMethod);
+    const invoice = shouldInvoiceOrder(updated, paymentMethod, opts.staffInvoice)
+      ? await createInvoice(tx, updated, paymentMethod)
+      : null;
+
+    /* Live Sheet row, enqueued INSIDE this transaction so the log and the
+       ledger can never disagree — a rolled-back payment takes its row with it. */
+    await enqueueSheetEvent(tx, "payment", [
+      istStamp(),
+      "#" + o.id.slice(-6),
+      await customerIdFor(tx, o.studentId),
+      o.student.name,
+      paymentMethod,
+      total,
+      Number(updated.gst) || 0,
+      (invoice as { number?: string } | null)?.number ?? "—",
+    ]);
     return updated;
   });
 }

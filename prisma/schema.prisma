@@ -196,6 +196,30 @@ model Bag {
   @@index([code])
 }
 
+/* Rows waiting to reach the Google Sheet.
+
+   A transactional outbox. The event is written in the SAME transaction as the
+   order or payment that caused it, so the Sheet can never miss something that
+   really happened — and, just as important, can never record something that
+   was rolled back. Delivery is separate and best-effort: Google being slow or
+   down must never make an order fail at the counter.
+
+   Rows are kept briefly after sending so a sync can be proved rather than
+   assumed; the cron prunes them. */
+model SheetOutbox {
+  id      String   @id @default(cuid())
+  kind    String // order | payment | complaint | collection
+  at      DateTime @default(now())
+  payload Json // the finished row, resolved at enqueue time
+
+  sentAt    DateTime?
+  attempts  Int       @default(0)
+  lastError String?
+
+  // the flush scans exactly this: unsent, oldest first
+  @@index([sentAt, at])
+}
+
 model CycleUse {
   id             String       @id @default(cuid())
   subscriptionId String

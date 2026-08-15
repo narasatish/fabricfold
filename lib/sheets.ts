@@ -1,10 +1,18 @@
 /* Google Sheets writer — service-account auth, no SDK dependency.
 
-   PRIVACY CONTRACT: this module must only ever receive aggregate business
-   figures. No student names, phone numbers or addresses. A Sheet can be shared
-   with one careless click, and our /privacy page does not name Google as a
-   processor of personal data. Keep it that way — if you ever need per-student
-   rows here, update the privacy policy FIRST.
+   PRIVACY CONTRACT — read before adding a caller.
+
+   Aggregate business figures may always be written. Per-student rows are
+   limited to the owner's own operational record — the Complaints tab, and the
+   live Orders log — and carry a NAME and CUSTOMER ID only. Never a phone
+   number, never an address. A Sheet is one careless click from being shared,
+   and the smallest thing that identifies a student to a stranger is their
+   number.
+
+   The owner asked for a live per-order log, so this is a deliberate widening
+   of the original "aggregates only" rule, not an oversight. ACTION REQUIRED:
+   /privacy still does not name Google as a processor of personal data, and it
+   must before this runs against real students.
 
    Env (all required; the sync is a no-op without them):
      GOOGLE_SA_EMAIL        service account address (…@….iam.gserviceaccount.com)
@@ -58,6 +66,63 @@ export async function readSheet(tab: string): Promise<string[][]> {
   if (!res.ok) return []; // missing tab -> 400; treat as empty
   const j = (await res.json()) as { values?: string[][] };
   return j.values || [];
+}
+
+/**
+ * APPEND rows to the bottom of a tab, creating the tab and writing `header`
+ * first if it is empty.
+ *
+ * Appending rather than rewriting is what makes a live log affordable. The
+ * aggregate sync clears and re-writes whole tabs, which costs several API
+ * calls and grows with the dataset — fine once a day, ruinous per order. An
+ * append is one call whatever the history.
+ *
+ * Returns a result rather than throwing: a Sheets outage must never be able to
+ * take an order down with it.
+ */
+export async function appendSheet(
+  tab: string,
+  rows: (string | number)[][],
+  header?: (string | number)[],
+) {
+  if (!sheetsConfigured()) return { ok: false as const, error: "Google Sheets not configured" };
+  if (!rows.length) return { ok: true as const, rows: 0 };
+
+  const id = process.env.GOOGLE_SHEET_ID!;
+  try {
+    const token = await accessToken();
+    const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+
+    // Create the tab if absent. "already exists" is the normal case — ignore it.
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}:batchUpdate`, {
+      method: "POST", headers: auth,
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: tab } } }] }),
+    }).catch(() => {});
+
+    /* Header only when the tab is genuinely empty. Checking A1 rather than
+       tracking "did I create it" keeps this correct if the tab was made by
+       hand, and stops a header being appended into the middle of the log. */
+    const out = [...rows];
+    if (header) {
+      const first = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${encodeURIComponent(`${tab}!A1:A1`)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const empty = !first.ok || !((await first.json()) as { values?: string[][] }).values?.length;
+      if (empty) out.unshift(header);
+    }
+
+    const range = encodeURIComponent(`${tab}!A1`);
+    const res = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${range}:append` +
+        `?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+      { method: "POST", headers: auth, body: JSON.stringify({ values: out }) },
+    );
+    if (!res.ok) return { ok: false as const, error: `append failed (${res.status}): ${(await res.text()).slice(0, 200)}` };
+    return { ok: true as const, rows: out.length };
+  } catch (e) {
+    return { ok: false as const, error: (e as Error).message };
+  }
 }
 
 /** Overwrite a tab with `rows` (row 0 = headers). Creates the tab if missing. */

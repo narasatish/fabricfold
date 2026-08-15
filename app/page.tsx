@@ -14,6 +14,12 @@ export const metadata: Metadata = {
     locale: "en_IN",
     url: "https://fabricfold.in",
     siteName: "FabricFold",
+    /* Must be repeated here. A page-level `openGraph` REPLACES the root
+       layout's object rather than merging into it, so declaring one without
+       images silently drops the site-wide og.png — which is how the homepage,
+       the single most-shared URL, ended up with no preview image on WhatsApp
+       while every other page had one. */
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "FabricFold" }],
   },
 };
 

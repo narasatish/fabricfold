@@ -30,25 +30,48 @@ let auth: typeof import("../lib/actions/auth");
 
 const NEW_NUMBER = "9812345670"; // never registered
 
-beforeAll(async () => {
-  execSync("npx prisma db push", { env: { ...process.env, DATABASE_URL: TEST_URL }, stdio: "ignore" });
+/** Is the test schema already in step with the Prisma schema?
+ *  Probed by touching the newest model — a query that succeeds means the table
+ *  exists, and a failure means the schema predates it and needs a push. Cheap
+ *  and, unlike a version file, it cannot drift out of date on its own. */
+async function schemaIsCurrent(): Promise<boolean> {
+  try {
+    await db.sheetOutbox.count();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  /* Put back the guards `db push` just removed.
-     Prisma only knows about the schema file, so any raw object — the partial
-     unique index that stops two students holding one bag code — is dropped
-     when it syncs. This hook is the only thing in the suite that pushes, and
-     it silently disarmed that index for everything that ran afterwards: the
-     QA pipeline's "DB refuses to reissue a retired code" failed on every full
-     run, pointing at the product rather than at this line. Restoring it here
-     keeps the fix next to the cause. */
-  if (IS_PG) {
-    execSync("node scripts/ensure-guards.mjs", {
-      env: { ...process.env, FF_GUARD_SCHEMA: "ff_test" },
-      stdio: "ignore",
-    });
+beforeAll(async () => {
+  db = (await import("../lib/db")).db;
+
+  /* Push ONLY when the test schema is actually behind.
+     This hook is the one place in the suite that runs DDL, and it used to do
+     so on every run. Two costs, both real:
+
+       - `prisma db push` drops objects Prisma does not know about, including
+         the partial unique index that stops two students sharing a bag code.
+         The QA pipeline then reported "DB refuses to reissue a retired code"
+         as a product failure when this line had quietly disarmed it.
+       - the DDL runs while other files are hitting the same database, and
+         intermittently took unrelated tests down with it — otp-security has
+         failed this way, on a schema change that had nothing to do with OTPs.
+
+     So: probe for the newest model first and skip the push when it is there,
+     which is the normal case. A fresh or stale schema still self-heals, and
+     the guards are re-armed only on the path that could have removed them. */
+  const current = await schemaIsCurrent();
+  if (!current) {
+    execSync("npx prisma db push", { env: { ...process.env, DATABASE_URL: TEST_URL }, stdio: "ignore" });
+    if (IS_PG) {
+      execSync("node scripts/ensure-guards.mjs", {
+        env: { ...process.env, FF_GUARD_SCHEMA: "ff_test" },
+        stdio: "ignore",
+      });
+    }
   }
 
-  db = (await import("../lib/db")).db;
   auth = await import("../lib/actions/auth");
 
   await db.college.upsert({

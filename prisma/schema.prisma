@@ -166,19 +166,34 @@ model Subscription {
 // already-printed bag point at two different students over its lifetime. A lost
 // bag is marked lost and the student gets a NEW code, not the old one back.
 model Bag {
-  id            String   @id @default(cuid())
-  code          String   @unique
+  id String @id @default(cuid())
+
+  /* NOT globally unique any more — unique only among codes still IN SERVICE.
+     A code is the student's customer ID printed on the bag, and it is recycled
+     when they graduate, so B001 legitimately appears on several Bag rows across
+     the years. The guarantee that still matters — one code never points at two
+     students at the same time — is enforced by a partial unique index created
+     in scripts/ensure-guards.mjs:  UNIQUE(code) WHERE status <> 'released'.
+     Prisma cannot express a partial unique index, hence the raw one. */
+  code          String
   studentId     String
   student       Student  @relation(fields: [studentId], references: [id])
   tier          String? // bronze | silver | gold | null (walk-in)
   complimentary Boolean  @default(false) // first bag free, later ones charged
   price         Decimal  @default(0)
-  status        String   @default("active") // active | lost | replaced
-  issuedAt      DateTime @default(now())
-  issuedBy      String // staffId
-  note          String?
+
+  /* active | lost | replaced | released
+     Only `released` frees the code for a new student. A lost bag keeps its
+     code reserved: bags turn up weeks later, and it must still identify the
+     person it was issued to rather than whoever inherited the number. */
+  status     String    @default("active")
+  releasedAt DateTime?
+  issuedAt   DateTime  @default(now())
+  issuedBy   String // staffId
+  note       String?
 
   @@index([studentId, status])
+  @@index([code])
 }
 
 model CycleUse {

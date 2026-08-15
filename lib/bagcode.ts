@@ -3,10 +3,19 @@
    B001–B999 bronze · S001–S999 silver · G001–G999 gold · W001–W999 walk-in
    (a student with no subscription who buys a bag).
 
+   The code IS the student's customer ID: printed on the bag, permanent for as
+   long as they hold it, and quoted at the counter.
+
    The code names a physical object, so the rules are strict:
-   - allocated exactly once, gap-free, and NEVER reused. A recycled code would
-     make one printed bag point at two different students over its lifetime.
-   - a lost bag is marked lost and the student gets a NEW code, not the old one.
+   - RECYCLED, but only deliberately. When a student graduates, staff release
+     their code and it returns to the pool for a new student — otherwise 999
+     per tier would be a hard ceiling on how many students the campus can ever
+     enrol. Reuse happens only through that explicit release.
+   - a lost bag keeps its code reserved forever. Bags turn up weeks later, and
+     a found B042 must still name the person it was issued to rather than
+     whoever inherited the number. Same for a bag replaced on a plan change.
+   - one code never names two students AT ONCE — enforced in the database by a
+     partial unique index, not merely by this allocator.
    - globally unique rather than per-campus: whoever finds a bag labelled B042
      must be able to reach exactly one student without knowing the campus. 999
      per kind is a deliberate "for now" ceiling — a second campus needs a campus
@@ -62,18 +71,43 @@ export function parseBagCode(code: string): { kind: BagKind; n: number } | null 
   return { kind, n };
 }
 
-/** Claim the next code for a kind. Call inside the transaction that creates the
-    Bag row, so a rolled-back handover doesn't burn a code. */
+/** Claim a code for a kind. Call inside the transaction that creates the Bag
+    row, so a rolled-back handover doesn't burn a code.
+
+    Released codes are reused BEFORE minting a new number, and the lowest one
+    goes first. Two reasons: the printed stock is reused in the order it comes
+    back, and the numbers stay dense — a campus of 300 students should be
+    holding B001–B300, not drifting toward B999 with gaps where graduates were. */
 export async function allocateBagCode(tx: Prisma.TransactionClient, kind: BagKind) {
+  const letter = BAG_LETTER[kind];
+
+  /* A code is free when some bag row released it and no LIVE row holds it.
+     Both halves are needed: a code can be released once and later re-issued,
+     so the released row alone doesn't prove it is available now. */
+  const [released, live] = await Promise.all([
+    tx.bag.findMany({
+      where: { status: "released", code: { startsWith: letter } },
+      select: { code: true },
+      orderBy: { code: "asc" },
+    }),
+    tx.bag.findMany({
+      where: { status: { not: "released" }, code: { startsWith: letter } },
+      select: { code: true },
+    }),
+  ]);
+  const taken = new Set(live.map((b) => b.code));
+  const recycled = released.find((r) => !taken.has(r.code));
+  if (recycled) return recycled.code;
+
   const row = await tx.fySequence.upsert({
-    where: { kind_fyTag: { kind: "bagcode", fyTag: BAG_LETTER[kind] } },
-    create: { kind: "bagcode", fyTag: BAG_LETTER[kind], value: 1 },
+    where: { kind_fyTag: { kind: "bagcode", fyTag: letter } },
+    create: { kind: "bagcode", fyTag: letter, value: 1 },
     update: { value: { increment: 1 } },
   });
   const code = formatBagCode(kind, row.value);
   if (!code) {
     throw new Error(
-      `All ${MAX_PER_KIND} ${BAG_LABEL[kind]} bag codes are used up — widen the code scheme before issuing more.`,
+      `All ${MAX_PER_KIND} ${BAG_LABEL[kind]} bag codes are in use — release codes from students who have left, or widen the code scheme.`,
     );
   }
   return code;

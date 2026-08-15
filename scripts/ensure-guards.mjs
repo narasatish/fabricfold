@@ -153,6 +153,47 @@ try {
     `[guards] value constraints — ${checksAdded} added, ${checksPresent} already present` +
       (checksSkipped ? `, ${checksSkipped} SKIPPED due to existing bad data` : ""),
   );
+
+  /* One customer ID, one student — enforced by the DATABASE.
+
+     A bag code is recycled when a student leaves, so `code` cannot be globally
+     unique any more: B001 legitimately appears on several rows over the years.
+     What must never happen is two students holding B001 AT ONCE, which a bug
+     in the allocator could otherwise cause silently — and the damage lands on
+     a physical bag handed to the wrong person.
+
+     Prisma cannot express a partial unique index, so it is created here.
+     Released rows are excluded; everything still in service is unique.
+
+     Schema-aware, unlike the rest of this file: the isolated `ff_test` schema
+     the suite runs against needs the same index, or a test asserting "the DB
+     rejects a duplicate code" would pass in production and quietly prove
+     nothing where it actually runs. FF_GUARD_SCHEMA=ff_test targets it. */
+  const SCHEMA = process.env.FF_GUARD_SCHEMA || "public";
+  const bagTable = await client.query(
+    `select 1 from information_schema.tables where table_schema=$1 and table_name='Bag'`, [SCHEMA]);
+  if (bagTable.rowCount) {
+    const idx = "bag_code_in_service_uniq";
+    const hasIdx = await client.query(
+      `select 1 from pg_indexes where schemaname=$1 and indexname=$2`, [SCHEMA, idx]);
+    if (hasIdx.rowCount) {
+      console.log(`[guards] ${SCHEMA}.Bag.${idx}: already present`);
+    } else {
+      // Same rule as the CHECKs: report bad data rather than fail the deploy.
+      const dupes = await client.query(
+        `select count(*)::int n from (
+           select code from "${SCHEMA}"."Bag" where status <> 'released'
+           group by code having count(*) > 1
+         ) d`);
+      if (dupes.rows[0].n > 0) {
+        console.warn(`[guards] ${SCHEMA}.Bag.${idx}: ${dupes.rows[0].n} code(s) already held by two live bags — index NOT added, investigate`);
+      } else {
+        await client.query(
+          `CREATE UNIQUE INDEX "${idx}" ON "${SCHEMA}"."Bag"(code) WHERE status <> 'released'`);
+        console.log(`[guards] ${SCHEMA}.Bag.${idx}: index ADDED`);
+      }
+    }
+  }
 } catch (e) {
   // A deploy without ledger protection is worse than no deploy: fail the build
   // and leave the previous deployment live.

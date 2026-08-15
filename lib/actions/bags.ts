@@ -109,7 +109,47 @@ export async function issueBag(
   return { ok: true as const, code: bag.code, complimentary, price, codesLeft: left };
 }
 
-/** Mark a bag lost or replaced. The code is retired, never handed out again. */
+/**
+ * Release a customer ID back to the pool — the student has left the campus.
+ *
+ * This is the ONLY route by which a code is reused. Marking a bag lost or
+ * replaced deliberately does not free it: a lost bag turns up weeks later and
+ * must still name the student it was issued to, not whoever inherited the
+ * number in the meantime.
+ *
+ * Manager+ rather than counter staff. Releasing a code detaches a student from
+ * the identity printed on their bag, and the next person to be issued that
+ * number inherits it — not a decision to make by mis-tap during a queue.
+ */
+export async function releaseBagCode(bagId: string, note?: string) {
+  const st = await requireStaff(2); // Manager+
+  const bag = await db.bag.findUnique({ where: { id: bagId }, include: { student: true } });
+  if (!bag) return { ok: false as const, error: "Bag not found" };
+  if (bag.status === "released") return { ok: false as const, error: "This code has already been released" };
+
+  /* Refuse while the student can still place orders against it. Releasing a
+     code mid-plan would hand a live subscriber's identity to someone else. */
+  const sub = await db.subscription.findUnique({ where: { studentId: bag.studentId } });
+  if (sub?.active) {
+    return { ok: false as const, error: "This student still has an active plan — cancel or let it expire before releasing their code" };
+  }
+  const openOrders = await db.order.count({
+    where: { studentId: bag.studentId, status: { notIn: ["collected", "cancelled"] } },
+  });
+  if (openOrders) {
+    return { ok: false as const, error: `${openOrders} order(s) still open for this student — finish them before releasing the code` };
+  }
+
+  await db.bag.update({
+    where: { id: bagId },
+    data: { status: "released", releasedAt: new Date(), note: note?.trim() || bag.note },
+  });
+  await audit("Customer ID released", `${bag.code} · ${bag.student.name}${note ? ` — ${note}` : ""}`, st.id);
+  publish([`student:${bag.studentId}`], { type: "bag", payload: { studentId: bag.studentId } });
+  return { ok: true as const, code: bag.code };
+}
+
+/** Mark a bag lost or replaced. The code stays reserved — see releaseBagCode. */
 export async function retireBag(bagId: string, status: "lost" | "replaced", note?: string) {
   const st = await requireStaff(1);
   const bag = await db.bag.findUnique({ where: { id: bagId }, include: { student: true } });

@@ -87,12 +87,22 @@ export default async function CustomerHome() {
         >
           <div className="between">
             <div>
+              {/* The bag code IS the customer ID: it is printed on the bag the
+                  student carries, so it is the number staff read and the one
+                  worth showing largest. Students without a bag yet still need
+                  something to quote, so the internal reference stands in until
+                  a bag is issued. */}
               <div style={{ fontSize: "12px", opacity: 0.85, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em" }}>
-                FabricFold ID
+                Customer ID
               </div>
               <div className="big-num mono mt4" style={{ letterSpacing: ".06em" }}>
-                {student.id}
+                {activeBag?.code ?? student.id}
               </div>
+              {activeBag && (
+                <div className="mono" style={{ fontSize: "11.5px", opacity: 0.7, marginTop: 2 }}>
+                  Ref {student.id}
+                </div>
+              )}
             </div>
             <div
               style={{
@@ -107,7 +117,7 @@ export default async function CustomerHome() {
               }}
             >
               {/* must fit the 52px chip — a larger size overflows the whole ID card */}
-              <Qr text={student.id} size={40} dark="#fff" light="transparent" />
+              <Qr text={activeBag?.code ?? student.id} size={40} dark="#fff" light="transparent" />
             </div>
           </div>
           <div className="between" style={{ marginTop: "12px" }}>
@@ -129,16 +139,8 @@ export default async function CustomerHome() {
           </div>
         )}
 
-        {/* Bag code — what the student quotes at the counter */}
-        {activeBag && (
-          <div className="card pad mt12" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span style={{ color: "var(--teal-dark)" }}><Svg name="layers" size={20} /></span>
-            <div>
-              <div className="muted" style={{ fontSize: "11.5px", textTransform: "uppercase", letterSpacing: ".04em" }}>Your bag</div>
-              <div className="h-sm mono">{activeBag.code}</div>
-            </div>
-          </div>
-        )}
+        {/* No separate bag card any more — the code is the Customer ID above.
+            Repeating it here made the same number look like two things. */}
 
         {/* Remaining subscription cycles */}
         {sub?.active && (

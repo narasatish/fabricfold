@@ -1,0 +1,17 @@
+{
+  "appId": "in.fabricfold.staff",
+  "appName": "FabricFold Staff",
+  "webDir": "public",
+  "server": {
+    "url": "https://fabricfold.in/s",
+    "cleartext": false
+  },
+  "plugins": {
+    "BluetoothLe": {
+      "displayStrings": {
+        "scanning": "Scanning for tag printer…",
+        "noDeviceFound": "No printer found"
+      }
+    }
+  }
+}

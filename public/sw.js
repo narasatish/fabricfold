@@ -1,6 +1,6 @@
 /* FabricFold service worker — offline shell + Web Push. Network-first for
    navigations so deploys show up without manual refresh. */
-const CACHE = "ff-v8";
+const CACHE = "ff-v9";
 
 self.addEventListener("install", () => self.skipWaiting());
 

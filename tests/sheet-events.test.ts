@@ -117,13 +117,22 @@ describe("reliability sweep", () => {
     expect(route).toMatch(/stuck/);
   });
 
-  it("runs far more often than the heavy aggregate sync", () => {
-    const vercel = JSON.parse(read("vercel.json"));
-    const crons: { path: string; schedule: string }[] = vercel.crons;
+  it("is registered as a Vercel cron the Hobby plan will accept", () => {
+    // Hobby rejects anything more frequent than daily, and such an entry fails
+    // the DEPLOY rather than just the cron — so this is pinned. The sub-daily
+    // cadence comes from the external scheduler instead.
+    const crons: { path: string; schedule: string }[] = JSON.parse(read("vercel.json")).crons;
     const flush = crons.find((c) => c.path === "/api/sheets/flush");
-    const sync = crons.find((c) => c.path === "/api/sheets/sync");
-    expect(flush?.schedule).toMatch(/^\*\/\d+ \* \* \* \*$/); // every N minutes
-    expect(sync?.schedule).not.toMatch(/^\*\//); // daily, unchanged
+    expect(flush).toBeDefined();
+    expect(flush!.schedule).not.toMatch(/^\*\//);
+    const [min, hour] = flush!.schedule.split(" ");
+    expect(min).toMatch(/^\d+$/);
+    expect(hour).toMatch(/^\d+$/); // a fixed time of day, i.e. once daily
+  });
+
+  it("documents that the live cadence comes from the external scheduler", () => {
+    expect(route).toMatch(/cron-job\.org/);
+    expect(route).toMatch(/Hobby plan refuses|refuses any schedule/);
   });
 });
 

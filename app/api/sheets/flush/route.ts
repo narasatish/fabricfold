@@ -9,6 +9,17 @@
    flush is an optimisation that may never actually execute. This sweep is what
    turns "usually within seconds" into "always, eventually".
 
+   CADENCE: the Vercel cron entry is only a daily backstop, because a Hobby
+   plan refuses any schedule running more than once a day — an every-5-minutes
+   expression is rejected at DEPLOY time, taking the whole release with it.
+   The real cadence comes from the same external scheduler (cron-job.org,
+   Bearer CRON_SECRET) already pointed at /api/sheets/sync. Aim one at this
+   route every minute or two and the log stays live even when the
+   fire-and-forget flush is frozen.
+
+   (Written out in words on purpose: a cron expression with a slash-star in it
+   closes this comment early and breaks the file.)
+
    Idempotent — rows are marked sent only once Google has accepted them, so a
    double invocation cannot duplicate or lose anything. */
 import { db } from "@/lib/db";

@@ -170,6 +170,53 @@ try {
      rejects a duplicate code" would pass in production and quietly prove
      nothing where it actually runs. FF_GUARD_SCHEMA=ff_test targets it. */
   const SCHEMA = process.env.FF_GUARD_SCHEMA || "public";
+
+  /* One payment per order per method — enforced by the DATABASE.
+
+     Both payment paths check `paid` before writing, and neither check can win
+     a race. Postgres runs READ COMMITTED, so two concurrent transactions both
+     read paid = false and both insert; the Razorpay webhook is worse, because
+     its check sits OUTSIDE the transaction and Razorpay retries deliveries.
+     Two retries arriving together charge a student twice.
+
+     That is not a bug you can clean up afterwards: Payment rows are immutable
+     by trigger, so a duplicate cannot be deleted, only offset with a manual
+     credit note after the money has already left.
+
+     Two indexes:
+       gatewayRef  — one Razorpay payment id may appear once, full stop. This
+                     is what makes webhook retries safe.
+       order+method — an order may hold a `credit` row AND a `upi` row (the
+                     split payCore writes), but never two of the same method.
+                     Refunds and cash_out are excluded: an order can legitimately
+                     be refunded more than once. */
+  const payTable = await client.query(
+    `select 1 from information_schema.tables where table_schema=$1 and table_name='Payment'`, [SCHEMA]);
+  if (payTable.rowCount) {
+    const payIdx = [
+      ["payment_gateway_ref_uniq", `("gatewayRef") WHERE "gatewayRef" IS NOT NULL`,
+        `select count(*)::int n from (select "gatewayRef" from "${SCHEMA}"."Payment"
+           where "gatewayRef" is not null group by "gatewayRef" having count(*) > 1) d`],
+      ["payment_order_method_uniq", `("orderId", method) WHERE "orderId" IS NOT NULL AND method NOT IN ('refund','cash_out')`,
+        `select count(*)::int n from (select "orderId", method from "${SCHEMA}"."Payment"
+           where "orderId" is not null and method not in ('refund','cash_out')
+           group by "orderId", method having count(*) > 1) d`],
+    ];
+    for (const [name, def, dupeSql] of payIdx) {
+      const has = await client.query(
+        `select 1 from pg_indexes where schemaname=$1 and indexname=$2`, [SCHEMA, name]);
+      if (has.rowCount) { console.log(`[guards] ${SCHEMA}.Payment.${name}: already present`); continue; }
+      // Same rule as everywhere else: report bad data, never fail the deploy.
+      const dupes = await client.query(dupeSql);
+      if (dupes.rows[0].n > 0) {
+        console.warn(`[guards] ${SCHEMA}.Payment.${name}: ${dupes.rows[0].n} duplicate group(s) already exist — index NOT added, investigate before real money flows`);
+        continue;
+      }
+      await client.query(`CREATE UNIQUE INDEX "${name}" ON "${SCHEMA}"."Payment"${def}`);
+      console.log(`[guards] ${SCHEMA}.Payment.${name}: index ADDED`);
+    }
+  }
+
   const bagTable = await client.query(
     `select 1 from information_schema.tables where table_schema=$1 and table_name='Bag'`, [SCHEMA]);
   if (bagTable.rowCount) {

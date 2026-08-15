@@ -34,13 +34,31 @@ export async function POST(req: Request) {
   const o = await db.order.findUnique({ where: { id: orderId } });
   if (!o || o.paid) return Response.json({ ok: true });
 
-  const updated = await db.$transaction(async (tx) => {
-    await tx.payment.create({ data: { method: "upi", amount: Number(o.total) - Number(o.creditApplied), orderId: o.id, collegeId: o.collegeId, studentId: o.studentId, gatewayRef } });
-    const paymentMethod = Number(o.creditApplied) > 0 ? "upi+credit" : "upi";
-    const u = await tx.order.update({ where: { id: o.id }, data: { paid: true, paymentMethod } });
-    if (shouldInvoiceOrder(u, paymentMethod)) await createInvoice(tx, u, paymentMethod);
-    return u;
-  });
+  /* Razorpay RETRIES this webhook, and two retries can arrive at once. The
+     `o.paid` check above is a cheap early exit, not a guarantee: it reads
+     outside the transaction, so both deliveries can pass it. The real defence
+     is the unique index on Payment.gatewayRef — the second insert fails, and
+     since Payment rows are immutable a duplicate could never be cleaned up. */
+  let updated;
+  try {
+    updated = await db.$transaction(async (tx) => {
+      // re-read inside the transaction so the common case exits cleanly
+      const fresh = await tx.order.findUniqueOrThrow({ where: { id: o.id } });
+      if (fresh.paid) return null;
+      await tx.payment.create({ data: { method: "upi", amount: Number(fresh.total) - Number(fresh.creditApplied), orderId: fresh.id, collegeId: fresh.collegeId, studentId: fresh.studentId, gatewayRef } });
+      const paymentMethod = Number(fresh.creditApplied) > 0 ? "upi+credit" : "upi";
+      const u = await tx.order.update({ where: { id: fresh.id }, data: { paid: true, paymentMethod } });
+      if (shouldInvoiceOrder(u, paymentMethod)) await createInvoice(tx, u, paymentMethod);
+      return u;
+    });
+  } catch (e) {
+    /* P2002 = the unique index rejected it, i.e. this exact gateway payment is
+       already recorded. That is a SUCCESS from Razorpay's point of view, so
+       answer 200: a 500 here would make it retry the same duplicate forever. */
+    if ((e as { code?: string }).code === "P2002") return Response.json({ ok: true, duplicate: true });
+    throw e;
+  }
+  if (!updated) return Response.json({ ok: true, duplicate: true });
 
   await pushNotif(o.studentId, `Payment received for order #${o.id.slice(-4)} — thank you!`, "status");
   publish(orderChannels(updated), { type: "order.updated", payload: { orderId: o.id } });

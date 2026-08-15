@@ -32,7 +32,15 @@ function signedRequest(body: unknown, secretOverride?: string) {
   });
 }
 
-function capturedEvent(orderId: string, paymentId = "pay_TEST123") {
+/* The default reference is derived from the order.
+
+   It used to be the same literal for every scenario, which modelled something
+   that cannot happen: a Razorpay payment id is globally unique, so one id can
+   never appear on two orders. The database now enforces exactly that, and the
+   shared literal would have failed the constraint — the fixture was wrong, not
+   the rule. A replay of ONE order still reuses its id, which is the case that
+   matters and is asserted below. */
+function capturedEvent(orderId: string, paymentId = `pay_TEST_${orderId}`) {
   return {
     event: "payment.captured",
     payload: { payment: { entity: { id: paymentId, notes: { ff_order_id: orderId } } } },
@@ -61,6 +69,29 @@ beforeAll(async () => {
   await db.student.upsert({
     where: { id: "222222" }, update: {},
     create: { id: "222222", phone: "9999900002", name: "Gateway Student", collegeId: "gw1" },
+  });
+
+  /* Clear this file's own fixtures before creating them again.
+     There was no cleanup here at all. It passed only because the schema was
+     changing often enough that `prisma db push` kept truncating tables as a
+     side effect — so the suite was green for a reason unrelated to the tests.
+     The moment the schema settled, the second run failed on duplicate order
+     ids. Cleaning explicitly makes the file repeatable on its own terms.
+
+     Payments and invoices are immutable by trigger, hence the escape hatch;
+     it is scoped to this transaction and to rows this file created. */
+  await db.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`SET LOCAL app.allow_delete = 'on'`);
+    const mine = await tx.order.findMany({ where: { collegeId: "gw1" }, select: { id: true } });
+    const ids = mine.map((o) => o.id);
+    if (ids.length) {
+      await tx.creditNote.deleteMany({ where: { invoice: { orderId: { in: ids } } } });
+      await tx.invoice.deleteMany({ where: { orderId: { in: ids } } });
+      await tx.payment.deleteMany({ where: { orderId: { in: ids } } });
+      await tx.orderEvent.deleteMany({ where: { orderId: { in: ids } } });
+      await tx.garmentTag.deleteMany({ where: { orderId: { in: ids } } });
+      await tx.order.deleteMany({ where: { id: { in: ids } } });
+    }
   });
   // Same reason as washday.test.ts: the slow part is `prisma db push` against a
   // remote Postgres, and it grows with the schema. It crossed the old 120s
@@ -92,7 +123,7 @@ describe("payment gateway webhook — auto-confirmation", () => {
     // money actually recorded, tagged with the gateway's reference
     const pay = await db.payment.findFirst({ where: { orderId: o.id } });
     expect(Number(pay?.amount)).toBe(177);
-    expect(pay?.gatewayRef).toBe("pay_TEST123");
+    expect(pay?.gatewayRef).toBe(`pay_TEST_${o.id}`);
 
     // UPI => a real GST invoice, gap-free numbering
     const inv = await db.invoice.findFirst({ where: { orderId: o.id } });

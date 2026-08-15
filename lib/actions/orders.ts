@@ -412,6 +412,21 @@ export async function collectOrder(orderId: string, code: string) {
 
 /* ---------- Payment (shared core: credit split + method + GST invoice) ---------- */
 async function payCore(orderId: string, method: "upi" | "cash", creditApplied: number, opts: { staffInvoice?: boolean; gatewayRef?: string | null }) {
+  /* The `o.paid` check below cannot stop a double tap on its own. Postgres runs
+     READ COMMITTED, so two concurrent calls both read paid = false and both
+     insert — and Payment rows are immutable, so the duplicate charge could
+     never be removed. The unique index on (orderId, method) is what actually
+     prevents it; this wrapper turns that collision into the same friendly
+     message the sequential case gives, rather than a raw constraint error. */
+  try {
+    return await payInner(orderId, method, creditApplied, opts);
+  } catch (e) {
+    if ((e as { code?: string }).code === "P2002") throw new Error("Already paid");
+    throw e;
+  }
+}
+
+async function payInner(orderId: string, method: "upi" | "cash", creditApplied: number, opts: { staffInvoice?: boolean; gatewayRef?: string | null }) {
   return db.$transaction(async (tx) => {
     const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { student: true } });
     if (o.paid) throw new Error("Already paid");

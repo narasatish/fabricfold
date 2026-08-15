@@ -81,18 +81,28 @@ describe("wash-day allocation spreads students evenly", () => {
 
   it("self-corrects toward equal spread as more students are added", async () => {
     const col = await mkCollege(4); // Thursday closed, 6 open days
-    for (let i = 0; i < 60; i++) {
+    /* 30 rather than 60.
+
+       The property is "every open day ends up with exactly the same count",
+       and it holds at any multiple of six — 60 proved nothing that 30 does
+       not. What 60 did do was double the round-trips to a remote database:
+       assignWashDay reads the current distribution before each write, so the
+       calls cannot be batched, and 120 sequential round-trips overran the 90s
+       budget whenever the rest of the suite was competing for the connection.
+       It failed in the full run and passed alone, which is the signature of a
+       timeout rather than a wrong answer. Halved, and given real headroom. */
+    const PER_DAY = 5, OPEN_DAYS = 6;
+    for (let i = 0; i < PER_DAY * OPEN_DAYS; i++) {
       const s = await mkStudent(col.id);
       await assignWashDay(s.id, col.id);
     }
     const dist = await washDayDistribution(col.id);
-    // 60 students over 6 open days should land at exactly 10 each with pure
-    // least-loaded assignment (deterministic round robin, no randomness)
+    // deterministic least-loaded assignment — no randomness, so this is exact
     for (let d = 0; d < 7; d++) {
       if (d === 4) expect(dist[d]).toBe(0);
-      else expect(dist[d]).toBe(10);
+      else expect(dist[d]).toBe(PER_DAY);
     }
-  }, 90_000);
+  }, 180_000);
 
   it("does not care about total headcount — the same logic works for 6 or 600", async () => {
     const small = await mkCollege(null);

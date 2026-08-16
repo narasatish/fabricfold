@@ -2,13 +2,14 @@
 
    The critical property: a FIXED code (DEV_OTP) must never be mintable for an
    arbitrary phone number in production. Before this guard, DEV_OTP=123456 in
-   prod meant 123456 logged you into ANY account — including the Owner.
+   prod meant 123456 logged you into ANY account â€” including the Owner.
 
    genCode is module-private, so we exercise it through requestOtp() and read
    back what actually got stored for that number. */
 import "dotenv/config";
 import { beforeAll, beforeEach, afterEach, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
+import { ensureTestSchema } from "./_schema";
 import path from "node:path";
 
 const BASE = process.env.DIRECT_URL || process.env.DATABASE_URL || "";
@@ -32,8 +33,10 @@ async function storedCode(phone: string) {
 }
 
 beforeAll(async () => {
-  execSync("npx prisma db push", { env: { ...process.env, DATABASE_URL: TEST_URL }, stdio: "ignore" });
   db = (await import("../lib/db")).db;
+  await ensureTestSchema(TEST_URL, async () => {
+    try { await db.sheetOutbox.count(); return true; } catch { return false; }
+  });
   auth = await import("../lib/actions/auth");
   // requestOtp for a staff mode number requires the staff row to exist
   await db.staff.upsert({
@@ -41,13 +44,26 @@ beforeAll(async () => {
     create: { name: "Sec Test Admin", phone: ATTACKER_TARGET, role: 3 },
   });
   // `prisma db push` against a remote Postgres is the slow part, and it grows
-  // with the schema — 120s was already marginal and broke once the Bag table
+  // with the schema â€” 120s was already marginal and broke once the Bag table
   // landed. Kept generous on purpose: this hook is setup, not a perf budget.
 }, 300_000);
 
-beforeEach(() => {
+beforeEach(async () => {
+  /* Reset the RATE LIMITER, not just the OTP rows.
+
+     requestOtp allows five codes per number per hour, and that counter lives
+     in the database. This file calls it repeatedly for the same three numbers,
+     so the rows survived each run and accumulated across runs: the Owner
+     number was found sitting at exactly 5. Past the cap requestOtp refuses,
+     stores nothing, and the "no code stored" guard fires.
+
+     Which made this file pass or fail depending on how many times it had run
+     in the previous hour: green alone, red in a full suite, green again later.
+     Clearing the counter makes every test start from the same place. */
+  await db.rateLimit.deleteMany({ where: { key: { startsWith: "otp:" } } });
+
   /* requestOtp refuses a number it cannot text, so without this these tests
-     would store no code at all — and assertions like `not.toBe("123456")`
+     would store no code at all â€” and assertions like `not.toBe("123456")`
      would pass against `undefined`, guarding nothing. Dry-run keeps delivery
      "possible" while sending nothing. */
   process.env.SMS_DRY_RUN = "1";
@@ -55,6 +71,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await db.otp.deleteMany({ where: { purpose: "login" } });
+  await db.rateLimit.deleteMany({ where: { key: { startsWith: "otp:" } } });
   delete process.env.TEST_PHONES;
   delete process.env.SMS_DRY_RUN;
 });
@@ -126,14 +143,14 @@ describe("OTP: a fixed code must never be a master key in production", () => {
     expect(seen.size).toBeGreaterThan(1);
   });
 
-  it("a code is actually generated — so the guards above aren't passing on undefined", async () => {
+  it("a code is actually generated â€” so the guards above aren't passing on undefined", async () => {
     setEnv("NODE_ENV", "production");
     process.env.DEV_OTP = "123456";
     process.env.TEST_PHONES = ALLOWED;
 
     await auth.requestOtp(OWNER, "customer");
     const code = await storedCode(OWNER);
-    expect(code, "no code stored — every `not.toBe` assertion here would pass vacuously").toBeDefined();
+    expect(code, "no code stored â€” every `not.toBe` assertion here would pass vacuously").toBeDefined();
     expect(code).toMatch(/^\d{6}$/);
   });
 

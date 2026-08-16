@@ -1,8 +1,9 @@
-/* Wash-day allocation tests — proves the round-robin spread and the pure
+/* Wash-day allocation tests â€” proves the round-robin spread and the pure
    off-day check, against the isolated ff_test schema. */
 import "dotenv/config";
 import { beforeAll, afterEach, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
+import { ensureTestSchema } from "./_schema";
 import path from "node:path";
 
 const BASE = process.env.DIRECT_URL || process.env.DATABASE_URL || "";
@@ -20,19 +21,23 @@ const nextPhone = () => `88888${String(++n).padStart(5, "0")}`;
 const nextId = () => `wd${String(n).padStart(4, "0")}`;
 
 beforeAll(async () => {
-  execSync("npx prisma db push", { env: { ...process.env, DATABASE_URL: TEST_URL }, stdio: "ignore" });
   db = (await import("../lib/db")).db;
+  // conditional, shared â€” see tests/_schema.ts for why five parallel pushes
+  // were producing three different intermittent failures
+  await ensureTestSchema(TEST_URL, async () => {
+    try { await db.sheetOutbox.count(); return true; } catch { return false; }
+  });
   ({ assignWashDay, washDayDistribution } = await import("../lib/washday-server"));
   ({ isOffWashDay } = await import("../lib/washday"));
   // `prisma db push` against a remote Postgres is the slow part here, and it
-  // grows with the schema — it sat right on the old 120s budget once the Bag
+  // grows with the schema â€” it sat right on the old 120s budget once the Bag
   // table landed, so this hook needs real headroom, not a tight bound.
 }, 300_000);
 
 afterEach(async () => {
   // The remote pooler occasionally drops an idle connection during a long run,
   // which surfaced as an unrelated PURE test failing inside this cleanup. Retry
-  // once so a dropped socket doesn't fail a passing test — a genuine problem
+  // once so a dropped socket doesn't fail a passing test â€” a genuine problem
   // still throws on the second attempt rather than being swallowed.
   const purge = async () => {
     await db.student.deleteMany({ where: { id: { startsWith: "wd" } } });
@@ -64,7 +69,7 @@ describe("wash-day allocation spreads students evenly", () => {
     const newStudent = await mkStudent(col.id);
     const assigned = await assignWashDay(newStudent.id, col.id);
 
-    // Sunday (0) has 0 students, far below Monday/Tuesday — must win
+    // Sunday (0) has 0 students, far below Monday/Tuesday â€” must win
     expect(assigned).toBe(0);
     const fresh = await db.student.findUnique({ where: { id: newStudent.id } });
     expect(fresh?.washDay).toBe(0);
@@ -84,7 +89,7 @@ describe("wash-day allocation spreads students evenly", () => {
     /* 30 rather than 60.
 
        The property is "every open day ends up with exactly the same count",
-       and it holds at any multiple of six — 60 proved nothing that 30 does
+       and it holds at any multiple of six â€” 60 proved nothing that 30 does
        not. What 60 did do was double the round-trips to a remote database:
        assignWashDay reads the current distribution before each write, so the
        calls cannot be batched, and 120 sequential round-trips overran the 90s
@@ -97,14 +102,14 @@ describe("wash-day allocation spreads students evenly", () => {
       await assignWashDay(s.id, col.id);
     }
     const dist = await washDayDistribution(col.id);
-    // deterministic least-loaded assignment — no randomness, so this is exact
+    // deterministic least-loaded assignment â€” no randomness, so this is exact
     for (let d = 0; d < 7; d++) {
       if (d === 4) expect(dist[d]).toBe(0);
       else expect(dist[d]).toBe(PER_DAY);
     }
   }, 180_000);
 
-  it("does not care about total headcount — the same logic works for 6 or 600", async () => {
+  it("does not care about total headcount â€” the same logic works for 6 or 600", async () => {
     const small = await mkCollege(null);
     for (let i = 0; i < 6; i++) {
       const s = await mkStudent(small.id);
@@ -116,7 +121,7 @@ describe("wash-day allocation spreads students evenly", () => {
   });
 });
 
-describe("isOffWashDay — pure, no DB", () => {
+describe("isOffWashDay â€” pure, no DB", () => {
   it("null washDay is never 'off' (unassigned students aren't flagged)", () => {
     expect(isOffWashDay(null)).toBe(false);
   });

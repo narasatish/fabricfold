@@ -3,11 +3,12 @@
    These prove the auto-confirmation path works WITHOUT needing a Razorpay
    account: we sign a payload with the same HMAC-SHA256 scheme Razorpay uses,
    POST it at the route handler, and assert the order flips to paid and a GST
-   invoice is raised. Runs in the isolated ff_test schema — never real data. */
+   invoice is raised. Runs in the isolated ff_test schema â€” never real data. */
 import "dotenv/config";
 import { beforeAll, describe, expect, it } from "vitest";
 import crypto from "node:crypto";
 import { execSync } from "node:child_process";
+import { ensureTestSchema } from "./_schema";
 import path from "node:path";
 
 const BASE = process.env.DIRECT_URL || process.env.DATABASE_URL || "";
@@ -37,7 +38,7 @@ function signedRequest(body: unknown, secretOverride?: string) {
    It used to be the same literal for every scenario, which modelled something
    that cannot happen: a Razorpay payment id is globally unique, so one id can
    never appear on two orders. The database now enforces exactly that, and the
-   shared literal would have failed the constraint — the fixture was wrong, not
+   shared literal would have failed the constraint â€” the fixture was wrong, not
    the rule. A replay of ONE order still reuses its id, which is the case that
    matters and is asserted below. */
 function capturedEvent(orderId: string, paymentId = `pay_TEST_${orderId}`) {
@@ -48,11 +49,10 @@ function capturedEvent(orderId: string, paymentId = `pay_TEST_${orderId}`) {
 }
 
 beforeAll(async () => {
-  execSync("npx prisma db push", {
-    env: { ...process.env, DATABASE_URL: TEST_URL },
-    stdio: "ignore",
-  });
   db = (await import("../lib/db")).db;
+  await ensureTestSchema(TEST_URL, async () => {
+    try { await db.sheetOutbox.count(); return true; } catch { return false; }
+  });
   ({ POST } = await import("../app/api/razorpay/webhook/route"));
 
   await db.appConfig.upsert({
@@ -74,7 +74,7 @@ beforeAll(async () => {
   /* Clear this file's own fixtures before creating them again.
      There was no cleanup here at all. It passed only because the schema was
      changing often enough that `prisma db push` kept truncating tables as a
-     side effect — so the suite was green for a reason unrelated to the tests.
+     side effect â€” so the suite was green for a reason unrelated to the tests.
      The moment the schema settled, the second run failed on duplicate order
      ids. Cleaning explicitly makes the file repeatable on its own terms.
 
@@ -110,7 +110,7 @@ async function mkOrder(id: string, opts: { noGst?: boolean; creditApplied?: numb
   });
 }
 
-describe("payment gateway webhook — auto-confirmation", () => {
+describe("payment gateway webhook â€” auto-confirmation", () => {
   it("a validly signed payment.captured marks the order paid and raises a GST invoice", async () => {
     const o = await mkOrder("GWPAID01");
     const res = await POST(signedRequest(capturedEvent(o.id)));
@@ -140,7 +140,7 @@ describe("payment gateway webhook — auto-confirmation", () => {
   });
 
   it("a malformed signature returns 400, not a 500 crash", async () => {
-    // timingSafeEqual throws on length mismatch — this is the regression guard
+    // timingSafeEqual throws on length mismatch â€” this is the regression guard
     const o = await mkOrder("GWBADSIG");
     const raw = JSON.stringify(capturedEvent(o.id));
     const req = new Request("https://fabricfold.in/api/razorpay/webhook", {

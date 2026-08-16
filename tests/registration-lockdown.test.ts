@@ -3,11 +3,11 @@
    Students must NOT be able to create their own account. A student account
    can only be created by staff (registerStudent). An unrecognised customer
    phone number verifying an OTP must be turned away, not offered a signup
-   form — and a student's phone number can only be changed by an Admin+
+   form â€” and a student's phone number can only be changed by an Admin+
    (updateStudentPhone), never by the student themselves.
 
    NOTE on scope: registerStudent/updateStudentPhone both call requireStaff(),
-   which reads the session from next/headers cookies() — that throws "Not
+   which reads the session from next/headers cookies() â€” that throws "Not
    signed in" outside a real Next.js request, so it can't be driven end-to-end
    from a plain vitest run (the same reason the existing money.test.ts never
    calls session-gated actions directly, only pure money functions). Those two
@@ -17,6 +17,7 @@
 import "dotenv/config";
 import { beforeAll, afterEach, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
+import { ensureTestSchema } from "./_schema";
 import path from "node:path";
 import fs from "node:fs";
 
@@ -31,7 +32,7 @@ let auth: typeof import("../lib/actions/auth");
 const NEW_NUMBER = "9812345670"; // never registered
 
 /** Is the test schema already in step with the Prisma schema?
- *  Probed by touching the newest model — a query that succeeds means the table
+ *  Probed by touching the newest model â€” a query that succeeds means the table
  *  exists, and a failure means the schema predates it and needs a push. Cheap
  *  and, unlike a version file, it cannot drift out of date on its own. */
 async function schemaIsCurrent(): Promise<boolean> {
@@ -55,22 +56,13 @@ beforeAll(async () => {
          The QA pipeline then reported "DB refuses to reissue a retired code"
          as a product failure when this line had quietly disarmed it.
        - the DDL runs while other files are hitting the same database, and
-         intermittently took unrelated tests down with it — otp-security has
+         intermittently took unrelated tests down with it â€” otp-security has
          failed this way, on a schema change that had nothing to do with OTPs.
 
      So: probe for the newest model first and skip the push when it is there,
      which is the normal case. A fresh or stale schema still self-heals, and
      the guards are re-armed only on the path that could have removed them. */
-  const current = await schemaIsCurrent();
-  if (!current) {
-    execSync("npx prisma db push", { env: { ...process.env, DATABASE_URL: TEST_URL }, stdio: "ignore" });
-    if (IS_PG) {
-      execSync("node scripts/ensure-guards.mjs", {
-        env: { ...process.env, FF_GUARD_SCHEMA: "ff_test" },
-        stdio: "ignore",
-      });
-    }
-  }
+  await ensureTestSchema(TEST_URL, schemaIsCurrent, IS_PG);
 
   auth = await import("../lib/actions/auth");
 
@@ -79,7 +71,7 @@ beforeAll(async () => {
     create: { id: "reg-test-college", name: "Reg Test College", features: {} },
   });
   // `prisma db push` against a remote Postgres is the slow part, and it grows
-  // with the schema — 120s was already marginal and broke once the Bag table
+  // with the schema â€” 120s was already marginal and broke once the Bag table
   // landed. Kept generous on purpose: this hook is setup, not a perf budget.
 }, 300_000);
 
@@ -107,14 +99,14 @@ describe("students cannot self-register", () => {
   it("passing a name/collegeId payload (the old registration shape) does NOT create an account", async () => {
     const code = await mkOtp(NEW_NUMBER);
     // The 4th param is kept in the signature for stale client bundles, but the
-    // server ignores it for registration purposes — this call shape is
+    // server ignores it for registration purposes â€” this call shape is
     // type-valid, it just must not actually create an account.
     const r = await auth.verifyOtp(NEW_NUMBER, code, "customer", { name: "Sneaky", collegeId: "reg-test-college" });
     expect(r.ok).toBe(false);
     expect(await db.student.findUnique({ where: { phone: NEW_NUMBER } })).toBeNull();
   });
 
-  // NOTE: a full successful login also isn't testable here — verifyOtp calls
+  // NOTE: a full successful login also isn't testable here â€” verifyOtp calls
   // createSession(), which needs next/headers cookies() same as requireStaff,
   // so it throws outside a real request regardless of this feature. The two
   // tests above already prove the lockdown property (the only thing this
@@ -124,7 +116,7 @@ describe("students cannot self-register", () => {
 describe("registration & phone changes are staff-gated (source-level regression guard)", () => {
   const adminSrc = fs.readFileSync(path.resolve(__dirname, "../lib/actions/admin.ts"), "utf8");
 
-  it("registerStudent requires a staff session (requireStaff) — any role, but never self-serve", () => {
+  it("registerStudent requires a staff session (requireStaff) â€” any role, but never self-serve", () => {
     const fn = adminSrc.slice(adminSrc.indexOf("export async function registerStudent"));
     expect(fn.slice(0, 200)).toMatch(/requireStaff\(1\)/);
   });

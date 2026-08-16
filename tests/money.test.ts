@@ -6,14 +6,31 @@ import { execSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
 
-// Run the money tests in an ISOLATED schema so they never touch real data:
-//  - Postgres (Supabase): a throwaway "ff_test" schema on the same database.
-//  - SQLite fallback: a local test.db file (used if DATABASE_URL is a file: URL).
-// Prefer DIRECT_URL (session pooler) — tests do DDL (db push) which needs it.
+/* Run the money tests in an isolated schema so they never touch real data:
+   - Postgres (Supabase): a throwaway schema on the same database.
+   - SQLite fallback: a local test.db file (if DATABASE_URL is a file: URL).
+   Prefer DIRECT_URL (session pooler) — these do DDL, which needs it.
+
+   ff_money, NOT the shared ff_test — and this is the important part.
+
+   This file starts by DROPPING its schema and rebuilding it, because these
+   tests want a pristine ledger: invoice numbering must be gap-free from 1, so
+   leftover rows would break it. That is fine on a schema it owns and
+   catastrophic on a shared one. It used to drop ff_test, which four other
+   files use, WHILE vitest ran them in parallel — their tables vanished
+   mid-test. Every intermittent failure chased this session traces back here:
+   "no code stored" in otp-security (the Otp table had just been dropped),
+   "Command failed: npx prisma db push" in washday (colliding with the
+   recreate), and the QA pipeline's bag-code assertion (the partial unique
+   indexes went with the schema).
+
+   Owning its own schema means it can keep the clean-slate guarantee its
+   assertions depend on without reaching into anyone else's. */
 const BASE = process.env.DIRECT_URL || process.env.DATABASE_URL || "";
 const IS_PG = /^postgres(ql)?:\/\//.test(BASE);
 const TEST_DB = path.resolve(__dirname, "../test.db");
-const TEST_URL = IS_PG ? BASE.split("?")[0] + "?schema=ff_test" : "file:" + TEST_DB;
+const MONEY_SCHEMA = "ff_money";
+const TEST_URL = IS_PG ? BASE.split("?")[0] + `?schema=${MONEY_SCHEMA}` : "file:" + TEST_DB;
 process.env.DATABASE_URL = TEST_URL;
 
 // imported lazily after env is set
@@ -27,7 +44,7 @@ beforeAll(async () => {
     const { Client } = await import("pg");
     const admin = new Client({ connectionString: BASE.split("?")[0] });
     await admin.connect();
-    await admin.query("DROP SCHEMA IF EXISTS ff_test CASCADE; CREATE SCHEMA ff_test;");
+    await admin.query(`DROP SCHEMA IF EXISTS ${MONEY_SCHEMA} CASCADE; CREATE SCHEMA ${MONEY_SCHEMA};`);
     await admin.end();
     execSync("npx prisma db push", {
       cwd: path.resolve(__dirname, ".."), stdio: "ignore",

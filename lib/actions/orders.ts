@@ -218,10 +218,21 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
    plan cycle) — so offline drop-offs are tracked exactly like app orders. */
 export async function walkInOrder(
   studentId: string,
-  input: { service: string; items: { label: string; qty: number }[]; weightKg: number | null; useCycle: boolean; noGst?: boolean; express?: boolean },
+  input: { service: string; items: { label: string; qty: number }[]; weightKg: number | null; useCycle: boolean; noGst?: boolean; express?: boolean; idemKey?: string | null },
 ) {
   const st = await requireStaff(1);
   const cfg = await getConfig();
+
+  /* An offline intake carries a key from the device that captured it. If that
+     key is already on an order, this is a REPLAY — the previous attempt
+     committed and something asked again. Return the existing order rather than
+     booking the same bag in twice, and report it as success, because from the
+     counter's point of view the order did go through. */
+  if (input.idemKey) {
+    const already = await db.order.findFirst({ where: { idemKey: input.idemKey }, select: { id: true } });
+    if (already) return { ok: true as const, id: already.id, replayed: true };
+  }
+
   const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: { include: { planRef: true } }, college: true } });
   if (!stu) return { ok: false as const, error: "Student not found" };
   const rate = cfg.rates[input.service];
@@ -285,7 +296,8 @@ export async function walkInOrder(
 
       const o = await tx.order.create({
         data: {
-          id, studentId: stu.id, collegeId: stu.collegeId, service: input.service,
+          id, idemKey: input.idemKey || null,
+          studentId: stu.id, collegeId: stu.collegeId, service: input.service,
           items, declaredPieces, actualPieces: declaredPieces, weightKg: input.weightKg,
           express: !!input.express, surcharge, usedCycle, noGst,
           paid: usedCycle && total === 0, paymentMethod: usedCycle && total === 0 ? "cycle" : null,
@@ -312,6 +324,12 @@ export async function walkInOrder(
       return o;
     });
   } catch (e) {
+    /* Two replays racing each other: the lookup above found nothing for both,
+       then the index rejected the loser. The order exists, so this is success. */
+    if ((e as { code?: string }).code === "P2002" && input.idemKey) {
+      const won = await db.order.findFirst({ where: { idemKey: input.idemKey }, select: { id: true } });
+      if (won) return { ok: true as const, id: won.id, replayed: true };
+    }
     return { ok: false as const, error: (e as Error).message };
   }
 

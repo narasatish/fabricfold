@@ -4,6 +4,7 @@ import { getSession, requireStaff } from "@/lib/auth";
 import { Svg } from "@/components/icons";
 import { TabBar, RealtimeRefresh } from "@/components/chrome";
 import { InstallPrompt } from "@/components/pwa";
+import { OfflineBanner } from "@/components/offline";
 import StaffTabBar from "./_components/StaffTabBar";
 import { db } from "@/lib/db";
 
@@ -39,6 +40,9 @@ export default async function StaffLayout({ children }: { children: React.ReactN
 
   return (
     <>
+      {/* Above the content: when the connection drops mid-queue the staff
+          member must see it before they wonder why a tap did nothing. */}
+      <OfflineBanner />
       {children}
       <StaffTabBar openComplaints={openComplaints} role={staff.role} />
       <InstallPrompt />

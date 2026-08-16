@@ -230,7 +230,17 @@ model CycleUse {
 
 // ───────────── Orders ─────────────
 model Order {
-  id             String    @id // human order code (#tag, last 4/6 shown)
+  id String @id // human order code (#tag, last 4/6 shown)
+
+  /* Client-generated key for an order captured while the counter was OFFLINE.
+     The queued intake is replayed when the connection returns, and a replay
+     can happen twice — the tab reconnects, the staff member also taps retry,
+     the request times out after the server already committed. This key is what
+     makes a repeat harmless: a partial unique index (ensure-guards) rejects the
+     second insert, and walkInOrder returns the order that already exists
+     instead of taking the clothes in twice. Null for anything taken online. */
+  idemKey String?
+
   studentId      String
   student        Student   @relation(fields: [studentId], references: [id])
   collegeId      String

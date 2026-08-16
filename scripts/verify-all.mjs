@@ -71,6 +71,15 @@ const STEPS = [
     slow: true,
     needsDb: true,
   },
+  {
+    /* Last, and never a failure. Every setting it lists is correct today; the
+       danger is that they are still correct-looking on the day a real student
+       signs in. Printing them at the end of every verify keeps the list in
+       front of whoever is about to deploy. */
+    name: "launch readiness",
+    cmd: "node scripts/launch-check.mjs",
+    proves: "test-only settings are visible, not forgotten",
+  },
 ];
 
 const results = [];

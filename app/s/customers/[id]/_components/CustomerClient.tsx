@@ -9,6 +9,7 @@ import { submitCompensation } from "@/lib/actions/credits";
 import { assignSubscription, upgradeSubscription, cancelSubscription } from "@/lib/actions/subscription";
 import { issueBag, retireBag, releaseBagCode } from "@/lib/actions/bags";
 import { walkInOrder } from "@/lib/actions/orders";
+import { enqueueIntake, newIdemKey } from "@/lib/offline-queue";
 import { topUpCredits } from "@/lib/actions/ops";
 import { updateStudentPhone } from "@/lib/actions/admin";
 
@@ -178,15 +179,48 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
   };
 
   const doWalkIn = async () => {
-    setWiLoading(true);
-    const r = await walkInOrder(student.id, {
+    const intake = {
+      studentId: student.id,
+      studentLabel: student.name,
       service: wiService,
-      items: wiItems.map(([label]) => ({ label, qty: wiQty[label] || 0 })),
+      items: wiItems.map(([label]) => ({ label, qty: wiQty[label] || 0 })).filter((i) => i.qty > 0),
       weightKg: wiWeight || null,
       useCycle: wiUseCycle,
       noGst: wiNoGst,
       express: wiExpress,
-    });
+    };
+
+    /* No connection: save it and let the student go.
+       Checked BEFORE calling, because a server action with no network hangs
+       and then throws — the staff member would be left holding a bag with no
+       idea whether it registered. */
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      enqueueIntake(intake);
+      setShowWalkIn(false);
+      setWiQty({});
+      toast("Saved on this device — it will send when the connection returns");
+      return;
+    }
+
+    setWiLoading(true);
+    /* The key travels with the request so a retry after a TIMEOUT cannot book
+       the same bag in twice: the server may well have committed before the
+       connection died. */
+    const idemKey = newIdemKey();
+    let r: Awaited<ReturnType<typeof walkInOrder>> | null = null;
+    try {
+      r = await walkInOrder(student.id, { ...intake, idemKey });
+    } catch {
+      /* Thrown, not returned — the network died mid-flight. Whether the server
+         committed is unknowable from here, which is exactly what the key is
+         for: queue it, and the replay resolves to the same single order. */
+      enqueueIntake({ ...intake, idemKey });
+      setWiLoading(false);
+      setShowWalkIn(false);
+      setWiQty({});
+      toast("Connection lost — order saved on this device and will send itself", true);
+      return;
+    }
     setWiLoading(false);
     if (!r.ok) return toast(r.error || "Failed", true);
     toast(`Walk-in order #${r.id?.slice(-4)} created`);

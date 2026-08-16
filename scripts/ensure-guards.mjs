@@ -217,6 +217,35 @@ try {
     }
   }
 
+  /* One offline intake, one order.
+
+     An order captured while the counter had no connection is replayed later,
+     and the replay can fire more than once — the tab reconnects and the staff
+     member also taps retry, or a request times out after the server already
+     committed. Without this the student's clothes are booked in twice and the
+     counter has two tickets for one bag. */
+  const orderTable = await client.query(
+    `select 1 from information_schema.tables where table_schema=$1 and table_name='Order'`, [SCHEMA]);
+  if (orderTable.rowCount) {
+    const oIdx = "order_idem_key_uniq";
+    const hasO = await client.query(
+      `select 1 from pg_indexes where schemaname=$1 and indexname=$2`, [SCHEMA, oIdx]);
+    if (hasO.rowCount) {
+      console.log(`[guards] ${SCHEMA}.Order.${oIdx}: already present`);
+    } else {
+      const dupes = await client.query(
+        `select count(*)::int n from (select "idemKey" from "${SCHEMA}"."Order"
+           where "idemKey" is not null group by "idemKey" having count(*) > 1) d`);
+      if (dupes.rows[0].n > 0) {
+        console.warn(`[guards] ${SCHEMA}.Order.${oIdx}: ${dupes.rows[0].n} duplicate key(s) — index NOT added, investigate`);
+      } else {
+        await client.query(
+          `CREATE UNIQUE INDEX "${oIdx}" ON "${SCHEMA}"."Order"("idemKey") WHERE "idemKey" IS NOT NULL`);
+        console.log(`[guards] ${SCHEMA}.Order.${oIdx}: index ADDED`);
+      }
+    }
+  }
+
   const bagTable = await client.query(
     `select 1 from information_schema.tables where table_schema=$1 and table_name='Bag'`, [SCHEMA]);
   if (bagTable.rowCount) {

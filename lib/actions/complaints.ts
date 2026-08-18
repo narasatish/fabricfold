@@ -16,13 +16,25 @@ export async function submitComplaint(text: string, orderId?: string | null, pho
   const stu = await requireStudent();
   const t = text.trim();
   if (!t) return { ok: false as const, error: "Please describe the issue" };
-  // Students may attach evidence too — a photo of the damage is worth more than
-  // a paragraph describing it, and it is the same record staff will look at.
+
+  /* Students attach the same evidence staff do: at least MIN_DAMAGE_PHOTOS.
+     A complaint is the opening of a dispute about someone's clothes, and it
+     has to stand on its own weeks later — "there was a stain" proves nothing
+     once the garment has been washed again, whichever side is right.
+
+     Enforced here as well as in the UI. The client disables the button, but a
+     server action is a public endpoint: the check that counts is this one. */
   const pics = cleanPhotos(photos);
+  if (pics.length < MIN_DAMAGE_PHOTOS) {
+    return {
+      ok: false as const,
+      error: `Please attach at least ${MIN_DAMAGE_PHOTOS} photos of the problem (${pics.length} so far) — they are what settles the claim.`,
+    };
+  }
   const c = await db.complaint.create({
     data: {
       studentId: stu.id, collegeId: stu.collegeId, text: t, orderId: orderId || null,
-      messages: { create: { from: "student", by: stu.id, text: t, photos: pics.length ? pics : undefined } },
+      messages: { create: { from: "student", by: stu.id, text: t, photos: pics } },
     },
   });
   await enqueueSheetEvent(db, "complaint", [

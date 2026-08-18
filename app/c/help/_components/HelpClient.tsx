@@ -5,6 +5,7 @@ import { useToast } from "@/components/chrome";
 import { Svg } from "@/components/icons";
 import { submitComplaint } from "@/lib/actions/complaints";
 import { compressImage } from "@/lib/compress-image";
+import { MIN_DAMAGE_PHOTOS, MAX_PHOTOS_PER_MESSAGE } from "@/lib/complaint-rules";
 
 export default function HelpClient({ orderId }: { orderId?: string }) {
   const router = useRouter();
@@ -17,8 +18,8 @@ export default function HelpClient({ orderId }: { orderId?: string }) {
   // A photo of the damage says more than a paragraph about it, and it lands in
   // the same thread staff review.
   const addPhoto = async (file: File) => {
-    if (photos.length >= 6) {
-      toast("Up to 6 photos", true);
+    if (photos.length >= MAX_PHOTOS_PER_MESSAGE) {
+      toast(`Up to ${MAX_PHOTOS_PER_MESSAGE} photos`, true);
       return;
     }
     setUploading(true);
@@ -92,7 +93,11 @@ export default function HelpClient({ orderId }: { orderId?: string }) {
       )}
 
       <label className="btn sec mt12" style={{ cursor: "pointer" }}>
-        <Svg name="camera" size={16} /> {uploading ? "Uploading…" : photos.length ? "Add another photo" : "Add a photo (optional)"}
+        <Svg name="camera" size={16} /> {uploading
+          ? "Uploading…"
+          : photos.length >= MIN_DAMAGE_PHOTOS
+            ? `Add another photo (${photos.length})`
+            : `Add photo ${photos.length + 1} of ${MIN_DAMAGE_PHOTOS}`}
         <input
           type="file"
           accept="image/*"
@@ -107,8 +112,26 @@ export default function HelpClient({ orderId }: { orderId?: string }) {
         />
       </label>
 
-      <button className="btn mt12" onClick={handleSubmitComplaint} disabled={loading || uploading}>
-        {loading ? "Submitting…" : "Submit complaint"}
+      {/* The requirement is stated before they write, and the button explains
+          what is missing rather than just sitting greyed out — a disabled
+          control with no reason is how people give up on reporting a problem. */}
+      <div className="muted mt8" style={{ fontSize: 12 }}>
+        {photos.length >= MIN_DAMAGE_PHOTOS
+          ? `${photos.length} photos attached — these are what settle the claim.`
+          : `At least ${MIN_DAMAGE_PHOTOS} photos are needed. They are the evidence if we have to make this right, and a washed garment cannot be photographed later.`}
+      </div>
+      <button
+        className="btn mt12"
+        onClick={handleSubmitComplaint}
+        disabled={loading || uploading || photos.length < MIN_DAMAGE_PHOTOS || !complaintText.trim()}
+      >
+        {loading
+          ? "Submitting…"
+          : photos.length < MIN_DAMAGE_PHOTOS
+            ? `Add ${MIN_DAMAGE_PHOTOS - photos.length} more photo${MIN_DAMAGE_PHOTOS - photos.length === 1 ? "" : "s"}`
+            : !complaintText.trim()
+              ? "Describe the issue"
+              : "Submit complaint"}
       </button>
     </div>
   );

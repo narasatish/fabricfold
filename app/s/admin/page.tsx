@@ -16,7 +16,10 @@ export default async function StaffAdminPage() {
   const month = istDate.slice(0, 7);
   const [cfg, colleges, staffList, payslips, plans, attToday, attMonth] = await Promise.all([
     db.appConfig.findUniqueOrThrow({ where: { id: "main" } }),
-    db.college.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+    /* ALL colleges, not just active ones. Filtering here is what made
+       "remove campus" a one-way door: the removed campus vanished from the
+       only screen that could bring it back. */
+    db.college.findMany({ orderBy: [{ active: "desc" }, { name: "asc" }] }),
     db.staff.findMany({ orderBy: { role: "desc" } }),
     db.payslip.findMany({ include: { staff: true }, orderBy: { at: "desc" }, take: 12 }),
     db.plan.findMany({ orderBy: [{ collegeId: "asc" }, { price: "asc" }] }),
@@ -55,7 +58,7 @@ export default async function StaffAdminPage() {
           payment: cfg.payment as { upiId: string; payeeName: string; bankName: string; accountName: string; accountNo: string; ifsc: string; gatewayKey: string },
           settings: cfg.settings as { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number; garmentTagsEnabled?: boolean },
         }}
-        colleges={colleges.map((c) => ({ id: c.id, name: c.name, address: c.address, closedWeekday: c.closedWeekday, features: c.features as Record<string, boolean> }))}
+        colleges={colleges.map((c) => ({ id: c.id, name: c.name, address: c.address, closedWeekday: c.closedWeekday, active: c.active, features: c.features as Record<string, boolean> }))}
         washDayByCollege={washDayByCollege}
         staff={staffList.map((x) => ({ id: x.id, name: x.name, phone: x.phone, role: x.role, collegeId: x.collegeId, active: x.active }))}
         plans={plans.map((p) => ({ id: p.id, collegeId: p.collegeId, name: p.name, price: N(p.price), gstFree: p.gstFree, tier: p.tier, active: p.active, buckets: p.buckets as { service: string; cycles: number; kgPerCycle: number }[] }))}

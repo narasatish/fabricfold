@@ -154,13 +154,39 @@ export async function saveCollege(input: { id?: string; name: string; address: s
   return { ok: true as const };
 }
 
-export async function deleteCollege(collegeId: string) {
+/**
+ * Remove a campus, or bring one back.
+ *
+ * Deactivation, not deletion — students, orders and payments still point at
+ * it, and a hard delete would either fail on those references or orphan them.
+ *
+ * `active` was previously a ONE-WAY DOOR. Every screen listed only active
+ * colleges, including the admin screen that owns this action, so a removed
+ * campus disappeared from the app entirely and nothing anywhere set the flag
+ * back. Its students then showed a campus of "-" in every list while their
+ * own detail page still named it, because that page loads the college
+ * directly. Restoring is the missing half.
+ */
+export async function setCollegeActive(collegeId: string, active: boolean) {
   const st = await requireStaff(4); // Owner only
-  const count = await db.college.count({ where: { active: true } });
-  if (count <= 1) return { ok: false as const, error: "Keep at least one college" };
-  const c = await db.college.update({ where: { id: collegeId }, data: { active: false } });
-  await audit("College removed", c.name, st.id);
-  return { ok: true as const };
+  const c = await db.college.findUnique({ where: { id: collegeId } });
+  if (!c) return { ok: false as const, error: "Campus not found" };
+  if (c.active === active) return { ok: true as const, active };
+
+  if (!active) {
+    // Never remove the last one, or there is nowhere to register a student.
+    const count = await db.college.count({ where: { active: true } });
+    if (count <= 1) return { ok: false as const, error: "Keep at least one campus" };
+  }
+
+  await db.college.update({ where: { id: collegeId }, data: { active } });
+  await audit(active ? "College restored" : "College removed", c.name, st.id);
+  return { ok: true as const, active };
+}
+
+/** Back-compat wrapper: the admin screen still calls this to remove. */
+export async function deleteCollege(collegeId: string) {
+  return setCollegeActive(collegeId, false);
 }
 
 /* ----- Staff management (Admin+) ----- */

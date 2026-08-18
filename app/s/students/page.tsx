@@ -18,7 +18,10 @@ export default async function StaffStudentsPage() {
         subscription: { select: { active: true } },
       },
     }),
-    db.college.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    /* Every college, including removed ones. A student still belongs to a
+       campus after it is deactivated, and showing "-" made it look as though
+       their record was broken. */
+    db.college.findMany({ select: { id: true, name: true, active: true }, orderBy: [{ active: "desc" }, { name: "asc" }] }),
   ]);
 
   const students = rows.map((r) => ({

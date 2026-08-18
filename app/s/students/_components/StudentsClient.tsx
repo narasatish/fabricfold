@@ -7,12 +7,19 @@ import { fmt, initials } from "@/lib/format";
 import { bulkRegisterStudents, broadcastNotice } from "@/lib/actions/students";
 
 type Student = { id: string; name: string; phone: string; credits: number; lifetimePieces: number; collegeId: string; subActive: boolean };
-type College = { id: string; name: string };
+type College = { id: string; name: string; active?: boolean };
 
 export default function StudentsClient({ students, colleges, staffRole }: { students: Student[]; colleges: College[]; staffRole: number }) {
   const router = useRouter();
   const toast = useToast();
-  const colName = (id: string) => colleges.find((c) => c.id === id)?.name || "—";
+  /* Name the campus even after it has been removed. Showing "-" made a
+     student on a deactivated campus look like a broken record, when their own
+     detail page named it correctly all along. */
+  const colName = (id: string) => {
+    const c = colleges.find((x) => x.id === id);
+    if (!c) return "—";
+    return c.active === false ? `${c.name} (removed)` : c.name;
+  };
 
   const [q, setQ] = useState("");
   const [campus, setCampus] = useState<"all" | string>("all");

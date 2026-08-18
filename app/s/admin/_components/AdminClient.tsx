@@ -9,7 +9,7 @@ import { fmt } from "@/lib/format";
 import { useToast, Sheet, Switch, Seg } from "@/components/chrome";
 import {
   saveRates, savePlan, togglePlan, savePaymentConfig, saveSettings,
-  toggleFeature, saveCollege, deleteCollege, saveStaff, setStaffActive, createPayslip,
+  toggleFeature, saveCollege, deleteCollege, setCollegeActive, saveStaff, setStaffActive, createPayslip,
 } from "@/lib/actions/admin";
 import { markErrorsSeen, syncSheetsNow } from "@/lib/actions/ops";
 import { saveSlotWindow, toggleSlotWindow, deleteSlotWindow } from "@/lib/actions/slots";
@@ -30,7 +30,7 @@ type Props = {
     payment: { upiId: string; payeeName: string; bankName: string; accountName: string; accountNo: string; ifsc: string; gatewayKey: string };
     settings: { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number; gstEnabled?: boolean; garmentTagsEnabled?: boolean };
   };
-  colleges: { id: string; name: string; address: string; closedWeekday: number | null; features: Record<string, boolean> }[];
+  colleges: { id: string; name: string; address: string; closedWeekday: number | null; active: boolean; features: Record<string, boolean> }[];
   washDayByCollege: Record<string, number[]>;
   staff: { id: string; name: string; phone: string; role: number; collegeId: string | null; active: boolean }[];
   payslips: { id: string; number: string; month: string; net: number; staffName: string }[];
@@ -160,10 +160,15 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
       {/* Colleges + feature flags */}
       <div className="sec-title mt20">Colleges &amp; features</div>
       {colleges.map((c) => (
-        <div key={c.id} className="card pad mt10">
+        /* Removed campuses stay listed, dimmed. Hiding them is what made
+           removal irreversible: the only screen that can restore one was also
+           the screen that stopped showing it. */
+        <div key={c.id} className="card pad mt10" style={{ opacity: c.active ? 1 : 0.5 }}>
           <div className="between">
             <div>
-              <div className="h-sm">{c.name}</div>
+              <div className="h-sm">
+                {c.name} {!c.active && <span className="pill red" style={{ marginLeft: 6 }}>Removed</span>}
+              </div>
               <div className="muted" style={{ fontSize: 12 }}>
                 {c.address}{c.closedWeekday !== null ? ` · ${WEEKDAY_NAMES[c.closedWeekday]}s closed` : ""}
               </div>
@@ -173,8 +178,14 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
               {currentRole >= 4 && (
                 <>
                   <button className="btn xs sec" onClick={() => { setColEdit({ id: c.id, name: c.name, address: c.address, closedWeekday: c.closedWeekday }); setSheet("college"); }}><Svg name="edit" size={13} /></button>
-                  {colleges.length > 1 && (
-                    <button className="btn xs sec" style={{ color: "var(--red)" }} onClick={() => { if (confirm(`Remove ${c.name}?`)) run(() => deleteCollege(c.id), "College removed"); }}><Svg name="trash" size={13} /></button>
+                  {c.active ? (
+                    colleges.filter((x) => x.active).length > 1 && (
+                      <button className="btn xs sec" style={{ color: "var(--red)" }} onClick={() => { if (confirm(`Remove ${c.name}?
+
+Students already registered there keep their records and can be restored with the campus.`)) run(() => deleteCollege(c.id), "College removed"); }}><Svg name="trash" size={13} /></button>
+                    )
+                  ) : (
+                    <button className="btn xs sec" onClick={() => run(() => setCollegeActive(c.id, true), "Campus restored")}>Restore</button>
                   )}
                 </>
               )}

@@ -39,16 +39,35 @@ async function sendSms(phone: string, code: string) {
 
   const sgLogin = process.env.SMSGATE_LOGIN, sgPass = process.env.SMSGATE_PASSWORD;
   if (sgLogin && sgPass) {
-    const res = await fetch("https://api.sms-gate.app/3rdparty/v1/message", {
+    /* Endpoint and body checked against the published OpenAPI spec
+       (capcom6.github.io/android-sms-gateway/swagger.json), not from memory.
+       Two things were wrong before and neither would have been obvious:
+
+         - the path was /message; it is /messages. The wrong path still
+           answered 401 rather than 404, because auth runs before routing, so
+           probing it looked like "alive, just needs credentials".
+         - the body used `message`, which the spec marks DEPRECATED in favour
+           of `textMessage.text`.
+
+       A success here is 202 Accepted (enqueued for the phone to send), not
+       200, so `res.ok` is the right check but the code is worth naming. */
+    const res = await fetch("https://api.sms-gate.app/3rdparty/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: "Basic " + Buffer.from(`${sgLogin}:${sgPass}`).toString("base64"),
       },
-      body: JSON.stringify({ message: text, phoneNumbers: ["+91" + phone] }),
+      body: JSON.stringify({
+        textMessage: { text },
+        phoneNumbers: ["+91" + phone],
+      }),
     });
     if (!res.ok) {
-      console.error("SMS-Gate send failed", res.status, await res.text().catch(() => ""));
+      const detail = await res.text().catch(() => "");
+      console.error("SMS-Gate send failed", res.status, detail);
+      /* 503 is the one worth separating: the gateway is fine, the PHONE is
+         offline. That is an operational problem someone can actually fix. */
+      if (res.status === 503) throw new Error("The SMS phone is offline — check it's on, connected and the app is running");
       throw new Error("Couldn't send the OTP — please try again in a moment");
     }
     return;

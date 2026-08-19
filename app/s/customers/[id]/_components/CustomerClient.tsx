@@ -7,7 +7,7 @@ import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, loyaltyBadge } from "@/l
 import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
 import { assignSubscription, upgradeSubscription, cancelSubscription } from "@/lib/actions/subscription";
-import { issueBag, retireBag, releaseBagCode } from "@/lib/actions/bags";
+import { issueBag, retireBag, releaseBagCode, setBagCode } from "@/lib/actions/bags";
 import { walkInOrder } from "@/lib/actions/orders";
 import { enqueueIntake, newIdemKey } from "@/lib/offline-queue";
 import { topUpCredits } from "@/lib/actions/ops";
@@ -103,6 +103,27 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
     const r = await retireBag(bagId, status);
     if (!r.ok) return toast(r.error || "Failed", true);
     toast(`Bag marked ${status}`);
+    router.refresh();
+  };
+
+  /* Change the printed number a student carries.
+
+     Needed when the counter has a specific bag in hand and the student must
+     end up with the number on it. Everything downstream reads the code from
+     the same row, so no other screen needs touching. */
+  const doEditBagCode = async (bagId: string, current: string) => {
+    const next = prompt(
+      `Customer ID for ${student.name}
+
+Currently ${current}. Type the code printed on the bag they are being given.
+` +
+      `The letter must match their plan, and the code must not already be held by another student.`,
+      current,
+    );
+    if (!next || next.trim().toUpperCase() === current) return;
+    const r = await setBagCode(bagId, next);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(r.changed ? `Customer ID is now ${r.code}` : "Unchanged");
     router.refresh();
   };
 
@@ -367,6 +388,7 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
                 </div>
                 <div className="muted mt4" style={{ fontSize: 12 }}>Issued {dateStr(activeBag.issuedAt)}</div>
                 <div className="row gap8 mt12">
+                  <button className="btn xs sec" onClick={() => doEditBagCode(activeBag.id, activeBag.code)}>Change ID</button>
                   <button className="btn xs sec" onClick={() => doRetireBag(activeBag.id, "lost")}>Mark lost</button>
                   <button className="btn xs sec" onClick={() => doRetireBag(activeBag.id, "replaced")}>Mark replaced</button>
                   <button className="btn xs sec" style={{ color: "var(--red)" }} onClick={() => doReleaseBag(activeBag.id, activeBag.code)}>

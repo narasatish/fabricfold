@@ -14,7 +14,7 @@ import { requireStaff } from "../auth";
 import { pushNotif, audit } from "../notify";
 import { publish } from "../realtime";
 import { notifyOwner } from "../mail";
-import { allocateBagCode, bagKindFor, isTier, BAG_LABEL, parseBagCode, codesRemaining, WARN_AT, MAX_PER_KIND } from "../bagcode";
+import { allocateBagCode, bagKindFor, isTier, BAG_LABEL, BAG_LETTER, parseBagCode, codesRemaining, WARN_AT, MAX_PER_KIND } from "../bagcode";
 
 /** Issue a bag to a student. First one is free; later ones take a price. */
 export async function issueBag(
@@ -161,6 +161,68 @@ export async function syncBagToPlan(studentId: string) {
     console.error("[bags] syncBagToPlan failed:", (e as Error).message);
     return { ok: false as const, error: (e as Error).message };
   }
+}
+
+/**
+ * Change a student's customer ID to a specific code.
+ *
+ * For the case the allocator cannot know about: the counter has a printed bag
+ * in hand and the student must end up with the number on it. Renaming the
+ * existing bag rather than issuing a new one keeps one row, one history, and
+ * no second code drifting about.
+ *
+ * It propagates by itself. Every screen — the student's home card, the QR, the
+ * staff customer page, future Sheet rows — reads the code from this row at
+ * render time, so there is nothing else to update. Sheet rows ALREADY written
+ * keep the old code on purpose: they record what the code was on the day, and
+ * rewriting history would make the log disagree with the receipts.
+ *
+ * Admin+, because this is the student's identity, and audited both values.
+ */
+export async function setBagCode(bagId: string, rawCode: string) {
+  const st = await requireStaff(3);
+  const bag = await db.bag.findUnique({ where: { id: bagId }, include: { student: { include: { subscription: { include: { planRef: true } } } } } });
+  if (!bag) return { ok: false as const, error: "Bag not found" };
+  if (bag.status === "released") return { ok: false as const, error: "This code has been released — issue a new bag instead" };
+
+  const code = (rawCode || "").trim().toUpperCase();
+  const parsed = parseBagCode(code);
+  if (!parsed) return { ok: false as const, error: "Use a code like B001, S042 or G250 — a letter and three digits" };
+  if (code === bag.code) return { ok: true as const, code, changed: false };
+
+  /* The letter has to match the plan they are actually on, or the bag lies
+     about the tier — and the letter is what staff read at the counter to know
+     which service the student is entitled to. */
+  const tier = bag.student.subscription?.active ? bag.student.subscription.planRef?.tier : null;
+  const expected = bagKindFor(tier);
+  if (parsed.kind !== expected) {
+    return {
+      ok: false as const,
+      error: `${bag.student.name} is on ${BAG_LABEL[expected]}, so the code must start with ${BAG_LETTER[expected]}. Change their plan first if that is what you meant.`,
+    };
+  }
+
+  /* Checked here for a readable message; the partial unique index is what
+     actually guarantees it, including against a simultaneous edit. */
+  const clash = await db.bag.findFirst({
+    where: { code, status: { not: "released" }, NOT: { id: bagId } },
+    include: { student: { select: { name: true } } },
+  });
+  if (clash) return { ok: false as const, error: `${code} is already held by ${clash.student.name}` };
+
+  const before = bag.code;
+  try {
+    await db.bag.update({ where: { id: bagId }, data: { code } });
+  } catch (e) {
+    if ((e as { code?: string }).code === "P2002") return { ok: false as const, error: `${code} was just taken by someone else — pick another` };
+    throw e;
+  }
+
+  await audit("Customer ID changed", `${bag.student.name} · ${before} → ${code}`, st.id);
+  // They carry this number and quote it at the counter, so they are told.
+  await pushNotif(bag.studentId, `Your FabricFold customer ID is now ${code} (was ${before}).`, "status");
+  publish([`student:${bag.studentId}`, `orders:${bag.student.collegeId}`], { type: "bag", payload: { studentId: bag.studentId, code } });
+  return { ok: true as const, code, changed: true, previous: before };
 }
 
 /**

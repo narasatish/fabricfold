@@ -72,3 +72,32 @@ describe("loyalty no longer collides with plan tiers", () => {
     expect(new Set(names).size).toBe(3); // still three distinct steps
   });
 });
+
+describe("a lost bag keeps the student's number", () => {
+  it("reissues the SAME code rather than allocating a new one", () => {
+    /* The code is the student's identity. Changing it because they mislaid a
+       bag would make "permanent customer ID" untrue. */
+    expect(bags).toMatch(/export async function reissueBagSameCode/);
+    const fn = bags.slice(bags.indexOf("export async function reissueBagSameCode"));
+    expect(fn).toMatch(/code: bag\.code, \/\/ the whole point: same number, new bag/);
+    expect(fn).not.toMatch(/allocateBagCode/);
+  });
+
+  it("retires the old row inside the same transaction", () => {
+    // one ACTIVE bag per code, so the old must stop being active first
+    const fn = bags.slice(bags.indexOf("export async function reissueBagSameCode"));
+    expect(fn).toMatch(/db\.\$transaction/);
+    expect(fn).toMatch(/status: "lost"/);
+  });
+
+  it("is free — losing a bag is not billed here", () => {
+    const fn = bags.slice(bags.indexOf("export async function reissueBagSameCode"));
+    expect(fn).toMatch(/complimentary: true/);
+    expect(fn).toMatch(/price: 0/);
+  });
+
+  it("warns staff to destroy the old bag if it turns up", () => {
+    const ui = read("app/s/customers/[id]/_components/CustomerClient.tsx");
+    expect(ui).toMatch(/Destroy it; do not put it back into stock/);
+  });
+});

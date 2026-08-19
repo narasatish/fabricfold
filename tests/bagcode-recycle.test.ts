@@ -63,8 +63,10 @@ describe("allocation prefers released codes", () => {
     expect(await allocateBagCode(tx, "bronze")).toBe("B006");
   });
 
-  it("never reuses a LOST code", async () => {
-    // a lost bag turns up later and must still name the student it was issued to
+  it("never hands a LOST code to a different student", async () => {
+    /* The owner of a lost code keeps it — they get the same number on a new
+       bag, via reissueBagSameCode, which bypasses this allocator entirely.
+       What must never happen is the allocator giving B001 to somebody else. */
     const tx = fakeTx([{ code: "B001", status: "lost" }], { B: 1 });
     expect(await allocateBagCode(tx, "bronze")).toBe("B002");
   });
@@ -128,9 +130,9 @@ describe("release is guarded", () => {
     const ui = read("app/s/customers/[id]/_components/CustomerClient.tsx");
     expect(ui).toMatch(/releaseBagCode/);
     expect(ui).toMatch(/Student left/);
-    expect(ui).toMatch(/confirm\(/); // spells out that the code is reissued
-    // and the copy tells staff which button keeps the code reserved
-    expect(ui).toMatch(/keeps the old one reserved/);
+    expect(ui).toMatch(/confirm\(/); // spells out that the code goes to the pool
+    // and the copy says which action frees the code, versus which keeps it
+    expect(ui).toMatch(/is the only action that frees/);
   });
 });
 
@@ -151,9 +153,17 @@ describe("the privacy policy matches what is written to the Sheet", () => {
 describe("the database enforces it, not just the allocator", () => {
   const guards = read("scripts/ensure-guards.mjs");
 
-  it("creates a partial unique index over codes still in service", () => {
-    // schema is interpolated so the same guard can be installed on ff_test
-    expect(guards).toMatch(/CREATE UNIQUE INDEX .*"\$\{SCHEMA\}"\."Bag"\(code\) WHERE status <> 'released'/);
+  it("allows one ACTIVE bag per code, not one row per code", () => {
+    /* Changed deliberately. The old rule (one row per non-released code)
+       forbade a lost bag and its replacement sharing a number — which is
+       exactly what a permanent customer ID requires. */
+    expect(guards).toMatch(/CREATE UNIQUE INDEX .*"\$\{SCHEMA\}"\."Bag"\(code\) WHERE status = 'active'/);
+    expect(guards).toMatch(/bag_code_one_active_uniq/);
+  });
+
+  it("drops the superseded index by name, so the change actually lands", () => {
+    // leaving it in place would silently block every reissue
+    expect(guards).toMatch(/DROP INDEX IF EXISTS .*bag_code_in_service_uniq/);
   });
 
   it("can target the test schema, so the suite tests a real constraint", () => {

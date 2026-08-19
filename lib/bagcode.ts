@@ -11,11 +11,15 @@
      their code and it returns to the pool for a new student — otherwise 999
      per tier would be a hard ceiling on how many students the campus can ever
      enrol. Reuse happens only through that explicit release.
-   - a lost bag keeps its code reserved forever. Bags turn up weeks later, and
-     a found B042 must still name the person it was issued to rather than
-     whoever inherited the number. Same for a bag replaced on a plan change.
+   - a LOST bag does not change who the student is. They are handed a fresh bag
+     with the SAME number printed on it, because an ID that changes whenever
+     someone mislays a bag is not an identity. The old row stays, marked lost,
+     so the history shows what happened. Consequence, accepted: if the lost bag
+     is handed in later, two bags carry that number — destroy the found one.
+   - a PLAN CHANGE does change the code, because the letter tells staff the
+     entitlement, and B on a Gold plan would be a lie.
    - one code never names two students AT ONCE — enforced in the database by a
-     partial unique index, not merely by this allocator.
+     partial unique index over ACTIVE bags, not merely by this allocator.
    - globally unique rather than per-campus: whoever finds a bag labelled B042
      must be able to reach exactly one student without knowing the campus. 999
      per kind is a deliberate "for now" ceiling — a second campus needs a campus

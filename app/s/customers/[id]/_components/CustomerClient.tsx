@@ -7,7 +7,7 @@ import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, loyaltyBadge } from "@/l
 import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
 import { assignSubscription, upgradeSubscription, cancelSubscription } from "@/lib/actions/subscription";
-import { issueBag, retireBag, releaseBagCode, setBagCode } from "@/lib/actions/bags";
+import { issueBag, retireBag, releaseBagCode, setBagCode, reissueBagSameCode } from "@/lib/actions/bags";
 import { walkInOrder } from "@/lib/actions/orders";
 import { enqueueIntake, newIdemKey } from "@/lib/offline-queue";
 import { topUpCredits } from "@/lib/actions/ops";
@@ -96,6 +96,25 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
     toast(`Bag ${r.code} issued${r.complimentary ? " — complimentary" : ` · ₹${r.price}`}`);
     setShowBag(false);
     setBagPrice(0);
+    router.refresh();
+  };
+
+  /* A lost bag does not change who the student is. They get a fresh bag with
+     the SAME number printed on it, because a customer ID that changes whenever
+     someone mislays a bag is not an identity. */
+  const doReissue = async (bagId: string, code: string) => {
+    if (!confirm(
+      `Reissue ${code} to ${student.name}?
+
+` +
+      `They keep the same customer ID — a new bag is printed with ${code} on it, free.
+
+` +
+      `If the old bag turns up later it will also say ${code}. Destroy it; do not put it back into stock.`,
+    )) return;
+    const r = await reissueBagSameCode(bagId, "lost");
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(`${r.code} reissued — same ID, new bag`);
     router.refresh();
   };
 
@@ -389,16 +408,16 @@ Currently ${current}. Type the code printed on the bag they are being given.
                 <div className="muted mt4" style={{ fontSize: 12 }}>Issued {dateStr(activeBag.issuedAt)}</div>
                 <div className="row gap8 mt12">
                   <button className="btn xs sec" onClick={() => doEditBagCode(activeBag.id, activeBag.code)}>Change ID</button>
-                  <button className="btn xs sec" onClick={() => doRetireBag(activeBag.id, "lost")}>Mark lost</button>
-                  <button className="btn xs sec" onClick={() => doRetireBag(activeBag.id, "replaced")}>Mark replaced</button>
+                  <button className="btn xs sec" onClick={() => doReissue(activeBag.id, activeBag.code)}>Lost — reissue</button>
                   <button className="btn xs sec" style={{ color: "var(--red)" }} onClick={() => doReleaseBag(activeBag.id, activeBag.code)}>
                     Student left
                   </button>
                 </div>
                 <div className="muted mt8" style={{ fontSize: 11.5 }}>
-                  Lost or replaced frees the student for a new code, but keeps the old one reserved — a bag
-                  handed in months later must still name its owner. <strong>Student left</strong> is the only
-                  one that returns {activeBag.code} to the pool for a new student.
+                  <strong>Lost — reissue</strong> prints a new bag with the same number: {activeBag.code} is
+                  their customer ID and stays with them. If the old bag turns up, destroy it rather than
+                  returning it to stock. <strong>Student left</strong> is the only action that frees
+                  {" "}{activeBag.code} for somebody else.
                 </div>
               </>
             ) : (

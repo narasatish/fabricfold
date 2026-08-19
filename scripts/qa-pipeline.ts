@@ -325,14 +325,36 @@ async function main() {
   eq("reminder counter starts at zero", short.collectionRemindersSent, 0);
 
   // ─────────────────────────────────────────────────────────────────
-  section("Bag lost → new code, old never reissued");
+  section("Bag lost → SAME code back to the same student");
+  /* The code is the student's identity, so losing a bag must not change it.
+     They get a fresh bag with the same number. What must still be impossible
+     is two ACTIVE bags carrying it. */
   const active = await db.bag.findFirstOrThrow({ where: { studentId: stu.id, status: "active" } });
   await db.bag.update({ where: { id: active.id }, data: { status: "lost" } });
+
+  let sameCodeBack = true;
+  try {
+    await db.bag.create({ data: { code: active.code, studentId: stu.id, tier: active.tier, complimentary: true, issuedBy: "qa" } });
+  } catch { sameCodeBack = false; }
+  check("the student keeps their number after a loss", sameCodeBack, active.code);
+
+  // a DIFFERENT student must not be able to hold that code at the same time
+  const other = await db.student.create({
+    data: { id: TAG + RUN + "oth", phone: `9${RUN}00099`, name: "QA Other", collegeId: college.id },
+  });
+  let twoActive = false;
+  try {
+    await db.bag.create({ data: { code: active.code, studentId: other.id, issuedBy: "qa" } });
+    twoActive = true;
+  } catch { /* expected: one ACTIVE bag per code */ }
+  check("a second ACTIVE bag with that code is refused", twoActive === false);
+
+  const rows = await db.bag.count({ where: { code: active.code } });
+  check("both rows keep the code, so history reads correctly", rows >= 2, `${rows} rows`);
+
+  // the ALLOCATOR must still never hand a lost code to someone else
   const replacement = await db.$transaction((tx) => allocateBagCode(tx, bagKindFor("silver")));
-  check("replacement code differs from the lost one", replacement !== active.code, `${active.code} → ${replacement}`);
-  let dupe = false;
-  try { await db.bag.create({ data: { code: active.code, studentId: stu.id, issuedBy: "qa" } }); dupe = true; } catch { /* expected */ }
-  check("DB refuses to reissue a retired code", dupe === false);
+  check("allocator never hands a lost code to another student", replacement !== active.code, `${active.code} vs ${replacement}`);
 
   // ─────────────────────────────────────────────────────────────────
   section("Money invariants");

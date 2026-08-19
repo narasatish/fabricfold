@@ -164,6 +164,57 @@ export async function syncBagToPlan(studentId: string) {
 }
 
 /**
+ * Replace a lost or damaged bag, KEEPING the student's number.
+ *
+ * The code is the student's customer ID, not the bag's. It is printed on the
+ * bag, but it identifies the person — so losing a bag must not change who they
+ * are. They are handed a fresh bag with the same number on it.
+ *
+ * The old row is kept, marked lost, so the history shows a replacement
+ * happened and when. The database allows both rows to carry the code because
+ * only one of them is ACTIVE.
+ *
+ * The trade-off, chosen deliberately: if the lost bag is handed in after the
+ * replacement is printed, two physical bags carry that number. The found one
+ * must be destroyed, never returned to stock. The alternative — a new number
+ * on every loss — is what makes an ID stop being permanent.
+ *
+ * Free. A student does not pay for losing a bag any more than for upgrading;
+ * charge for it at the counter as a separate sale if you want to.
+ */
+export async function reissueBagSameCode(bagId: string, reason: "lost" | "damaged" = "lost") {
+  const st = await requireStaff(1);
+  const bag = await db.bag.findUnique({ where: { id: bagId }, include: { student: true } });
+  if (!bag) return { ok: false as const, error: "Bag not found" };
+  if (bag.status !== "active") return { ok: false as const, error: `That bag is already marked ${bag.status}` };
+
+  const fresh = await db.$transaction(async (tx) => {
+    /* Retire first. The unique index allows one ACTIVE bag per code, so the
+       old row has to stop being active before the new one starts. */
+    await tx.bag.update({
+      where: { id: bagId },
+      data: { status: "lost", note: `${reason} — reissued with the same code` },
+    });
+    return tx.bag.create({
+      data: {
+        code: bag.code, // the whole point: same number, new bag
+        studentId: bag.studentId,
+        tier: bag.tier,
+        complimentary: true,
+        price: 0,
+        issuedBy: st.id,
+        note: `Replacement for a ${reason} bag`,
+      },
+    });
+  });
+
+  await pushNotif(bag.studentId, `Your replacement bag is ready — same number, ${bag.code}. Collect it at the counter.`, "status");
+  await audit("Bag reissued", `${bag.code} · ${bag.student.name} · ${reason}, same code`, st.id);
+  publish([`student:${bag.studentId}`, `orders:${bag.student.collegeId}`], { type: "bag", payload: { studentId: bag.studentId, code: bag.code } });
+  return { ok: true as const, code: fresh.code };
+}
+
+/**
  * Change a student's customer ID to a specific code.
  *
  * For the case the allocator cannot know about: the counter has a printed bag

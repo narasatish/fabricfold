@@ -154,42 +154,29 @@ try {
       (checksSkipped ? `, ${checksSkipped} SKIPPED due to existing bad data` : ""),
   );
 
-  /* One customer ID, one student — enforced by the DATABASE.
-
-     A bag code is recycled when a student leaves, so `code` cannot be globally
-     unique any more: B001 legitimately appears on several rows over the years.
-     What must never happen is two students holding B001 AT ONCE, which a bug
-     in the allocator could otherwise cause silently — and the damage lands on
-     a physical bag handed to the wrong person.
-
-     Prisma cannot express a partial unique index, so it is created here.
-     Released rows are excluded; everything still in service is unique.
-
-     Schema-aware, unlike the rest of this file: the isolated `ff_test` schema
-     the suite runs against needs the same index, or a test asserting "the DB
-     rejects a duplicate code" would pass in production and quietly prove
-     nothing where it actually runs. FF_GUARD_SCHEMA=ff_test targets it. */
+  /* Schema-aware: the isolated ff_test schema needs the same constraints, or a
+     test asserting "the DB rejects a duplicate" proves nothing where it runs.
+     FF_GUARD_SCHEMA=ff_test targets it. */
   const SCHEMA = process.env.FF_GUARD_SCHEMA || "public";
 
-  /* One payment per order per method — enforced by the DATABASE.
+  /* One customer ID, one student — enforced by the DATABASE.
 
-     Both payment paths check `paid` before writing, and neither check can win
-     a race. Postgres runs READ COMMITTED, so two concurrent transactions both
-     read paid = false and both insert; the Razorpay webhook is worse, because
-     its check sits OUTSIDE the transaction and Razorpay retries deliveries.
-     Two retries arriving together charge a student twice.
+     The code is the student's identity, not the bag's. It stays with them for
+     their whole time on campus: if they lose the bag, the SAME number is
+     printed on the replacement, because a customer ID that changes whenever
+     someone mislays a bag is not an identity.
 
-     That is not a bug you can clean up afterwards: Payment rows are immutable
-     by trigger, so a duplicate cannot be deleted, only offset with a manual
-     credit note after the money has already left.
+     So the rule is one ACTIVE bag per code, not one row per code. A lost or
+     replaced row keeps the code alongside the live one — same student, same
+     number, one of them retired — and history stays readable.
 
-     Two indexes:
-       gatewayRef  — one Razorpay payment id may appear once, full stop. This
-                     is what makes webhook retries safe.
-       order+method — an order may hold a `credit` row AND a `upi` row (the
-                     split payCore writes), but never two of the same method.
-                     Refunds and cash_out are excluded: an order can legitimately
-                     be refunded more than once. */
+     Consequence, accepted deliberately: if a lost bag is handed in after the
+     replacement is printed, two physical bags carry that number. The found one
+     must be destroyed, never returned to stock. The alternative was issuing a
+     new number on every loss, which breaks the permanence.
+
+     Released codes are excluded from the index entirely: release is the
+     controlled hand-back that lets a graduate's number go to somebody new. */
   const payTable = await client.query(
     `select 1 from information_schema.tables where table_schema=$1 and table_name='Payment'`, [SCHEMA]);
   if (payTable.rowCount) {
@@ -206,7 +193,6 @@ try {
       const has = await client.query(
         `select 1 from pg_indexes where schemaname=$1 and indexname=$2`, [SCHEMA, name]);
       if (has.rowCount) { console.log(`[guards] ${SCHEMA}.Payment.${name}: already present`); continue; }
-      // Same rule as everywhere else: report bad data, never fail the deploy.
       const dupes = await client.query(dupeSql);
       if (dupes.rows[0].n > 0) {
         console.warn(`[guards] ${SCHEMA}.Payment.${name}: ${dupes.rows[0].n} duplicate group(s) already exist — index NOT added, investigate before real money flows`);
@@ -217,13 +203,6 @@ try {
     }
   }
 
-  /* One offline intake, one order.
-
-     An order captured while the counter had no connection is replayed later,
-     and the replay can fire more than once — the tab reconnects and the staff
-     member also taps retry, or a request times out after the server already
-     committed. Without this the student's clothes are booked in twice and the
-     counter has two tickets for one bag. */
   const orderTable = await client.query(
     `select 1 from information_schema.tables where table_schema=$1 and table_name='Order'`, [SCHEMA]);
   if (orderTable.rowCount) {
@@ -249,7 +228,13 @@ try {
   const bagTable = await client.query(
     `select 1 from information_schema.tables where table_schema=$1 and table_name='Bag'`, [SCHEMA]);
   if (bagTable.rowCount) {
-    const idx = "bag_code_in_service_uniq";
+    /* Superseded by the ACTIVE-only rule below. The old index forbade a lost
+       bag and its replacement sharing a number, which is exactly what keeping
+       a permanent customer ID requires. Dropped by name so the change actually
+       lands — leaving it would silently block every reissue. */
+    await client.query(`DROP INDEX IF EXISTS "${SCHEMA}"."bag_code_in_service_uniq"`);
+
+    const idx = "bag_code_one_active_uniq";
     const hasIdx = await client.query(
       `select 1 from pg_indexes where schemaname=$1 and indexname=$2`, [SCHEMA, idx]);
     if (hasIdx.rowCount) {
@@ -258,14 +243,14 @@ try {
       // Same rule as the CHECKs: report bad data rather than fail the deploy.
       const dupes = await client.query(
         `select count(*)::int n from (
-           select code from "${SCHEMA}"."Bag" where status <> 'released'
+           select code from "${SCHEMA}"."Bag" where status = 'active'
            group by code having count(*) > 1
          ) d`);
       if (dupes.rows[0].n > 0) {
-        console.warn(`[guards] ${SCHEMA}.Bag.${idx}: ${dupes.rows[0].n} code(s) already held by two live bags — index NOT added, investigate`);
+        console.warn(`[guards] ${SCHEMA}.Bag.${idx}: ${dupes.rows[0].n} code(s) held by two ACTIVE bags — index NOT added, investigate`);
       } else {
         await client.query(
-          `CREATE UNIQUE INDEX "${idx}" ON "${SCHEMA}"."Bag"(code) WHERE status <> 'released'`);
+          `CREATE UNIQUE INDEX "${idx}" ON "${SCHEMA}"."Bag"(code) WHERE status = 'active'`);
         console.log(`[guards] ${SCHEMA}.Bag.${idx}: index ADDED`);
       }
     }

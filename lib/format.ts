@@ -24,10 +24,17 @@ export const STATUS_LABEL: Record<string, string> = {
   draft: "Draft", received: "Received", processing: "Processing", ready: "Ready", collected: "Collected", cancelled: "Cancelled",
 };
 
+/* Loyalty by lifetime pieces washed.
+
+   NOT Bronze/Silver/Gold — those are PLAN TIERS, and they decide the letter on
+   the student's bag. Using the same three words for both put a "Bronze" pill
+   next to a Silver plan on the very same card, which reads as a data error and
+   is impossible for staff to interpret at a counter. Distinct words, so the
+   two ideas can sit side by side without arguing. */
 export function loyaltyBadge(pieces: number) {
-  if (pieces >= 150) return { name: "Gold", bg: "#f6edd2", fg: "#8a6d12" };
-  if (pieces >= 50) return { name: "Silver", bg: "#eceef1", fg: "#5b6570" };
-  return { name: "Bronze", bg: "#f2e4d8", fg: "#8a5a34" };
+  if (pieces >= 150) return { name: "Regular", bg: "#f6edd2", fg: "#8a6d12" };
+  if (pieces >= 50) return { name: "Returning", bg: "#eceef1", fg: "#5b6570" };
+  return { name: "New", bg: "#f2e4d8", fg: "#8a5a34" };
 }
 
 export function upiLink(upiId: string, payeeName: string, amount: number, note: string) {

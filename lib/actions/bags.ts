@@ -110,6 +110,60 @@ export async function issueBag(
 }
 
 /**
+ * Make the student's customer ID match the plan they are actually on.
+ *
+ * The code IS the customer ID, and it lives on the bag — so until a bag was
+ * issued a Silver subscriber had no S-code at all, just the internal 6-digit
+ * reference. Assigning a plan and issuing the bag were two separate manual
+ * steps, and nothing tied them together, so "choose Gold, get G001" simply did
+ * not happen unless someone remembered the second step.
+ *
+ * Called after a plan is assigned or changed:
+ *   - no bag yet            -> issue one, complimentary (the subscription perk)
+ *   - bag of the wrong tier -> retire it and issue the new letter, free
+ *   - bag already correct   -> nothing, so this is safe to call repeatedly
+ *
+ * Never throws. A subscription that has been paid for must not roll back
+ * because a code could not be allocated; the caller reports what happened and
+ * staff can issue the bag by hand.
+ */
+export async function syncBagToPlan(studentId: string) {
+  try {
+    await requireStaff(1);
+    const stu = await db.student.findUnique({
+      where: { id: studentId },
+      include: { subscription: { include: { planRef: true } }, bags: { orderBy: { issuedAt: "desc" } } },
+    });
+    if (!stu) return { ok: false as const, error: "Student not found" };
+
+    const tier = stu.subscription?.active ? stu.subscription.planRef?.tier : null;
+    const wanted = bagKindFor(tier);
+    const active = stu.bags.find((b) => b.status === "active");
+
+    if (active && bagKindFor(active.tier) === wanted) {
+      return { ok: true as const, code: active.code, changed: false };
+    }
+
+    /* Retire the old one first: issueBag refuses while an active bag exists,
+       and it reads the most recent bag to decide the swap is free — which is
+       still the one just retired, so the student is not charged to upgrade. */
+    if (active) {
+      await db.bag.update({
+        where: { id: active.id },
+        data: { status: "replaced", note: `Plan changed — replaced by a ${wanted} code` },
+      });
+    }
+
+    const r = await issueBag(studentId, {});
+    if (!r.ok) return { ok: false as const, error: r.error };
+    return { ok: true as const, code: r.code, changed: true, replaced: active?.code ?? null };
+  } catch (e) {
+    console.error("[bags] syncBagToPlan failed:", (e as Error).message);
+    return { ok: false as const, error: (e as Error).message };
+  }
+}
+
+/**
  * Release a customer ID back to the pool — the student has left the campus.
  *
  * This is the ONLY route by which a code is reused. Marking a bag lost or

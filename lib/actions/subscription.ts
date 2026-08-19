@@ -10,6 +10,7 @@ import { publish } from "../realtime";
 import { pushNotif, audit } from "../notify";
 import { notifyOwner } from "../mail";
 import { assignWashDay } from "../washday-server";
+import { syncBagToPlan } from "./bags";
 
 const rid = (n: number) => { let s = ""; for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10); return s; };
 
@@ -76,11 +77,14 @@ export async function activateSubscription(studentId: string, method: "cash" | "
     await tx.payment.create({ data: { method, amount: gross, collegeId: stu.collegeId, studentId, note: `Subscription: ${stu.subscription!.plan}` } });
   });
 
+  // Third path that turns a plan on, so it allocates the code too.
+  const bag = await syncBagToPlan(studentId);
+
   await pushNotif(studentId, `Your "${stu.subscription.plan}" plan is active. Happy washing!`, "status");
-  await audit("Subscription activated", `${stu.name} · ${stu.subscription.plan} · ₹${gross} (${method})`, st.id);
+  await audit("Subscription activated", `${stu.name} · ${stu.subscription.plan} · ₹${gross} (${method})${bag.ok && bag.code ? ` · ${bag.code}` : ""}`, st.id);
   void notifyOwner("Subscription activated", `${stu.name}: "${stu.subscription.plan}" — ₹${gross} received by ${method.toUpperCase()} (activated by ${st.name}).`);
   publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "subscription", payload: { studentId } });
-  return { ok: true as const };
+  return { ok: true as const, code: bag.ok ? bag.code : undefined, bagError: bag.ok ? undefined : bag.error };
 }
 
 /** Manager+ assigns a plan DIRECTLY (no request/OTP; payment taken at counter). */
@@ -112,11 +116,21 @@ export async function assignSubscription(studentId: string, planId: string, meth
   });
   await db.otp.deleteMany({ where: { purpose: "subscription", refId: studentId } });
 
+  /* The customer ID follows the plan. Bronze -> B###, Silver -> S###, Gold ->
+     G###. Doing it here is the whole point: assigning a plan and issuing the
+     bag used to be two unconnected steps, so a Silver subscriber could sit
+     with no S-code at all until someone remembered the second one.
+
+     Deliberately AFTER the payment transaction and not inside it — a paid
+     subscription must not roll back because a code could not be allocated.
+     A failure is reported to the caller, not thrown. */
+  const bag = await syncBagToPlan(studentId);
+
   await pushNotif(studentId, `Your "${plan.name}" plan is active. Happy washing!`, "status");
-  await audit("Subscription assigned", `${stu.name} · ${plan.name} · ₹${gross} (${method})`, st.id);
+  await audit("Subscription assigned", `${stu.name} · ${plan.name} · ₹${gross} (${method})${bag.ok && bag.code ? ` · ${bag.code}` : ""}`, st.id);
   void notifyOwner("Subscription assigned", `${stu.name}: "${plan.name}" — ₹${gross} received by ${method.toUpperCase()} (assigned by ${st.name}).`);
   publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "subscription", payload: { studentId } });
-  return { ok: true as const };
+  return { ok: true as const, code: bag.ok ? bag.code : undefined, bagError: bag.ok ? undefined : bag.error };
 }
 
 /* Move a student to a different plan mid-term, paying only the difference.
@@ -194,11 +208,16 @@ export async function upgradeSubscription(studentId: string, planId: string, met
     });
   });
 
+  /* A tier change changes the letter on the bag, so the code is re-issued and
+     the old one retired. Free — charging a student to upgrade would be wrong,
+     and issueBag already treats a tier swap as complimentary. */
+  const bag = await syncBagToPlan(studentId);
+
   await pushNotif(studentId, `You're now on the "${plan.name}" plan. ${cyclesTotal - cyclesUsed} cycles left.`, "status");
-  await audit("Plan changed", `${stu.name} · ${cur.plan} → ${plan.name} · ₹${difference} (${method})`, st.id);
+  await audit("Plan changed", `${stu.name} · ${cur.plan} → ${plan.name} · ₹${difference} (${method})${bag.ok && bag.changed ? ` · ${bag.replaced} → ${bag.code}` : ""}`, st.id);
   void notifyOwner("Plan changed", `${stu.name}: ${cur.plan} → ${plan.name}. Collected ₹${difference} by ${method.toUpperCase()} (by ${st.name}).`);
   publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "subscription", payload: { studentId } });
-  return { ok: true as const, difference, cyclesLeft: cyclesTotal - cyclesUsed, tierChanged: cur.planRef?.tier !== plan.tier };
+  return { ok: true as const, difference, cyclesLeft: cyclesTotal - cyclesUsed, tierChanged: cur.planRef?.tier !== plan.tier, code: bag.ok ? bag.code : undefined };
 }
 
 /* Admin cancels an active plan, for any reason, at any time.

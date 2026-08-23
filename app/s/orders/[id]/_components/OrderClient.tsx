@@ -90,8 +90,22 @@ export default function StaffOrderClient({
   const [showPrintSheet, setShowPrintSheet] = useState(false);
   const [showUpiSheet, setShowUpiSheet] = useState(false);
 
+  /* A subscriber's order defaults to USING their plan.
+
+     This defaulted to false, so every cycle order depended on the counter
+     remembering to flick a toggle. Forget it and the student is billed the
+     full per-piece price despite holding a plan they paid for — and, because
+     the weight allowance only applies to cycle orders, no excess is worked out
+     either. That is the "it just asks for the weight and nothing happens" the
+     owner hit. Staff can still turn it off for a student who wants to pay
+     per piece and keep the cycle. */
+  const subCyclesLeft = order.student.subscription
+    ? order.student.subscription.cyclesTotal - order.student.subscription.cyclesUsed
+    : 0;
+  const canUseCycle = !!order.student.subscription?.active && subCyclesLeft > 0;
+
   // Sheet state
-  const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, useCycle: false, noGst: false, itemQtys: {} as Record<string, number> });
+  const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, useCycle: canUseCycle, noGst: false, itemQtys: {} as Record<string, number> });
   /* The weight field holds a STRING while being typed — see the input below. */
   const [weightText, setWeightText] = useState(order.weightKg ? String(order.weightKg) : "");
   /* Previewed with the same function that bills it, so the number staff quote

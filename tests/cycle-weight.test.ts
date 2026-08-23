@@ -123,3 +123,25 @@ describe("the excess can actually be collected", () => {
     expect(ui).toMatch(/upiLink\(upi\.upiId, upi\.payeeName, remaining,/);
   });
 });
+
+describe("a subscriber's order uses their plan by default", () => {
+  const ui = read("app/s/orders/[id]/_components/OrderClient.tsx");
+  it("defaults the cycle toggle ON when a plan has cycles left", () => {
+    /* It defaulted to false, so every cycle order depended on the counter
+       remembering to flick a toggle. Forget it and the student is billed the
+       full per-piece price despite holding a plan — and no weight allowance is
+       applied, because that only runs on cycle orders. */
+    expect(ui).toMatch(/const canUseCycle = !!order\.student\.subscription\?\.active && subCyclesLeft > 0;/);
+    expect(ui).toMatch(/useCycle: canUseCycle,/);
+    expect(ui).not.toMatch(/useCycle: false,/);
+  });
+  it("stays off for a student with no plan, or none left", () => {
+    // subCyclesLeft is 0 without a subscription, so canUseCycle is false
+    expect(ui).toMatch(/const subCyclesLeft = order\.student\.subscription/);
+    expect(ui).toMatch(/cyclesTotal - order\.student\.subscription\.cyclesUsed/);
+    expect(ui).toMatch(/: 0;/);
+  });
+  it("staff can still turn it off", () => {
+    expect(ui).toMatch(/onToggle=\{\(\) => setAcceptInput\(\{ \.\.\.acceptInput, useCycle: !acceptInput\.useCycle \}\)\}/);
+  });
+});

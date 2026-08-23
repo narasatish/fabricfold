@@ -35,8 +35,8 @@ const headers = { "Content-Type": "application/json", Authorization: auth };
 
 /** Turn an HTTP status into something actionable. */
 function explain(status: number, body: string) {
-  if (status === 401) return "Wrong username or password. Re-read them from the app — they change if you reset the server.";
-  if (status === 403) return "Authenticated, but not allowed. Check the account owns this device.";
+  // The API returns 403 for a bad password, not only 401 — verified against it.
+  if (status === 401 || status === 403) return "Wrong username or password. Re-read them from the Cloud Server section of the app — they are regenerated if the server is reset.";
   if (status === 400) return `The gateway rejected the request: ${body.slice(0, 200)}`;
   if (status === 503) return "THE PHONE IS OFFLINE. It must be powered on, online, and the SMS Gate app running.";
   return `HTTP ${status}: ${body.slice(0, 200)}`;

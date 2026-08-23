@@ -24,6 +24,13 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
   });
   if (!student) notFound();
 
+  /* Campuses a student may be moved to, plus each one's closed day so the
+     edit sheet can grey out a wash day the campus does not operate. */
+  const colleges = await db.college.findMany({
+    where: { active: true },
+    select: { id: true, name: true, closedWeekday: true },
+    orderBy: { name: "asc" },
+  });
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const gstOn = (cfg.settings as Record<string, unknown>)?.gstEnabled !== false;
   const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFold: "Wash & Fold", ironOnly: "Iron Only", dryClean: "Dry Clean" };
@@ -68,6 +75,7 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
     <div className="screen">
       <TopBar title={student.name} sub={`ID ${student.id}`} back="/s" />
       <StaffCustomerClient
+        colleges={colleges}
         student={plain}
         staffRole={staff.role}
         plans={collegePlans}

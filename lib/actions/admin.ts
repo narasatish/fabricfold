@@ -56,6 +56,91 @@ export async function updateStudentPhone(studentId: string, newPhone: string) {
   return { ok: true as const };
 }
 
+/**
+ * Edit a student's details: name, campus, wash day.
+ *
+ * Phone is deliberately NOT here — it stays in updateStudentPhone, because
+ * changing the number changes who can log into the account and deserves its
+ * own deliberate action rather than riding along with a typo fix.
+ *
+ * Admin+ throughout. A counter member correcting a spelling is fine in
+ * principle, but campus and wash day move a student between operational
+ * groups, and splitting the permission per field would be a rule nobody
+ * remembers at a busy counter.
+ */
+export async function updateStudentDetails(
+  studentId: string,
+  input: { name?: string; collegeId?: string; washDay?: number | null },
+) {
+  const st = await requireStaff(3);
+  const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: { include: { planRef: true } } } });
+  if (!stu) return { ok: false as const, error: "Student not found" };
+
+  const data: { name?: string; collegeId?: string; washDay?: number | null } = {};
+  const changes: string[] = [];
+
+  if (input.name !== undefined) {
+    const name = input.name.trim();
+    if (name.length < 2 || name.length > 60) return { ok: false as const, error: "Enter a valid name" };
+    if (name !== stu.name) { data.name = name; changes.push(`name ${stu.name} → ${name}`); }
+  }
+
+  /* Moving campus is the one that is not a simple field edit.
+
+     A plan belongs to a campus — assignSubscription refuses a plan from a
+     different one — so moving a student who holds an active plan would leave
+     them subscribed to something their new campus does not sell, and neither
+     screen would show it as wrong. Cancel or let the plan lapse first.
+
+     Past orders keep the campus they were placed at. They are a record of
+     where the work was done, and rewriting them would misstate every
+     per-campus statement already issued. */
+  if (input.collegeId !== undefined && input.collegeId !== stu.collegeId) {
+    const college = await db.college.findUnique({ where: { id: input.collegeId } });
+    if (!college) return { ok: false as const, error: "Campus not found" };
+    if (!college.active) return { ok: false as const, error: `${college.name} has been removed — restore it first` };
+    if (stu.subscription?.active) {
+      return {
+        ok: false as const,
+        error: `${stu.name} holds an active ${stu.subscription.plan}, which belongs to their current campus. Cancel the plan first, then move them.`,
+      };
+    }
+    const open = await db.order.count({ where: { studentId, status: { notIn: ["collected", "cancelled"] } } });
+    if (open) return { ok: false as const, error: `${open} order(s) still open at their current campus — finish those first` };
+
+    data.collegeId = college.id;
+    const from = await db.college.findUnique({ where: { id: stu.collegeId }, select: { name: true } });
+    changes.push(`campus ${from?.name ?? stu.collegeId} → ${college.name}`);
+    /* Wash days are balanced per campus, so a day that made sense at the old
+       one means nothing at the new. Cleared here and reassigned below. */
+    data.washDay = null;
+  }
+
+  if (input.washDay !== undefined && data.washDay === undefined) {
+    const wd = input.washDay;
+    if (wd !== null) {
+      if (!Number.isInteger(wd) || wd < 0 || wd > 6) return { ok: false as const, error: "Pick a weekday" };
+      const college = await db.college.findUnique({ where: { id: data.collegeId ?? stu.collegeId }, select: { closedWeekday: true } });
+      if (college?.closedWeekday === wd) return { ok: false as const, error: "That is the campus's closed day" };
+    }
+    if (wd !== stu.washDay) {
+      data.washDay = wd;
+      changes.push(`wash day ${stu.washDay ?? "none"} → ${wd ?? "none"}`);
+    }
+  }
+
+  if (!changes.length) return { ok: true as const, changed: false };
+
+  await db.student.update({ where: { id: studentId }, data });
+
+  // A move leaves them without a day; give them one on the new campus's rota.
+  if (data.collegeId) await assignWashDay(studentId, data.collegeId);
+
+  await audit("Student updated", `${stu.name} (${stu.id}) · ${changes.join("; ")}`, st.id);
+  publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "student", payload: { studentId } });
+  return { ok: true as const, changed: true, changes };
+}
+
 /* ----- Subscription plans per college (Admin+) ----- */
 const SERVICES = ["washIron", "washFold", "ironOnly", "dryClean"];
 export async function savePlan(input: {

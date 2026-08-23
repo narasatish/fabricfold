@@ -11,7 +11,8 @@ import { issueBag, retireBag, releaseBagCode, setBagCode, reissueBagSameCode } f
 import { walkInOrder } from "@/lib/actions/orders";
 import { enqueueIntake, newIdemKey } from "@/lib/offline-queue";
 import { topUpCredits } from "@/lib/actions/ops";
-import { updateStudentPhone } from "@/lib/actions/admin";
+import { updateStudentPhone, updateStudentDetails } from "@/lib/actions/admin";
+import { WEEKDAY_NAMES } from "@/lib/washday";
 
 type Student = {
   id: string;
@@ -37,11 +38,32 @@ type CollegePlan = { id: string; name: string; tier: string | null; price: numbe
 
 type Rates = Record<string, { label: string; items: [string, number][] }>;
 
-export default function StaffCustomerClient({ student, staffRole, plans, rates, gstEnabled }: { student: Student; staffRole: number; plans: CollegePlan[]; rates: Rates; gstEnabled: boolean }) {
+export default function StaffCustomerClient({ student, staffRole, plans, rates, gstEnabled, colleges }: { student: Student; staffRole: number; plans: CollegePlan[]; rates: Rates; gstEnabled: boolean; colleges: { id: string; name: string; closedWeekday: number | null }[] }) {
   const router = useRouter();
   const toast = useToast();
   const tier = loyaltyBadge(student.lifetimePieces);
   const [showPhoneEdit, setShowPhoneEdit] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [details, setDetails] = useState({
+    name: student.name,
+    collegeId: student.college?.id ?? "",
+    washDay: null as number | null,
+  });
+  const [detailsBusy, setDetailsBusy] = useState(false);
+
+  const doSaveDetails = async () => {
+    setDetailsBusy(true);
+    const r = await updateStudentDetails(student.id, {
+      name: details.name,
+      collegeId: details.collegeId || undefined,
+      washDay: details.washDay,
+    });
+    setDetailsBusy(false);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(r.changed ? "Details updated" : "Nothing changed");
+    setShowDetails(false);
+    router.refresh();
+  };
   const [newPhone, setNewPhone] = useState(student.phone);
   const [phoneLoading, setPhoneLoading] = useState(false);
   const [showComp, setShowComp] = useState(false);
@@ -330,7 +352,25 @@ Currently ${current}. Type the code printed on the bag they are being given.
           <span className="pill gray">{student.lifetimePieces} pcs lifetime</span>
         </div>
         <div className="divider" />
-        <div className="kv"><span className="k">College</span><span>{student.college?.name || "—"}</span></div>
+        <div className="kv">
+          <span className="k">College</span>
+          <span>
+            {student.college?.name || "—"}
+            {staffRole >= 3 && (
+              <button
+                className="action"
+                style={{ padding: "2px 6px", marginLeft: 6 }}
+                aria-label="Edit name, campus and wash day"
+                onClick={() => {
+                  setDetails({ name: student.name, collegeId: student.college?.id ?? "", washDay: null });
+                  setShowDetails(true);
+                }}
+              >
+                <Svg name="edit" size={13} />
+              </button>
+            )}
+          </span>
+        </div>
         <div className="kv"><span className="k">Store credit</span><span className="mono">{fmt(student.credits)}</span></div>
         <div className="kv"><span className="k">Member since</span><span>{dateStr(student.createdAt)}</span></div>
       </div>
@@ -714,6 +754,44 @@ Currently ${current}. Type the code printed on the bag they are being given.
             <Svg name="check" size={18} /> {assignLoading ? "Activating…" : `Confirm ${fmt(assignPlan?.gross || 0)} received & activate`}
           </button>
         </div>
+      </Sheet>
+
+      <Sheet open={showDetails} onClose={() => setShowDetails(false)}>
+        <div className="h-md" style={{ padding: "0 4px 12px" }}>Edit details</div>
+        <div className="field">
+          <label>Name</label>
+          <input className="input" value={details.name} onChange={(e) => setDetails({ ...details, name: e.target.value })} />
+        </div>
+        <div className="field">
+          <label>Campus</label>
+          <select className="input" value={details.collegeId} onChange={(e) => setDetails({ ...details, collegeId: e.target.value, washDay: null })}>
+            {colleges.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          {/* Said up front rather than after they press Save, because the
+              refusal is a rule about plans, not a validation slip. */}
+          {student.subscription?.active && details.collegeId !== (student.college?.id ?? "") && (
+            <div className="muted mt4" style={{ fontSize: 12, color: "var(--red)" }}>
+              Their plan belongs to the current campus. Cancel it first, then move them.
+            </div>
+          )}
+        </div>
+        <div className="field">
+          <label>Wash day</label>
+          <select
+            className="input"
+            value={details.washDay === null ? "" : details.washDay}
+            onChange={(e) => setDetails({ ...details, washDay: e.target.value === "" ? null : Number(e.target.value) })}
+          >
+            <option value="">Leave as it is</option>
+            {WEEKDAY_NAMES.map((n, i) => {
+              const closed = colleges.find((c) => c.id === details.collegeId)?.closedWeekday === i;
+              return <option key={i} value={i} disabled={closed}>{n}{closed ? " — campus closed" : ""}</option>;
+            })}
+          </select>
+        </div>
+        <button className="btn" onClick={doSaveDetails} disabled={detailsBusy || details.name.trim().length < 2}>
+          {detailsBusy ? "Saving…" : "Save details"}
+        </button>
       </Sheet>
 
       <Sheet open={showPhoneEdit} onClose={() => setShowPhoneEdit(false)}>

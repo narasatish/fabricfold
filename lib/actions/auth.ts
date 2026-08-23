@@ -17,7 +17,14 @@ const OTP_TTL = 5 * 60_000;
 const OTP_MAX_PER_NUMBER_HOUR = 5;
 const OTP_MAX_PER_IP_HOUR = 15; // a shared hostel wifi may carry several students
 
-/* Deliver the login code by SMS. Providers, first configured one wins:
+/* Deliver the login code. Channels, first configured one wins:
+   0. WhatsApp (free per-conversation on Meta's auth pricing tier for India
+      as of 2026) — Meta Cloud API with an APPROVED AUTHENTICATION template.
+      Env: WHATSAPP_TOKEN + WHATSAPP_PHONE_ID + WHATSAPP_OTP_TEMPLATE.
+      A failed WhatsApp send FALLS THROUGH to SMS rather than erroring: the
+      commonest failure is "recipient has no WhatsApp", and that student
+      still needs their code.
+   Then SMS providers:
    1. SMS-Gate (free) — the "SMS Gateway" Android app (sms-gate.app) running on
       the owner's spare phone; OTPs go out from its SIM via the app's cloud API.
       Env: SMSGATE_LOGIN + SMSGATE_PASSWORD (shown inside the app).
@@ -28,6 +35,43 @@ const OTP_MAX_PER_IP_HOUR = 15; // a shared hostel wifi may carry several studen
    Free-first is deliberate: SMS-Gate costs nothing and is tried before any
    paid provider, so wiring Twilio for testing can't quietly start billing
    every login once the free gateway is live. */
+function waOtpConfigured() {
+  return !!(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_ID && process.env.WHATSAPP_OTP_TEMPLATE);
+}
+
+/** Send the code as a Meta authentication template. Returns false on ANY
+    failure so the caller can fall back to SMS — a student without WhatsApp
+    must still get their code. */
+async function sendOtpViaWhatsApp(phone: string, code: string): Promise<boolean> {
+  try {
+    const res = await fetch(`https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: "91" + phone,
+        type: "template",
+        template: {
+          name: process.env.WHATSAPP_OTP_TEMPLATE,
+          language: { code: process.env.WHATSAPP_TEMPLATE_LANG || "en" },
+          components: [
+            { type: "body", parameters: [{ type: "text", text: code }] },
+            { type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: code }] },
+          ],
+        },
+      }),
+    });
+    if (!res.ok) {
+      console.error("WhatsApp OTP send failed", res.status, await res.text().catch(() => ""));
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("WhatsApp OTP send error", e);
+    return false;
+  }
+}
+
 async function sendSms(phone: string, code: string) {
   const text = `Your FabricFold login OTP is ${code}. It expires in 5 minutes.`;
 
@@ -35,6 +79,17 @@ async function sendSms(phone: string, code: string) {
   if (process.env.SMS_DRY_RUN === "1") {
     console.log(`[SMS dry-run -> ${phone}] ${text}`);
     return;
+  }
+
+  /* WhatsApp first. OTPs may ONLY travel as an approved template of category
+     AUTHENTICATION — Meta rejects free-form text with a code in it outside the
+     24-hour window, which a login OTP always is. The template body carries the
+     code as {{1}} and the copy-code button repeats it, both required by Meta's
+     auth-template format. Template name goes in WHATSAPP_OTP_TEMPLATE. */
+  if (waOtpConfigured()) {
+    const sent = await sendOtpViaWhatsApp(phone, code);
+    if (sent) return;
+    console.error(`WhatsApp OTP to ${phone} failed — falling back to SMS`);
   }
 
   const sgLogin = process.env.SMSGATE_LOGIN, sgPass = process.env.SMSGATE_PASSWORD;
@@ -132,6 +187,7 @@ function smsConfigured() {
      the honest way to exercise the flow on staging without spending messages. */
   if (process.env.SMS_DRY_RUN === "1") return true;
   return !!(
+    (process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_ID && process.env.WHATSAPP_OTP_TEMPLATE) ||
     (process.env.SMSGATE_LOGIN && process.env.SMSGATE_PASSWORD) ||
     (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM) ||
     (process.env.MSG91_AUTHKEY && process.env.MSG91_TEMPLATE_ID)

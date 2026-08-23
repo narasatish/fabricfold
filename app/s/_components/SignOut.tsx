@@ -27,8 +27,8 @@ export default function SignOut() {
       onClick={signOut}
       disabled={loading}
       aria-label="Sign out"
-      className="action"
-      style={{ color: "var(--red)", display: "flex", alignItems: "center", gap: 6 }}
+      className="action wide"
+      style={{ color: "var(--red)" }}
     >
       <Svg name="logout" size={19} />
       <span style={{ fontSize: 13, fontWeight: 600 }}>{loading ? "…" : "Sign out"}</span>

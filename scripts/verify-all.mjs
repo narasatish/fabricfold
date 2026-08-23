@@ -17,13 +17,14 @@ const hasEnv = existsSync(".env");
 const STEPS = [
   {
     name: "typecheck",
-    /* rimraf .next/dev first: tsconfig includes BOTH .next/types (build) and
-       .next/dev/types (dev server). A dev server that ran since the last build
-       leaves a LayoutProps global that only knows the routes it lazily
-       compiled, and the build's validator then fails against that stale
-       constraint — a "type error" caused by having previewed the app, not by
-       any code. Cost us a failed verify on 2026-08-23. */
-    cmd: "npx rimraf .next/dev && npx tsc --noEmit",
+    /* tsconfig.verify.json EXCLUDES .next/dev: tsconfig includes both
+       .next/types (build) and .next/dev/types (dev server). A dev server that
+       ran since the last build leaves a LayoutProps global that only knows the
+       routes it lazily compiled, and the build's validator fails against that
+       stale constraint — a "type error" caused by previewing the app, not by
+       code. First attempt deleted .next/dev instead; that corrupted the cache
+       of a dev server that happened to be running. Excluding is inert. */
+    cmd: "npx tsc --noEmit -p tsconfig.verify.json",
     proves: "no type errors anywhere in the app",
   },
   {

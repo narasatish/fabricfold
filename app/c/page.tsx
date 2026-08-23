@@ -199,20 +199,13 @@ export default async function CustomerHome() {
 
         {/* Service tiles */}
         <div className="sec-title mt20">Start an order</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px" }}>
+        <div className="svc-grid">
           {enabledServices.map((svc) => (
-            <Link
-              key={svc.key}
-              href={`/c/order/new?service=${svc.key}`}
-              className="card"
-              style={{ padding: "16px 8px", display: "flex", flexDirection: "column", alignItems: "center", gap: "9px", textDecoration: "none" }}
-            >
-              <div className="icon-tile" style={{ width: "40px", height: "40px" }}>
-                <Svg name={svc.icon} size={20} />
+            <Link key={svc.key} href={`/c/order/new?service=${svc.key}`} className="card svc-tile" data-svc={svc.key}>
+              <div className="icon-tile">
+                <Svg name={svc.icon} size={21} />
               </div>
-              <div style={{ fontSize: "12px", fontWeight: 600, textAlign: "center", lineHeight: 1.25 }}>
-                {svc.label}
-              </div>
+              <div className="svc-lbl">{svc.label}</div>
             </Link>
           ))}
         </div>

@@ -80,3 +80,10 @@ describe("the staff card exposes it", () => {
     expect(ui).toMatch(/disabled=\{closed\}/);
   });
 });
+
+describe("realtime", () => {
+  it("tells BOTH campuses about a move", () => {
+    // the receiving counter's list is wrong until it hears about the arrival
+    expect(fn).toMatch(/if \(data\.collegeId\) channels\.push\(`orders:\$\{data\.collegeId\}`\)/);
+  });
+});

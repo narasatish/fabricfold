@@ -137,7 +137,12 @@ export async function updateStudentDetails(
   if (data.collegeId) await assignWashDay(studentId, data.collegeId);
 
   await audit("Student updated", `${stu.name} (${stu.id}) · ${changes.join("; ")}`, st.id);
-  publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "student", payload: { studentId } });
+  /* Both campuses on a move: the old one has to drop them from its wash-day
+     list, and the new one has to show them. Publishing only the old channel
+     would leave the receiving counter's screen wrong until a manual refresh. */
+  const channels = [`student:${studentId}`, `orders:${stu.collegeId}`];
+  if (data.collegeId) channels.push(`orders:${data.collegeId}`);
+  publish(channels, { type: "student", payload: { studentId } });
   return { ok: true as const, changed: true, changes };
 }
 

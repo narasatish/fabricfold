@@ -142,7 +142,7 @@ export default function LoginForm() {
 
             {mode === "customer" && (
               <div className="muted center mt16" style={{ fontSize: "12.5px", lineHeight: 1.5 }}>
-                New here? Visit your campus counter to get registered — you'll then sign in with just your number.
+                New here? Visit your campus counter to get registered. Staff sign in on the Staff tab above.
               </div>
             )}
           </>

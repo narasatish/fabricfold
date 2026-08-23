@@ -6,7 +6,7 @@ Campus laundry platform. Customer app `/c` + staff app `/s`. Read `HANDOFF.md` b
 - Copy/business rules: the prototype `C:\Users\naras\Downloads\ff_design\design_handoff_fabricfold\FabricFold.html` + its README. UI is now design-system v2 (owner-approved restyle, Jul 2026): tokens + motion system live in app/globals.css — keep the class contract, don't reintroduce prototype-flat styles.
 - Money rules are sacred: GST is payment-method driven (UPI→invoice, cash only w/ staff override, credit never); per-FY gap-free numbering via FySequence; refunds→proportional credit notes. Tests: `npm test` (must stay green).
 - Never pass Prisma objects (Decimal) to client components — serialize to plain numbers in the page.
-- Dev login: customer 9876500011 / owner 8019121966, OTP 123456. Run: `npm run dev` (port 3005 via ../.claude/launch.json). Reseed: `npm run seed`.
+- Dev login: customer 9876500011 / owner 8019121966, OTP 123456. The owner number is BOTH staff and student (separate tables, separate unique keys) so the customer app can be tested from the counter phone — student id 801966. Run: `npm run dev` (port 3005 via ../.claude/launch.json). Reseed: `npm run seed`.
 - Commit per step; never commit .env/secrets. Deploy only with explicit user OK.
 
 

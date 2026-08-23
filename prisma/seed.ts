@@ -52,6 +52,14 @@ async function main() {
     { id: "517204", phone: "9876500022", name: "Diya Sharma", collegeId: c1.id, credits: 0, lifetimePieces: 42, createdAt: new Date(t0 - 30 * DAY) },
     { id: "690145", phone: "9876500033", name: "Kabir Rao", collegeId: c2.id, credits: 120, lifetimePieces: 73, createdAt: new Date(t0 - 50 * DAY) },
     { id: "238876", phone: "9876500044", name: "Ishita Nair", collegeId: c2.id, credits: 0, lifetimePieces: 9, createdAt: new Date(t0 - 8 * DAY) },
+    /* The owner's own number, ALSO a student. Staff and Student are separate
+       tables with separate unique constraints, so one number can hold both —
+       and it must, because the owner tests the customer app on the same phone
+       they run the counter from. Seeded here so `npm run seed` reproduces it;
+       before this, signing in on the Customer tab with the documented owner
+       number said "not registered", which read as a bug and was really just
+       missing data. */
+    { id: "801966", phone: "8019121966", name: "Owner (customer)", collegeId: c1.id, credits: 0, lifetimePieces: 0, createdAt: new Date(t0 - 5 * DAY) },
   ];
   for (const s of students) await db.student.create({ data: s });
 

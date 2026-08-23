@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { Qr } from "@/components/qr";
 import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, upiLink } from "@/lib/format";
+import { CYCLE_KG_LIMIT, excessWeightCharge } from "@/lib/money";
 import { isOverdue } from "@/lib/money";
 import { useToast, Sheet, Seg, Switch } from "@/components/chrome";
 import {
@@ -69,12 +70,14 @@ export default function StaffOrderClient({
   staffRole,
   upi,
   expectedPickupCode,
+  baseGarmentRate,
 }: {
   order: Order;
   serviceRates: { label: string; items: Array<[string, number]> };
   staffRole: number;
   upi: { upiId: string; payeeName: string };
   expectedPickupCode: string | null;
+  baseGarmentRate: number;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -89,6 +92,12 @@ export default function StaffOrderClient({
 
   // Sheet state
   const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, useCycle: false, noGst: false, itemQtys: {} as Record<string, number> });
+  /* The weight field holds a STRING while being typed — see the input below. */
+  const [weightText, setWeightText] = useState(order.weightKg ? String(order.weightKg) : "");
+  /* Previewed with the same function that bills it, so the number staff quote
+     at the counter is the number the order is charged. */
+  const overKg = Math.max(0, (acceptInput.weightKg || 0) - CYCLE_KG_LIMIT);
+  const excessNow = excessWeightCharge(acceptInput.weightKg, baseGarmentRate);
   const [intakePhotos, setIntakePhotos] = useState<string[]>([]);
   // Damage report — opens a complaint thread the student can see, so it needs
   // real evidence attached before it can be filed.
@@ -523,9 +532,16 @@ export default function StaffOrderClient({
             </button>
           )}
 
-          {!order.paid && !order.usedCycle && (
+          {/* Gated on MONEY OWING, not on how the order was billed.
+              This used to read `!order.usedCycle`, which hid the button — and
+              with it the only route to the UPI QR — on every cycle order. That
+              was invisible while cycle orders came to ₹0, but a bag over the
+              5 kg allowance (or an urgent cycle premium) owes real money, and
+              there was no way to collect it in the app. */}
+          {!order.paid && Number(order.total) > 0 && (
             <button className="btn ghost mt10" onClick={() => setShowPaymentSheet(true)}>
-              <Svg name="card" size={17} /> Record payment
+              <Svg name="card" size={17} />{" "}
+              {order.usedCycle ? `Collect ${fmt(Number(order.total))} — over the ${CYCLE_KG_LIMIT} kg cycle` : "Record payment"}
             </button>
           )}
           {order.paid && (
@@ -706,13 +722,36 @@ export default function StaffOrderClient({
           )}
           <div className="field">
             <label>Weight (kg)</label>
+            {/* type="text" + inputMode="decimal": a number input shows spinner
+                arrows nobody weighs with, and its value-coercion made "5." and
+                a leading zero fight the typist. The raw string is kept in
+                state so the field shows exactly what was typed; it is parsed
+                once, on Accept. */}
             <input
               className="input"
-              type="number"
-              step="0.1"
-              value={acceptInput.weightKg}
-              onChange={(e) => setAcceptInput({ ...acceptInput, weightKg: Number(e.target.value) })}
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder="e.g. 4.6"
+              value={weightText}
+              onChange={(e) => {
+                const t = e.target.value;
+                if (t !== "" && !/^\d{0,3}(\.\d{0,2})?$/.test(t)) return; // ignore stray characters
+                setWeightText(t);
+                setAcceptInput((a) => ({ ...a, weightKg: Number(t) || 0 }));
+              }}
             />
+            {acceptInput.useCycle && (
+              <div className="muted" style={{ fontSize: "12px", marginTop: "7px" }}>
+                {overKg > 0 ? (
+                  <span style={{ color: "var(--amber)", fontWeight: 600 }}>
+                    {overKg.toFixed(2).replace(/\.?0+$/, "")} kg over the {CYCLE_KG_LIMIT} kg cycle — collect {fmt(excessNow)}
+                  </span>
+                ) : (
+                  <>Within the {CYCLE_KG_LIMIT} kg cycle — nothing to collect.</>
+                )}
+              </div>
+            )}
           </div>
           {order.student.subscription?.active && (
             <div className="chip-toggle" style={{ marginBottom: "16px" }}>

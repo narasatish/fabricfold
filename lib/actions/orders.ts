@@ -7,7 +7,7 @@ import { featureOn, serviceOn } from "../features";
 import { enqueueSheetEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import type { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff } from "../auth";
-import { expressSurcharge, urgentCycleCharge, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill } from "../money";
+import { expressSurcharge, urgentCycleCharge, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit } from "../notify";
@@ -123,27 +123,21 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       if (blocked || !sub) throw new Error(blocked || "No active subscription");
       type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
       const buckets = (sub.buckets as unknown as Bucket[] | null) || null;
-      let kgLimit: number;
       if (buckets && buckets.length) {
         // multi-bucket plan: consume a cycle from the bucket matching THIS service
         const idx = buckets.findIndex((b) => b.service === o.service && b.used < b.cycles);
         if (idx < 0) throw new Error(`No ${cfg.rates[o.service]?.label || o.service} cycles left on this plan`);
         buckets[idx] = { ...buckets[idx], used: buckets[idx].used + 1 };
-        kgLimit = Number(buckets[idx].kgPerCycle) || 7;
         await tx.subscription.update({ where: { id: sub.id }, data: { buckets, cyclesUsed: { increment: 1 } } });
       } else {
         // legacy single-bucket subscription
         if (sub.cyclesUsed >= sub.cyclesTotal) throw new Error("No active subscription cycle available");
-        kgLimit = Number(sub.kgPerCycle) || (cfg.plan as { kgPerCycle: number }).kgPerCycle;
         await tx.subscription.update({ where: { id: sub.id }, data: { cyclesUsed: { increment: 1 } } });
       }
       usedCycle = true;
       await tx.cycleUse.create({ data: { subscriptionId: sub.id, orderId: o.id } });
-      if (input.weightKg && input.weightKg > kgLimit) {
-        const excessKg = Math.ceil(input.weightKg - kgLimit);
-        const rate = cfg.rates.washIron.items[0][1];
-        excessCharge = excessKg * rate * 3; // prototype: excess kg billed at 3x base piece rate per kg
-      }
+      // 5 kg is the allowance on every plan — see CYCLE_KG_LIMIT.
+      excessCharge = excessWeightCharge(input.weightKg, cfg.rates.washIron.items[0][1]);
       // Urgent (same-day) on a cycle order: the cycle is already prepaid, so
       // only the 40% urgent premium on its average value is charged, in cash,
       // right now — see urgentCycleCharge().
@@ -258,23 +252,18 @@ export async function walkInOrder(
         if (blocked || !sub) throw new Error(blocked || "No active subscription");
         type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
         const buckets = (sub.buckets as unknown as Bucket[] | null) || null;
-        let kgLimit: number;
         if (buckets && buckets.length) {
           const idx = buckets.findIndex((b) => b.service === input.service && b.used < b.cycles);
           if (idx < 0) throw new Error(`No ${rate.label} cycles left on this plan`);
           buckets[idx] = { ...buckets[idx], used: buckets[idx].used + 1 };
-          kgLimit = Number(buckets[idx].kgPerCycle) || 7;
           await tx.subscription.update({ where: { id: sub.id }, data: { buckets, cyclesUsed: { increment: 1 } } });
         } else {
           if (sub.cyclesUsed >= sub.cyclesTotal) throw new Error("No subscription cycles left");
-          kgLimit = Number(sub.kgPerCycle) || 7;
           await tx.subscription.update({ where: { id: sub.id }, data: { cyclesUsed: { increment: 1 } } });
         }
         usedCycle = true;
-        if (input.weightKg && input.weightKg > kgLimit) {
-          const excessKg = Math.ceil(input.weightKg - kgLimit);
-          excessCharge = excessKg * cfg.rates.washIron.items[0][1] * 3;
-        }
+        // Same 5 kg allowance as the counter flow — one rule, one function.
+        excessCharge = excessWeightCharge(input.weightKg, cfg.rates.washIron.items[0][1]);
         // Urgent (same-day) on a cycle order: the cycle is already prepaid, so
         // only the 40% urgent premium on its average value is charged, in cash.
         if (input.express) {

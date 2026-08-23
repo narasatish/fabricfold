@@ -92,6 +92,10 @@ export default async function StaffOrderPage({ params }: { params: Promise<{ id:
         staffRole={staff.role}
         upi={{ upiId: payment.upiId || "", payeeName: payment.payeeName || "FabricFold" }}
         expectedPickupCode={pickupOtp?.code || null}
+        /* Excess weight is billed off the base garment rate (see
+           excessWeightCharge). Passed in so the accept sheet can quote the
+           charge before staff commit, using the same function that bills it. */
+        baseGarmentRate={Number(rates.washIron?.items?.[0]?.[1]) || 0}
       />
     </div>
   );

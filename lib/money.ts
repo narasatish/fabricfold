@@ -70,6 +70,43 @@ export function shouldInvoiceOrder(o: { noGst?: boolean }, method: string, staff
   return shouldInvoice(method, staffInvoiceOverride);
 }
 
+/* ─── Cycle weight allowance ───────────────────────────────────────────────
+
+   Every plan includes the SAME 5 kg per cycle, whatever the tier. The tiers
+   differ in how many cycles you get, not how heavy each one may be — so this
+   is a constant, not a per-plan field.
+
+   It deliberately ignores Subscription.kgPerCycle and the per-bucket
+   kgPerCycle still stored on existing rows. Those held 7 on seeded plans, and
+   reading them meant two students on the same plan could get different
+   allowances depending on when they subscribed. The columns stay (old orders
+   were billed against them and the history must still read correctly); they
+   are simply no longer consulted when billing a new order. */
+export const CYCLE_KG_LIMIT = 5;
+
+/* Weight past the allowance is billed per kg at 3x the base garment rate.
+   The multiplier is inherited from the prototype and kept so pricing does not
+   move silently; deriving it from the campus's own rate keeps it in step when
+   a campus reprices. */
+export const EXCESS_KG_MULTIPLIER = 3;
+
+/**
+ * What the student owes for weight beyond the cycle's 5 kg.
+ *
+ * PROPORTIONAL, not rounded up to the next whole kilo. The old code did
+ * `Math.ceil(over)`, so a bag 200 g over the limit was billed a full extra
+ * kilogram — ₹45 for 200 g, which is the kind of charge that gets argued
+ * about at the counter. Charging for what was actually weighed is both easier
+ * to defend and what the owner asked for.
+ *
+ * Rounded to the rupee because that is what changes hands.
+ */
+export function excessWeightCharge(weightKg: number | null | undefined, basePieceRate: number) {
+  const over = (Number(weightKg) || 0) - CYCLE_KG_LIMIT;
+  if (over <= 0) return 0;
+  return Math.round(over * (Number(basePieceRate) || 0) * EXCESS_KG_MULTIPLIER);
+}
+
 /** Bill math shared by acceptOrder and tests. Cycle orders carry only the excess charge. */
 export function computeBill(sub: number, surcharge: number, gstPct: number, opts: { usedCycle?: boolean; excessCharge?: number; noGst?: boolean } = {}) {
   // A cycle order carries no GST (the plan was already billed/invoiced when

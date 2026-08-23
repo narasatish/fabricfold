@@ -136,7 +136,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       }
       usedCycle = true;
       await tx.cycleUse.create({ data: { subscriptionId: sub.id, orderId: o.id } });
-      // 5 kg is the allowance on every plan — see CYCLE_KG_LIMIT.
+      // 7 kg is the allowance on every plan — see CYCLE_KG_LIMIT.
       excessCharge = excessWeightCharge(input.weightKg, cfg.rates.washIron.items[0][1]);
       // Urgent (same-day) on a cycle order: the cycle is already prepaid, so
       // only the 40% urgent premium on its average value is charged, in cash,
@@ -262,7 +262,7 @@ export async function walkInOrder(
           await tx.subscription.update({ where: { id: sub.id }, data: { cyclesUsed: { increment: 1 } } });
         }
         usedCycle = true;
-        // Same 5 kg allowance as the counter flow — one rule, one function.
+        // Same 7 kg allowance as the counter flow — one rule, one function.
         excessCharge = excessWeightCharge(input.weightKg, cfg.rates.washIron.items[0][1]);
         // Urgent (same-day) on a cycle order: the cycle is already prepaid, so
         // only the 40% urgent premium on its average value is charged, in cash.

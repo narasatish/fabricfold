@@ -536,7 +536,7 @@ export default function StaffOrderClient({
               This used to read `!order.usedCycle`, which hid the button — and
               with it the only route to the UPI QR — on every cycle order. That
               was invisible while cycle orders came to ₹0, but a bag over the
-              5 kg allowance (or an urgent cycle premium) owes real money, and
+              7 kg allowance (or an urgent cycle premium) owes real money, and
               there was no way to collect it in the app. */}
           {!order.paid && Number(order.total) > 0 && (
             <button className="btn ghost mt10" onClick={() => setShowPaymentSheet(true)}>

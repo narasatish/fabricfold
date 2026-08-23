@@ -72,6 +72,29 @@ export async function requireStaff(minRole = 1) {
   return st;
 }
 
+/**
+ * The session, but only if the account behind it can still sign in.
+ *
+ * getSession() answers "is the cookie validly signed?". That is not the same
+ * as "may this person use the app": the staff row may have been removed, or
+ * "sign out everywhere" may have bumped the epoch. Screens that decide where
+ * to SEND someone (the login page, the two app layouts) need this stronger
+ * question — otherwise a dead cookie bounces /login → /s → error → /login,
+ * and the person is stuck until they clear cookies by hand.
+ */
+export async function liveSession(): Promise<Session | null> {
+  const s = await getSession();
+  if (!s) return null;
+  try {
+    if (s.mode === "staff") await requireStaff(1);
+    else await requireStudent();
+    return s;
+  } catch (e) {
+    if (e instanceof AuthError) return null;
+    throw e;
+  }
+}
+
 export class AuthError extends Error {
   status = 401;
 }

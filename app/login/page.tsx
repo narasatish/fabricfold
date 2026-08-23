@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/auth";
+import { liveSession } from "@/lib/auth";
 import LoginForm from "./_components/LoginForm";
 
 // A logged-in user hitting /login (e.g. via "Open app" on the marketing site)
@@ -18,7 +18,10 @@ export const metadata: Metadata = {
 };
 
 export default async function LoginPage() {
-  const s = await getSession();
+  /* liveSession, not getSession: a cookie whose account was removed (or whose
+     session was ended everywhere) must land HERE, on the form, not be bounced
+     to an app that will refuse it. Signing in again overwrites the cookie. */
+  const s = await liveSession();
   if (s?.mode === "customer") redirect("/c");
   if (s?.mode === "staff") redirect("/s");
   return <LoginForm />;

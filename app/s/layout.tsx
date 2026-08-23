@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { getSession, requireStaff } from "@/lib/auth";
+import { getSession, requireStaff, AuthError } from "@/lib/auth";
 import { Svg } from "@/components/icons";
 import { TabBar, RealtimeRefresh } from "@/components/chrome";
 import { InstallPrompt } from "@/components/pwa";
@@ -30,8 +30,16 @@ export default async function StaffLayout({ children }: { children: React.ReactN
     redirect("/login");
   }
 
-  // Verify staff exists and get current data
-  const staff = await requireStaff(1);
+  /* Verify the account can still sign in. A removed staff member, or one who
+     pressed "sign out everywhere", still carries a validly-signed cookie; that
+     must mean "back to sign-in", never an error page. */
+  let staff;
+  try {
+    staff = await requireStaff(1);
+  } catch (e) {
+    if (e instanceof AuthError) redirect("/login");
+    throw e;
+  }
 
   // Get unresolved complaint count
   const openComplaints = await db.complaint.count({

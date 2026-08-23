@@ -18,6 +18,10 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  /* There is a stray package-lock.json in the user's home directory, so Next
+     guesses the workspace root one level too high and warns on every start.
+     Pin it: this folder IS the project. */
+  turbopack: { root: __dirname },
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

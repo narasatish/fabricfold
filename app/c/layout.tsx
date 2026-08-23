@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getSession, requireStudent } from "@/lib/auth";
+import { getSession, requireStudent, AuthError } from "@/lib/auth";
 import { Svg } from "@/components/icons";
 import { TabBar, RealtimeRefresh } from "@/components/chrome";
 import { InstallPrompt } from "@/components/pwa";
@@ -15,8 +15,14 @@ export default async function CustomerLayout({ children }: { children: React.Rea
     redirect("/login");
   }
 
-  // Verify student exists
-  const student = await requireStudent();
+  // Verify the account can still sign in — see the note in app/s/layout.tsx.
+  let student;
+  try {
+    student = await requireStudent();
+  } catch (e) {
+    if (e instanceof AuthError) redirect("/login");
+    throw e;
+  }
 
   // Get unread notification count
   const unreadCount = await db.notification.count({

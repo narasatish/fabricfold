@@ -8,7 +8,11 @@ const url = process.env.DATABASE_URL || "file:./dev.db";
 function makeAdapter() {
   if (/^postgres(ql)?:\/\//.test(url)) {
     const { PrismaPg } = require("@prisma/adapter-pg");
-    return new PrismaPg({ connectionString: url });
+    /* Honour ?schema=… exactly as lib/db.ts does. Without this, a URL meant
+       for an isolated schema silently seeds — and WIPES — public. The ledger
+       triggers caught it once; they should not have had to. */
+    const schema = new URL(url).searchParams.get("schema") || undefined;
+    return new PrismaPg({ connectionString: url }, schema ? { schema } : undefined);
   }
   const { PrismaBetterSqlite3 } = require("@prisma/adapter-better-sqlite3");
   return new PrismaBetterSqlite3({ url });

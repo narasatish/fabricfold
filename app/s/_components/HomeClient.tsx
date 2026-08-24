@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { Seg, Sheet, useToast } from "@/components/chrome";
@@ -8,6 +8,7 @@ import { isOverdue } from "@/lib/money";
 import { dayLabel, hhmm, istDateStr, istMinutes } from "@/lib/slots";
 import { activateSubscription } from "@/lib/actions/subscription";
 import { registerStudent } from "@/lib/actions/admin";
+import { searchStudents } from "@/lib/actions/students";
 import { clockIn, clockOut } from "@/lib/actions/ops";
 
 type Order = {
@@ -38,7 +39,6 @@ export default function StaffHomeClient({
   staff,
   orders,
   pendingSubs,
-  students,
   colleges,
   metrics,
   attendance,
@@ -46,7 +46,6 @@ export default function StaffHomeClient({
   staff: { name: string; role: number };
   orders: Order[];
   pendingSubs: PendingSub[];
-  students: { id: string; name: string; phone: string }[];
   colleges: { id: string; name: string }[];
   metrics: Metrics;
   attendance: { clockedIn: boolean; clockedOut: boolean; since: number | null };
@@ -79,14 +78,26 @@ export default function StaffHomeClient({
           ? actionable.filter((o) => o.status === "received" || o.status === "draft")
           : actionable.filter((o) => o.status === filter);
 
-  // Search results (students and orders by ID/phone/name)
+  /* Students come from the server; orders are already on this page, so they
+     stay client-side. Debounced so a four-letter name is one query, not four,
+     and guarded by a sequence number so a slow early response cannot land on
+     top of a later one and show results for a query already replaced. */
+  const [foundStudents, setFoundStudents] = useState<{ id: string; name: string; phone: string }[]>([]);
+  const searchSeq = useRef(0);
+  useEffect(() => {
+    if (!q) { setFoundStudents([]); return; }
+    const seq = ++searchSeq.current;
+    const t = setTimeout(async () => {
+      const r = await searchStudents(q);
+      if (seq === searchSeq.current && r.ok) setFoundStudents(r.students);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q]);
+
   const searchResults = useMemo(() => {
     if (!q) return null;
-    return {
-      students: students.filter((st) => st.id.includes(q) || st.phone.includes(q) || st.name.toLowerCase().includes(q)),
-      orders: orders.filter((o) => o.id.toLowerCase().includes(q)),
-    };
-  }, [q, orders, students]);
+    return { students: foundStudents, orders: orders.filter((o) => o.id.toLowerCase().includes(q)) };
+  }, [q, orders, foundStudents]);
 
   const handleClock = async () => {
     const r = attendance.clockedIn && !attendance.clockedOut ? await clockOut() : await clockIn();

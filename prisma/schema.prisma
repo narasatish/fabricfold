@@ -109,6 +109,12 @@ model Student {
   complaints    Complaint[]
   notifications Notification[]
   bags          Bag[]
+
+  /* Student had NO indexes at all. Every campus filter was a sequential scan,
+     and the students list orders by createdAt on every load. Cheap to add,
+     and the cost only grows. */
+  @@index([collegeId])
+  @@index([createdAt])
 }
 
 model Staff {
@@ -322,6 +328,9 @@ model Payment {
   gatewayRef String? // Razorpay payment id when auto-captured
 
   @@index([collegeId, at])
+  /* The reports page filters on `at` alone (8-week revenue bars). The
+     composite above leads with collegeId, so it cannot serve that query. */
+  @@index([at])
 }
 
 model Invoice {

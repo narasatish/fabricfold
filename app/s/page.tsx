@@ -21,14 +21,27 @@ export default async function StaffHomePage() {
 
   // Pending subscription requests (active=false) + their cash OTP codes
   const pending = await db.subscription.findMany({ where: { active: false }, include: { student: true } });
-  const pendingSubs = await Promise.all(
-    pending.map(async (p) => {
-      const otp = await db.otp.findFirst({ where: { purpose: "subscription", refId: p.studentId, usedAt: null } });
-      return { studentId: p.studentId, student: { id: p.student.id, name: p.student.name }, hasOtp: !!otp };
-    }),
-  );
+  /* One query for every pending code, not one per row. This was a findFirst
+     inside a Promise.all — invisible with three pending, a queue of round
+     trips with thirty. */
+  const pendingOtps = pending.length
+    ? await db.otp.findMany({
+        where: { purpose: "subscription", usedAt: null, refId: { in: pending.map((p) => p.studentId) } },
+        select: { refId: true },
+      })
+    : [];
+  const withOtp = new Set(pendingOtps.map((o) => o.refId));
+  const pendingSubs = pending.map((p) => ({
+    studentId: p.studentId,
+    student: { id: p.student.id, name: p.student.name },
+    hasOtp: withOtp.has(p.studentId),
+  }));
 
-  const students = await db.student.findMany({ select: { id: true, name: true, phone: true } });
+  /* The whole student table used to be fetched here and shipped to the
+     browser so the browser could filter it and show ten matches — on every
+     render, and this screen refreshes every 10 seconds. Search now runs on
+     the server (searchStudents), which also means it finds students the old
+     first-page fetch would have missed. */
   const colleges = await db.college.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } });
 
   // Attendance state for THIS staff member (IST business day)
@@ -74,7 +87,6 @@ export default async function StaffHomePage() {
         staff={{ name: staff.name, role: staff.role }}
         orders={plainOrders}
         pendingSubs={pendingSubs}
-        students={students}
         colleges={colleges}
         metrics={metrics}
         attendance={attendance}

@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { TopBar, RealtimeRefresh } from "@/components/chrome";
+import { TopBar } from "@/components/chrome";
 import { parsePeriod, computeReport } from "@/lib/report";
 import { fmt, timeAgo } from "@/lib/format";
 import { Svg } from "@/components/icons";
@@ -32,13 +32,26 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
     return allPayments.filter((p) => p.at.getTime() >= from && p.at.getTime() < to && N(p.amount) > 0).reduce((s2, p) => s2 + N(p.amount), 0);
   });
   const maxWeek = Math.max(1, ...weeks);
-  const allOrders = await db.order.findMany({ select: { studentId: true, usedCycle: true, total: true, paid: true } });
-  const byStudent = new Map<string, number>();
-  allOrders.forEach((o) => byStudent.set(o.studentId, (byStudent.get(o.studentId) || 0) + 1));
-  const repeatRate = byStudent.size ? Math.round((Array.from(byStudent.values()).filter((n) => n >= 2).length / byStudent.size) * 100) : 0;
-  const activeSubs = await db.subscription.count({ where: { active: true } });
-  const subRevenue = allOrders.filter((o) => o.usedCycle).length;
-  const payRevenue = allOrders.filter((o) => !o.usedCycle && o.paid).reduce((s2, o) => s2 + N(o.total), 0);
+  /* Two numbers used to cost one row per ORDER EVER RECORDED.
+
+     This page re-renders on a timer, so at 50,000 orders it was re-reading
+     50,000 rows every few seconds to display a percentage and a total.
+     groupBy returns one row per STUDENT instead (bounded by enrolment, not by
+     history), and the revenue total comes back as a single aggregate. Same
+     arithmetic, same answers — pinned by a test that runs both ways over the
+     same data and compares.
+
+     Prisma aggregates rather than raw SQL on purpose: the money suite still
+     has a SQLite fallback, and `count(*) FILTER (...)` is Postgres-only. */
+  const [perStudent, payAgg, activeSubs] = await Promise.all([
+    db.order.groupBy({ by: ["studentId"], _count: { _all: true } }),
+    db.order.aggregate({ _sum: { total: true }, where: { usedCycle: false, paid: true } }),
+    db.subscription.count({ where: { active: true } }),
+  ]);
+  const repeatRate = perStudent.length
+    ? Math.round((perStudent.filter((g) => g._count._all >= 2).length / perStudent.length) * 100)
+    : 0;
+  const payRevenue = N(payAgg._sum.total);
   const cfgRow = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const plan = cfgRow.plan as { price: number };
   const subRevenueApprox = activeSubs * plan.price;
@@ -54,7 +67,10 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
   return (
     <div className="screen">
       <TopBar title="Reports" sub={period.label} />
-      <RealtimeRefresh />
+      {/* No refresher here on purpose: app/s/layout.tsx already mounts one for
+          every staff screen. A second timer refreshed nothing sooner — it just
+          re-ran this page's queries about three times per 20 seconds instead
+          of two, and this is the page whose queries are the heaviest. */}
       <div className="pad">
         <ReportsControls period={period.kind} d={sp.d} m={sp.m} y={sp.y} />
 

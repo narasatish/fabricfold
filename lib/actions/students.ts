@@ -5,6 +5,45 @@ import { requireStaff } from "../auth";
 import { audit } from "../notify";
 import { washDayDistribution } from "../washday-server";
 
+/**
+ * Find students by customer ID, phone or name — on the SERVER.
+ *
+ * The staff home screen used to receive the entire student table and filter
+ * it in the browser to show ten matches. That shipped every student on every
+ * render of a screen that refreshes every ten seconds, and it still only
+ * searched what had been sent.
+ *
+ * Capped at 20: the counter is looking for one person, and an unbounded LIKE
+ * is exactly the query that gets slow once it matters.
+ */
+export async function searchStudents(query: string) {
+  await requireStaff(1);
+  const q = (query || "").trim();
+  // Two characters is the point where a search stops meaning "everyone".
+  if (q.length < 2) return { ok: true as const, students: [] };
+
+  /* The phone clause is OMITTED when the query has no digits, rather than
+     given a value that cannot match. The first version used a NUL character
+     as that never-match sentinel and Postgres rejected the entire query — NUL
+     is not valid UTF-8 input — so searching any name returned nothing at all.
+     Caught by exercising the box in a browser; the source-level tests were
+     perfectly happy with it. */
+  const digits = q.replace(/\D/g, "");
+  const or: Array<Record<string, unknown>> = [
+    { id: { contains: q } },
+    { name: { contains: q, mode: "insensitive" } },
+  ];
+  if (digits.length >= 2) or.push({ phone: { contains: digits } });
+
+  const students = await db.student.findMany({
+    where: { OR: or },
+    select: { id: true, name: true, phone: true },
+    orderBy: { name: "asc" },
+    take: 20,
+  });
+  return { ok: true as const, students };
+}
+
 const rid = () => String(Math.floor(100000 + Math.random() * 900000));
 async function uniqueId() {
   for (let i = 0; i < 25; i++) { const id = rid(); if (!(await db.student.findUnique({ where: { id } }))) return id; }

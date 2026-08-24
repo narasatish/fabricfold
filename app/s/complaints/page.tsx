@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { TopBar, RealtimeRefresh } from "@/components/chrome";
+import { TopBar } from "@/components/chrome";
 import StaffComplaintsClient from "./_components/ComplaintsClient";
 
 export default async function StaffComplaintsPage() {
@@ -29,7 +29,6 @@ export default async function StaffComplaintsPage() {
   return (
     <div className="screen">
       <TopBar title="Complaints" />
-      <RealtimeRefresh types={["complaint.message"]} />
       <StaffComplaintsClient complaints={plain} staffRole={staff.role} />
     </div>
   );

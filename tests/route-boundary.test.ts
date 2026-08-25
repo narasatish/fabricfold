@@ -9,7 +9,18 @@ import path from "node:path";
 
 const read = (p: string) => fs.readFileSync(path.resolve(__dirname, "..", p), "utf8");
 const auth = read("lib/actions/auth.ts");
-const proxy = read("proxy.ts");
+
+/* proxy.ts is the Vercel-only layer. Cloudflare Workers cannot run Node
+   middleware, and Next 16 refuses to let a proxy file opt into the Edge
+   runtime, so on the Workers branch this file is deliberately absent.
+
+   The proxy assertions therefore run only where the file exists. What must
+   hold on EVERY platform — that each page and layout guards itself — is
+   asserted unconditionally in tests/route-guards.test.ts, which is why
+   dropping the proxy is a portability change rather than a security one. */
+const PROXY_PATH = path.resolve(__dirname, "..", "proxy.ts");
+const hasProxy = fs.existsSync(PROXY_PATH);
+const proxy = hasProxy ? read("proxy.ts") : "";
 
 describe("layer 1 — the OTP gate", () => {
   it("checks the staff table BEFORE any send", () => {
@@ -29,7 +40,7 @@ describe("layer 1 — the OTP gate", () => {
   });
 });
 
-describe("layer 3 — the proxy boundary", () => {
+describe.skipIf(!hasProxy)("layer 3 — the proxy boundary", () => {
   it("exists as proxy.ts (Next 16 renamed middleware)", () => {
     expect(proxy).toMatch(/export async function proxy/);
   });
@@ -79,5 +90,15 @@ describe("WhatsApp OTP channel", () => {
   it("dry-run still short-circuits before it", () => {
     const fn = auth.slice(auth.indexOf("async function sendSms"));
     expect(fn.indexOf("SMS_DRY_RUN")).toBeLessThan(fn.indexOf("waOtpConfigured()"));
+  });
+});
+
+describe("dropping the proxy is a deliberate, covered trade", () => {
+  it("either the proxy exists, or the guard suite does", () => {
+    /* Both is fine (Vercel). Neither is not: that would mean the choke point
+       vanished and nothing replaced it. */
+    const guards = fs.existsSync(path.resolve(__dirname, "route-guards.test.ts"));
+    expect(hasProxy || guards).toBe(true);
+    expect(guards).toBe(true); // the portable half must always be present
   });
 });

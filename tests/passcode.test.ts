@@ -12,10 +12,25 @@ import {
 
 describe("passcode hashing", () => {
   it("never stores the passcode itself", async () => {
-    const { hash, salt } = await hashPasscode("7391");
-    expect(hash).not.toContain("7391");
-    expect(salt).not.toContain("7391");
-    expect(hash.length).toBeGreaterThan(60); // 64-byte key, hex encoded
+    /* Deliberately NOT `expect(hash).not.toContain("7391")`.
+
+       That was the original assertion and it was flaky: the hash is 128 hex
+       characters, so it holds ~125 four-character windows, and any given
+       4-digit sequence turns up by chance in roughly one run in five hundred.
+       It failed here on 2026-08-25 with ...4367d[7391]5074dd... — a correct
+       hash, a false alarm, and exactly the kind of intermittent red that
+       teaches people to re-run the suite instead of reading it.
+
+       What actually matters is that the stored value is a scrypt digest and
+       not the secret: it must not EQUAL the passcode, must be full length,
+       and must be pure hex. A substring search over random data tests none
+       of that. */
+    const passcode = "7391";
+    const { hash, salt } = await hashPasscode(passcode);
+    expect(hash).not.toBe(passcode);
+    expect(salt).not.toBe(passcode);
+    expect(hash).toMatch(/^[0-9a-f]{128}$/); // 64-byte key, hex encoded
+    expect(salt).toMatch(/^[0-9a-f]{32,}$/);
   });
 
   it("salts, so identical passcodes hash differently", async () => {

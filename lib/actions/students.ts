@@ -96,7 +96,8 @@ export async function bulkRegisterStudents(text: string, collegeId: string) {
     if (seen.has(phone)) { skipped.push({ line, reason: "duplicate in list" }); continue; }
     seen.add(phone);
     if (await db.student.findUnique({ where: { phone } })) { skipped.push({ line, reason: "already registered" }); continue; }
-    await db.student.create({ data: { id: await uniqueId(), phone, name, collegeId, washDay: nextDay() } });
+    // washDay deliberately NOT set — the rota is parked; drop off any day.
+    await db.student.create({ data: { id: await uniqueId(), phone, name, collegeId } });
     created++;
   }
   await audit("Bulk student import", `${created} added to ${college.name}${skipped.length ? `, ${skipped.length} skipped` : ""}`, st.id);

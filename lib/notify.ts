@@ -194,14 +194,26 @@ export async function sendWhatsAppPhotos(phone: string, keys: string[], caption?
   }
 }
 
-/** In-app notification + realtime broadcast + Web Push + WhatsApp. */
+/** In-app notification + realtime broadcast + Web Push + WhatsApp.
+
+    The push and WhatsApp legs run via after(): a bare floating promise is
+    abandoned when Vercel freezes the instance after the response — the exact
+    failure that once left Sheet rows unsent for hours. after() keeps the
+    function alive until the sends finish, without delaying the response. */
 export async function pushNotif(studentId: string, text: string, kind = "status") {
   const n = await db.notification.create({ data: { studentId, text, kind } });
   publish([`student:${studentId}`], { type: "notification", payload: { id: n.id, text, kind } });
-  sendPushTo("student", studentId, { title: "FabricFold", body: text }).catch(() => {});
-  db.student.findUnique({ where: { id: studentId }, select: { phone: true } })
-    .then((s) => (s ? sendWhatsApp(s.phone, text) : undefined))
-    .catch(() => {});
+  const deliver = async () => {
+    await sendPushTo("student", studentId, { title: "FabricFold", body: text }).catch(() => {});
+    const s = await db.student.findUnique({ where: { id: studentId }, select: { phone: true } }).catch(() => null);
+    if (s) await sendWhatsApp(s.phone, text).catch(() => {});
+  };
+  try {
+    const { after } = await import("next/server");
+    after(deliver());
+  } catch {
+    void deliver(); // outside Next (tests, scripts): best effort
+  }
   return n;
 }
 

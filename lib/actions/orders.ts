@@ -7,7 +7,7 @@ import { featureOn, serviceOn } from "../features";
 import { enqueueSheetEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import type { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff } from "../auth";
-import { expressSurcharge, urgentCycleCharge, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge } from "../money";
+import { expressSurcharge, urgentCycleCharge, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit } from "../notify";
@@ -93,7 +93,7 @@ export async function placeOrder(input: { service: string; items: { label: strin
 }
 
 /* ---------- Staff: verify & accept (receive) ---------- */
-export async function acceptOrder(orderId: string, input: { weightKg: number | null; useCycle: boolean; noGst?: boolean; items?: { label: string; qty: number }[]; intakePhotos?: string[] }) {
+export async function acceptOrder(orderId: string, input: { weightKg: number | null; useCycle: boolean; noGst?: boolean; waiveExcess?: boolean; items?: { label: string; qty: number }[]; intakePhotos?: string[] }) {
   const st = await requireStaff(1);
   const cfg = await getConfig();
 
@@ -136,8 +136,9 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       }
       usedCycle = true;
       await tx.cycleUse.create({ data: { subscriptionId: sub.id, orderId: o.id } });
-      // 7 kg is the allowance on every plan — see CYCLE_KG_LIMIT.
-      excessCharge = excessWeightCharge(input.weightKg, cfg.rates.washIron.items[0][1]);
+      // 5 kg allowance on every plan, Rs 50 per started kg over; staff may
+      // waive it (recorded below) when the scale or the situation argues.
+      excessCharge = excessWeightCharge(input.weightKg, undefined, { waived: !!input.waiveExcess });
       // Urgent (same-day) on a cycle order: the cycle is already prepaid, so
       // only the 40% urgent premium on its average value is charged, in cash,
       // right now — see urgentCycleCharge().
@@ -199,6 +200,11 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
 
   await pushNotif(result.studentId, `Order received — ${result.actualPieces} pieces logged for ${cfg.rates[result.service].label}.`, "status");
   if (result.noGst) await audit("No-GST billing", `#${result.id.slice(-4)} ₹${Number(result.total)}`, st.id);
+  /* A waiver only matters when there was something to waive. Recording who
+     skipped the charge is what lets "why was 8 kg free?" be answered later. */
+  if (input.waiveExcess && Number(input.weightKg) > CYCLE_KG_LIMIT) {
+    await audit("Excess weight waived", `#${result.id.slice(-4)} ${input.weightKg} kg (limit ${CYCLE_KG_LIMIT})`, st.id);
+  }
   if (result.usedCycle && Number(result.surcharge) > 0) await audit("Urgent cycle charge", `#${result.id.slice(-4)} ₹${Number(result.surcharge)} cash (cycle order)`, st.id);
   bcast(result);
   flushSoon();
@@ -212,7 +218,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
    plan cycle) — so offline drop-offs are tracked exactly like app orders. */
 export async function walkInOrder(
   studentId: string,
-  input: { service: string; items: { label: string; qty: number }[]; weightKg: number | null; useCycle: boolean; noGst?: boolean; express?: boolean; idemKey?: string | null },
+  input: { service: string; items: { label: string; qty: number }[]; weightKg: number | null; useCycle: boolean; noGst?: boolean; waiveExcess?: boolean; express?: boolean; idemKey?: string | null },
 ) {
   const st = await requireStaff(1);
   const cfg = await getConfig();
@@ -263,7 +269,7 @@ export async function walkInOrder(
         }
         usedCycle = true;
         // Same 7 kg allowance as the counter flow — one rule, one function.
-        excessCharge = excessWeightCharge(input.weightKg, cfg.rates.washIron.items[0][1]);
+        excessCharge = excessWeightCharge(input.weightKg, undefined, { waived: !!input.waiveExcess });
         // Urgent (same-day) on a cycle order: the cycle is already prepaid, so
         // only the 40% urgent premium on its average value is charged, in cash.
         if (input.express) {
@@ -337,6 +343,38 @@ export async function walkInOrder(
    stray items are the commonest laundry complaint, and the cheapest moment to
    catch one is BEFORE the student opens the bag — a proactive "we're a piece
    short" is an apology, the same fact discovered at the counter is a dispute. */
+/**
+ * Advance MANY orders one step in a single action.
+ *
+ * Twenty orders coming off the line means twenty taps through twenty screens;
+ * this is the "mark the whole rail ready" button. Each order still goes
+ * through advanceStatus itself — same permissions, same notifications, same
+ * timeline rows — so batching changes the ergonomics, not the rules.
+ *
+ * Per-order outcomes are reported rather than all-or-nothing: one order that
+ * cannot advance (already collected, say) must not hold the other nineteen.
+ * The piece-recount step is deliberately unavailable here — counting is a
+ * one-at-a-time act, and a batch that pretended to count would record numbers
+ * nobody actually counted.
+ */
+export async function advanceStatusBatch(orderIds: string[]) {
+  await requireStaff(1);
+  const ids = [...new Set(orderIds)].slice(0, 50);
+  if (!ids.length) return { ok: false as const, error: "Nothing selected" };
+  const failed: { id: string; error: string }[] = [];
+  let advanced = 0;
+  for (const id of ids) {
+    try {
+      const r = await advanceStatus(id);
+      if (r.ok) advanced++;
+      else failed.push({ id, error: r.error ?? "failed" });
+    } catch (e) {
+      failed.push({ id, error: (e as Error).message });
+    }
+  }
+  return { ok: true as const, advanced, failed };
+}
+
 export async function advanceStatus(orderId: string, input?: { countedPieces?: number | null }) {
   const st = await requireStaff(1);
   const cfg = await getConfig();

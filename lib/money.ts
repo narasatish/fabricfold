@@ -84,29 +84,33 @@ export function shouldInvoiceOrder(o: { noGst?: boolean }, method: string, staff
    they bought. The columns stay (old orders were billed against them and the
    history must still read correctly); they are simply no longer consulted
    when billing a new order. */
-export const CYCLE_KG_LIMIT = 7;
+export const CYCLE_KG_LIMIT = 5;
 
-/* Weight past the allowance is billed per kg at 3x the base garment rate.
-   The multiplier is inherited from the prototype and kept so pricing does not
-   move silently; deriving it from the campus's own rate keeps it in step when
-   a campus reprices. */
-export const EXCESS_KG_MULTIPLIER = 3;
+/* Flat rupees per kg over the allowance. Owner-set (Sep 2026): every plan has
+   the same 5 kg allowance and the same Rs 50/kg excess — replacing the old
+   3x-garment-rate derivation, which produced a different number per campus
+   and could not be quoted from memory at the counter. */
+export const EXCESS_PER_KG = 50;
 
 /**
- * What the student owes for weight beyond the cycle's 7 kg.
+ * What the student owes for weight beyond the cycle's 5 kg.
  *
  * PROPORTIONAL, not rounded up to the next whole kilo. The old code did
  * `Math.ceil(over)`, so a bag 200 g over the limit was billed a full extra
- * kilogram — ₹45 for 200 g, which is the kind of charge that gets argued
- * about at the counter. Charging for what was actually weighed is both easier
- * to defend and what the owner asked for.
+ * Rounded UP to whole kilograms — owner's call (Sep 2026), reversing the old
+ * fractional billing: 5.2 kg is billed as 1 kg over, because "one kg over,
+ * fifty rupees" is a sentence staff can say at the counter, and a scale that
+ * reads 5.2 on one weighing and 5.4 on the next should not change the price.
  *
- * Rounded to the rupee because that is what changes hands.
+ * `waived` zeroes the charge — staff judgement (a bedsheet week, a scale
+ * acting up). The waiver is recorded on the order via surchargeWaivedBy, so
+ * "why was this free?" has an answer months later.
  */
-export function excessWeightCharge(weightKg: number | null | undefined, basePieceRate: number) {
+export function excessWeightCharge(weightKg: number | null | undefined, _basePieceRate?: number, opts: { waived?: boolean } = {}) {
+  if (opts.waived) return 0;
   const over = (Number(weightKg) || 0) - CYCLE_KG_LIMIT;
   if (over <= 0) return 0;
-  return Math.round(over * (Number(basePieceRate) || 0) * EXCESS_KG_MULTIPLIER);
+  return Math.ceil(over) * EXCESS_PER_KG;
 }
 
 /** Bill math shared by acceptOrder and tests. Cycle orders carry only the excess charge. */

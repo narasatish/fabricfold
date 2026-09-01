@@ -10,6 +10,7 @@ import { activateSubscription } from "@/lib/actions/subscription";
 import { registerStudent } from "@/lib/actions/admin";
 import { searchStudents } from "@/lib/actions/students";
 import { clockIn, clockOut } from "@/lib/actions/ops";
+import { advanceStatusBatch } from "@/lib/actions/orders";
 
 type Order = {
   id: string;
@@ -24,6 +25,7 @@ type Order = {
   createdAt: number;
   receivedAt: number | null;
   dropSlotAt: number | null;
+  readyAt: number | null;
   student: { id: string; name: string; phone: string };
 };
 
@@ -58,6 +60,12 @@ export default function StaffHomeClient({
   const [subMethod, setSubMethod] = useState<"cash" | "upi">("upi");
   const [subOtp, setSubOtp] = useState("");
   const [showRegister, setShowRegister] = useState(false);
+  /* Batch mode: tick orders, advance them all one step in one action.
+     Selection only ever holds received/processing ids — ready orders leave
+     through the collect flow, one at a time, because collection takes a code. */
+  const [batchMode, setBatchMode] = useState(false);
+  const [batchIds, setBatchIds] = useState<Set<string>>(new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
   const [reg, setReg] = useState({ name: "", phone: "", collegeId: colleges[0]?.id || "" });
   const [regLoading, setRegLoading] = useState(false);
 
@@ -67,6 +75,9 @@ export default function StaffHomeClient({
   const actionable = orders.filter((o) => ["draft", "received", "processing", "ready"].includes(o.status));
   const ov = (o: Order) => isOverdue({ status: o.status, receivedAt: o.receivedAt ? new Date(o.receivedAt) : null, express: o.express });
   const overdueOrders = actionable.filter(ov);
+  /* Ready 5+ days: shelf space and a student who has forgotten. Aged from the
+     ready EVENT, not the order date. */
+  const staleReady = actionable.filter((o) => o.status === "ready" && o.readyAt !== null && Date.now() - o.readyAt > 5 * 86_400_000);
 
   // Filter by filter type
   const filtered =
@@ -129,6 +140,18 @@ export default function StaffHomeClient({
     router.refresh();
   };
 
+  const doBatchAdvance = async () => {
+    if (!batchIds.size) return;
+    setBatchBusy(true);
+    const r = await advanceStatusBatch([...batchIds]);
+    setBatchBusy(false);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(`${r.advanced} advanced${r.failed.length ? ` · ${r.failed.length} couldn't (already moved?)` : ""}`, r.advanced === 0);
+    setBatchIds(new Set());
+    setBatchMode(false);
+    router.refresh();
+  };
+
   const renderOrderRow = (o: Order) => {
     const pieces = o.actualPieces !== null ? o.actualPieces : o.declaredPieces;
     const statusLabel = {
@@ -143,11 +166,23 @@ export default function StaffHomeClient({
     const statusClass = `st-${o.status}`;
     const late = ov(o) && (o.status === "received" || o.status === "processing");
 
+    const selectable = batchMode && (o.status === "received" || o.status === "processing");
+    const selected = batchIds.has(o.id);
     return (
       <button
         key={o.id}
-        onClick={() => router.push(`/s/orders/${o.id}`)}
+        onClick={() => {
+          if (batchMode) {
+            if (!selectable) return;
+            const next = new Set(batchIds);
+            if (selected) next.delete(o.id); else next.add(o.id);
+            setBatchIds(next);
+            return;
+          }
+          router.push(`/s/orders/${o.id}`);
+        }}
         className="card-btn mt10"
+        style={batchMode ? { opacity: selectable ? 1 : 0.4, borderColor: selected ? "var(--teal-dark)" : undefined, borderWidth: selected ? 2 : undefined } : undefined}
       >
         <div className="grow">
           <div className="between">
@@ -340,6 +375,29 @@ export default function StaffHomeClient({
             <span className="pill gray">{actionable.length}</span>
           </div>
 
+          {/* Uncollected: not another filter tab — a banner, because it is a
+              task ("call these students / clear the shelf"), not a view. */}
+          {staleReady.length > 0 && !batchMode && (
+            <div className="card pad mt10" style={{ borderColor: "var(--amber)", background: "var(--amber-soft, #fdf6e7)" }}>
+              <div className="h-sm">{staleReady.length} bag{staleReady.length === 1 ? "" : "s"} waiting 5+ days</div>
+              {staleReady.slice(0, 6).map((o) => (
+                <button key={o.id} className="between mt6" style={{ width: "100%", textAlign: "left", fontSize: 13 }}
+                  onClick={() => router.push(`/s/orders/${o.id}`)}>
+                  <span># {o.id.slice(-4)} · {o.student.name}</span>
+                  <span className="muted">{Math.floor((Date.now() - (o.readyAt || 0)) / 86_400_000)} days</span>
+                </button>
+              ))}
+              {staleReady.length > 6 && <div className="muted mt6" style={{ fontSize: 12 }}>…and {staleReady.length - 6} more under Ready</div>}
+            </div>
+          )}
+
+          <div className="between mt10">
+            <div />
+            <button className="btn xs sec" onClick={() => { setBatchMode(!batchMode); setBatchIds(new Set()); }}>
+              {batchMode ? "Cancel" : "Select many"}
+            </button>
+          </div>
+
           <Seg<"all" | "received" | "processing" | "ready" | "overdue">
             options={[
               ["all", "All"],
@@ -351,6 +409,18 @@ export default function StaffHomeClient({
             value={filter}
             onChange={setFilter}
           />
+
+          {batchMode && (
+            <div className="card pad mt10" style={{ position: "sticky", top: 8, zIndex: 5 }}>
+              <div className="between">
+                <span className="h-sm">{batchIds.size} selected</span>
+                <button className="btn xs" disabled={!batchIds.size || batchBusy} onClick={doBatchAdvance}>
+                  {batchBusy ? "Advancing…" : "Advance all one step"}
+                </button>
+              </div>
+              <div className="muted mt4" style={{ fontSize: 12 }}>New → Wash, Wash → Ready. Ready orders collect one at a time — that step takes the student&apos;s code.</div>
+            </div>
+          )}
 
           <div className="mt10">
             {filtered.length ? (

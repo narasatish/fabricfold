@@ -1,12 +1,39 @@
 {
-  "regions": ["bom1"],
+  "regions": [
+    "bom1"
+  ],
   "crons": [
-    { "path": "/api/report/daily", "schedule": "30 15 * * *" },
-    { "path": "/api/backup", "schedule": "0 20 * * *" },
-    { "path": "/api/sheets/sync", "schedule": "0 21 * * *" },
-    { "path": "/api/sheets/flush", "schedule": "15 21 * * *" },
-    { "path": "/api/cron/purge-photos", "schedule": "0 22 * * *" },
-    { "path": "/api/cron/collection-reminders", "schedule": "30 12 * * *" },
-    { "path": "/api/cron/error-digest", "schedule": "0 6 * * *" }
+    {
+      "path": "/api/report/daily",
+      "schedule": "30 15 * * *"
+    },
+    {
+      "path": "/api/backup",
+      "schedule": "0 20 * * *"
+    },
+    {
+      "path": "/api/sheets/sync",
+      "schedule": "0 21 * * *"
+    },
+    {
+      "path": "/api/sheets/flush",
+      "schedule": "15 21 * * *"
+    },
+    {
+      "path": "/api/cron/purge-photos",
+      "schedule": "0 22 * * *"
+    },
+    {
+      "path": "/api/cron/collection-reminders",
+      "schedule": "30 12 * * *"
+    },
+    {
+      "path": "/api/cron/error-digest",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/weekly-digest",
+      "schedule": "30 3 * * 1"
+    }
   ]
 }

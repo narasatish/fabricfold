@@ -73,6 +73,9 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   const [settings, setSettings] = useState({ reportEmail: config.settings.reportEmail || "", dailyEmail: !!config.settings.dailyEmail, sendHour: config.settings.sendHour ?? 21, openingFloat: config.settings.openingFloat ?? 0, garmentTagsEnabled: config.settings.garmentTagsEnabled === true });
   const [colEdit, setColEdit] = useState<{ id?: string; name: string; address: string; closedWeekday: number | null }>({ name: "", address: "", closedWeekday: null });
   const [stEdit, setStEdit] = useState<{ id?: string; name: string; phone: string; role: number; active?: boolean }>({ name: "", phone: "", role: 1 });
+  const [impCollege, setImpCollege] = useState(colleges.find((c) => c.active)?.id || colleges[0]?.id || "");
+  const [impBusy, setImpBusy] = useState(false);
+  const [impResult, setImpResult] = useState<null | { added: string[]; skipped: string[]; problems: string[]; warnings: string[] }>(null);
   const [slip, setSlip] = useState({ staffId: staff[0]?.id || "", month: new Date().toISOString().slice(0, 7), basic: 0, allowances: 0, deductions: 0, postExpense: true });
   const emptySlot = (collegeId: string) => ({ id: undefined as string | undefined, collegeId, weekday: 1, startMin: 540, endMin: 660, capacity: 15 });
   const [slotEdit, setSlotEdit] = useState<ReturnType<typeof emptySlot>>(emptySlot(colleges[0]?.id || ""));
@@ -217,35 +220,7 @@ Students already registered there keep their records and can be restored with th
         </button>
       )}
 
-      {/* Wash-day spread — target quota vs. actual distribution, recalculated
-          from whoever is actually registered right now (not a fixed headcount) */}
-      <div className="sec-title mt20">Wash-day spread</div>
-      {colleges.map((c) => {
-        const dist = washDayByCollege[c.id] || new Array(7).fill(0);
-        const openDays = [0, 1, 2, 3, 4, 5, 6].filter((d) => d !== c.closedWeekday);
-        const total = dist.reduce((s, n) => s + n, 0);
-        const target = openDays.length ? Math.ceil(total / openDays.length) : 0;
-        return (
-          <div key={c.id} className="card pad mt10">
-            <div className="between">
-              <div className="h-sm">{c.name}</div>
-              <span className="pill gray" style={{ fontSize: 11 }}>{total} assigned · target ~{target}/day</span>
-            </div>
-            <div className="row gap6 mt10" style={{ flexWrap: "wrap" }}>
-              {openDays.map((d) => {
-                const n = dist[d];
-                const over = target > 0 && n > target * 1.15;
-                return (
-                  <div key={d} className="card" style={{ padding: "8px 12px", textAlign: "center", minWidth: 64, borderColor: over ? "var(--amber)" : undefined }}>
-                    <div className="muted" style={{ fontSize: 11 }}>{WEEKDAY_SHORT[d]}</div>
-                    <div className="h-sm" style={{ color: over ? "var(--amber)" : undefined }}>{n}</div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
+      {/* Wash-day spread chart removed — rota parked (Sep 2026). */}
 
       {/* Subscription plans per college */}
       <div className="sec-title mt20">Subscription plans</div>
@@ -309,6 +284,57 @@ Students already registered there keep their records and can be restored with th
           ))}
         </div>
       ))}
+
+      {/* Import students from the enrolment sheet */}
+      <div className="sec-title mt20">Import students</div>
+      <div className="card pad mt10">
+        <div className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>
+          Upload the enrolment .xlsx — columns <b>Name</b>, <b>Mobile</b>, <b>Customer ID</b> (B1001 / S1009 / G1100), Amount optional.
+          Already-registered mobiles are skipped, never overwritten, so re-uploading the same sheet is safe.
+        </div>
+        <div className="field mt10">
+          <label>Campus</label>
+          <select className="input" value={impCollege} onChange={(e) => setImpCollege(e.target.value)}>
+            {colleges.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+        <input
+          type="file"
+          accept=".xlsx"
+          className="input mt10"
+          disabled={impBusy}
+          onChange={async (e) => {
+            const f = e.target.files?.[0];
+            e.target.value = ""; // same file can be re-picked after fixing it
+            if (!f) return;
+            setImpBusy(true); setImpResult(null);
+            const fd = new FormData();
+            fd.append("file", f);
+            fd.append("collegeId", impCollege);
+            try {
+              const res = await fetch("/api/import/students", { method: "POST", body: fd });
+              const j = await res.json();
+              if (!j.ok) { toast(j.error || "Import failed", true); return; }
+              setImpResult(j);
+              toast(`${j.added.length} imported · ${j.skipped.length} skipped · ${j.problems.length} problems`, j.added.length === 0);
+              router.refresh();
+            } catch {
+              toast("Upload failed — check the connection and try again", true);
+            } finally {
+              setImpBusy(false);
+            }
+          }}
+        />
+        {impBusy && <div className="muted mt8" style={{ fontSize: 13 }}>Importing — leave this page open…</div>}
+        {impResult && (
+          <div className="mt10" style={{ fontSize: 12.5, lineHeight: 1.6 }}>
+            <div><b>{impResult.added.length} added</b>{impResult.added.length > 0 && `: ${impResult.added.slice(0, 5).join(", ")}${impResult.added.length > 5 ? "…" : ""}`}</div>
+            {impResult.skipped.length > 0 && <div className="muted">{impResult.skipped.length} already registered (skipped)</div>}
+            {impResult.warnings.map((w) => <div key={w} style={{ color: "var(--amber)" }}>{w}</div>)}
+            {impResult.problems.map((x) => <div key={x} style={{ color: "var(--danger, #c0392b)" }}>{x}</div>)}
+          </div>
+        )}
+      </div>
 
       {/* Staff */}
       <div className="sec-title mt20">Staff roles</div>
@@ -463,10 +489,8 @@ Students already registered there keep their records and can be restored with th
           <Switch on={settings.dailyEmail} onToggle={() => setSettings({ ...settings, dailyEmail: !settings.dailyEmail })} />
         </div>
         <div className="field"><label>Opening cash float (₹)</label><input className="input" type="number" value={settings.openingFloat} onChange={(e) => setSettings({ ...settings, openingFloat: Number(e.target.value) })} /></div>
-        <div className="chip-toggle" style={{ marginBottom: 15 }}>
-          <div><div className="h-sm">Per-garment QR tagging</div><div className="muted" style={{ fontSize: 12 }}>Parked feature — off by default, safe to switch on anytime</div></div>
-          <Switch on={settings.garmentTagsEnabled} onToggle={() => setSettings({ ...settings, garmentTagsEnabled: !settings.garmentTagsEnabled })} />
-        </div>
+        {/* Per-garment QR tagging toggle removed (owner, Sep 2026) — the
+            backend flag still exists but stays off; restore from git if wanted. */}
         <button className="btn" onClick={() => run(() => saveSettings(settings), "Settings saved")}>Save settings</button>
       </Sheet>
 

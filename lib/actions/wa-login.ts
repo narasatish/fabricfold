@@ -126,6 +126,9 @@ export async function checkWhatsAppLogin(code: string) {
   if (won.count !== 1) return { ok: false as const, status: "claimed" as const, error: "That sign-in was already used — start again." };
 
   await createSession({ mode: "customer", studentId: stu.id, epoch: stu.sessionEpoch });
+  /* Same record as every other sign-in path — the login is the event that
+     starts every other event, so it must not be invisible in the audit log. */
+  await db.auditLog.create({ data: { action: "Student sign-in", detail: `${stu.name} (${stu.id}) via whatsapp`, by: stu.id } }).catch(() => {});
   jar.delete(CLAIM_COOKIE);
   return { ok: true as const, status: "signed-in" as const };
 }

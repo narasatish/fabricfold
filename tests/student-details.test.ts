@@ -43,10 +43,11 @@ describe("moving campus is guarded", () => {
        every per-campus statement already issued. */
     expect(fn).not.toMatch(/order\.updateMany/);
   });
-  it("reassigns the wash day on the new campus rota", () => {
-    // a day balanced against the old campus means nothing at the new one
+  it("clears the wash day and leaves it unassigned — rota is parked", () => {
+    /* A day balanced against the old campus means nothing at the new one.
+       With the rota parked (owner, Sep 2026) no new day is assigned either. */
     expect(fn).toMatch(/data\.washDay = null/);
-    expect(fn).toMatch(/if \(data\.collegeId\) await assignWashDay/);
+    expect(fn).not.toMatch(/assignWashDay/);
   });
 });
 
@@ -75,9 +76,8 @@ describe("the staff card exposes it", () => {
     // the refusal is a rule about plans, not a validation slip
     expect(ui).toMatch(/Their plan belongs to the current campus/);
   });
-  it("greys out the closed day rather than letting them pick it", () => {
-    expect(ui).toMatch(/campus closed/);
-    expect(ui).toMatch(/disabled=\{closed\}/);
+  it("no longer offers a wash-day picker — the rota is parked", () => {
+    expect(ui).not.toMatch(/<label>Wash day<\/label>/);
   });
 });
 

@@ -25,9 +25,17 @@ function fakeTx(bags: { code: string; status: string }[], seq: Record<string, nu
       },
     },
     fySequence: {
-      upsert: async ({ where }: any) => {
+      /* Mirrors the real allocator's contract: upsert CREATES at MINT_FROM
+         (1000) or increments, and update() jumps a legacy 3-digit-era
+         sequence forward. */
+      upsert: async ({ where, create }: any) => {
         const k = where.kind_fyTag.fyTag;
-        seq[k] = (seq[k] ?? 0) + 1;
+        seq[k] = seq[k] === undefined ? create.value : seq[k] + 1;
+        return { value: seq[k] };
+      },
+      update: async ({ where, data }: any) => {
+        const k = where.kind_fyTag.fyTag;
+        seq[k] = data.value;
         return { value: seq[k] };
       },
     },
@@ -35,8 +43,15 @@ function fakeTx(bags: { code: string; status: string }[], seq: Record<string, nu
 }
 
 describe("allocation prefers released codes", () => {
-  it("mints a fresh number when nothing has been released", async () => {
-    expect(await allocateBagCode(fakeTx([]), "bronze")).toBe("B001");
+  it("mints from 1000 — the printed stock's numbering — when nothing has been released", async () => {
+    expect(await allocateBagCode(fakeTx([]), "bronze")).toBe("B1000");
+  });
+
+  it("jumps a legacy sub-1000 sequence forward instead of colliding with print stock", async () => {
+    // a campus that minted B001–B037 in the 3-digit era must not mint B038
+    // once the owner's B1001-numbered bags exist
+    const tx = fakeTx([], { B: 37 });
+    expect(await allocateBagCode(tx, "bronze")).toBe("B1000");
   });
 
   it("reuses a released code instead of minting a new one", async () => {
@@ -59,32 +74,41 @@ describe("allocation prefers released codes", () => {
     const tx = fakeTx([
       { code: "B002", status: "released" },
       { code: "B002", status: "active" },
-    ], { B: 5 });
-    expect(await allocateBagCode(tx, "bronze")).toBe("B006");
+    ], { B: 1004 });
+    expect(await allocateBagCode(tx, "bronze")).toBe("B1005");
   });
 
   it("never hands a LOST code to a different student", async () => {
     /* The owner of a lost code keeps it — they get the same number on a new
        bag, via reissueBagSameCode, which bypasses this allocator entirely.
-       What must never happen is the allocator giving B001 to somebody else. */
-    const tx = fakeTx([{ code: "B001", status: "lost" }], { B: 1 });
-    expect(await allocateBagCode(tx, "bronze")).toBe("B002");
+       What must never happen is the allocator giving that code to somebody else. */
+    const tx = fakeTx([{ code: "B1001", status: "lost" }], { B: 1001 });
+    expect(await allocateBagCode(tx, "bronze")).toBe("B1002");
   });
 
   it("never reuses a REPLACED code", async () => {
-    const tx = fakeTx([{ code: "B001", status: "replaced" }], { B: 1 });
-    expect(await allocateBagCode(tx, "bronze")).toBe("B002");
+    const tx = fakeTx([{ code: "B1001", status: "replaced" }], { B: 1001 });
+    expect(await allocateBagCode(tx, "bronze")).toBe("B1002");
   });
 
   it("keeps tiers in separate pools", async () => {
     // a released Bronze code must not be handed out as a Gold one
     const tx = fakeTx([{ code: "B003", status: "released" }]);
-    expect(await allocateBagCode(tx, "gold")).toBe("G001");
+    expect(await allocateBagCode(tx, "gold")).toBe("G1000");
   });
 
   it("recycles walk-in codes too", async () => {
-    const tx = fakeTx([{ code: "W002", status: "released" }], { W: 8 });
+    const tx = fakeTx([{ code: "W002", status: "released" }], { W: 1008 });
     expect(await allocateBagCode(tx, "walkin")).toBe("W002");
+  });
+
+  it("accepts the owner's four-digit printed codes", async () => {
+    expect(parseBagCode("B1001")).toEqual({ kind: "bronze", n: 1001 });
+    expect(parseBagCode("G1100")).toEqual({ kind: "gold", n: 1100 });
+    expect(formatBagCode("silver", 1009)).toBe("S1009");
+    // and the 3-digit era stays valid — printed bags are never invalidated
+    expect(parseBagCode("B042")).toEqual({ kind: "bronze", n: 42 });
+    expect(formatBagCode("bronze", 42)).toBe("B042");
   });
 });
 

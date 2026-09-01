@@ -105,13 +105,13 @@ export default function StaffOrderClient({
   const canUseCycle = !!order.student.subscription?.active && subCyclesLeft > 0;
 
   // Sheet state
-  const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, useCycle: canUseCycle, noGst: false, itemQtys: {} as Record<string, number> });
+  const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, useCycle: canUseCycle, noGst: false, waiveExcess: false, itemQtys: {} as Record<string, number> });
   /* The weight field holds a STRING while being typed — see the input below. */
   const [weightText, setWeightText] = useState(order.weightKg ? String(order.weightKg) : "");
   /* Previewed with the same function that bills it, so the number staff quote
      at the counter is the number the order is charged. */
   const overKg = Math.max(0, (acceptInput.weightKg || 0) - CYCLE_KG_LIMIT);
-  const excessNow = excessWeightCharge(acceptInput.weightKg, baseGarmentRate);
+  const excessNow = excessWeightCharge(acceptInput.weightKg, undefined, { waived: acceptInput.waiveExcess });
   const [intakePhotos, setIntakePhotos] = useState<string[]>([]);
   // Damage report — opens a complaint thread the student can see, so it needs
   // real evidence attached before it can be filed.
@@ -148,6 +148,7 @@ export default function StaffOrderClient({
       weightKg: acceptInput.weightKg || null,
       useCycle: acceptInput.useCycle,
       noGst: acceptInput.noGst,
+      waiveExcess: acceptInput.waiveExcess,
       items: adjusted.length ? adjusted : undefined,
       intakePhotos: intakePhotos.length ? intakePhotos : undefined,
     });
@@ -758,12 +759,30 @@ export default function StaffOrderClient({
             {acceptInput.useCycle && (
               <div className="muted" style={{ fontSize: "12px", marginTop: "7px" }}>
                 {overKg > 0 ? (
-                  <span style={{ color: "var(--amber)", fontWeight: 600 }}>
-                    {overKg.toFixed(2).replace(/\.?0+$/, "")} kg over the {CYCLE_KG_LIMIT} kg cycle — collect {fmt(excessNow)}
-                  </span>
+                  acceptInput.waiveExcess ? (
+                    <span style={{ fontWeight: 600 }}>
+                      {Math.ceil(overKg)} kg over — charge waived, nothing to collect.
+                    </span>
+                  ) : (
+                    <span style={{ color: "var(--amber)", fontWeight: 600 }}>
+                      {/* Billed per STARTED kg — quote the same number that bills. */}
+                      {Math.ceil(overKg)} kg over the {CYCLE_KG_LIMIT} kg cycle — collect {fmt(excessNow)}
+                    </span>
+                  )
                 ) : (
                   <>Within the {CYCLE_KG_LIMIT} kg cycle — nothing to collect.</>
                 )}
+              </div>
+            )}
+            {/* The waiver appears only when there is a charge to waive; a
+                switch that mostly does nothing teaches staff to ignore it. */}
+            {acceptInput.useCycle && overKg > 0 && (
+              <div className="chip-toggle" style={{ marginTop: "10px" }}>
+                <div>
+                  <div className="h-sm">Waive excess charge</div>
+                  <div className="muted" style={{ fontSize: "12px" }}>Recorded in the audit log with your name</div>
+                </div>
+                <Switch on={acceptInput.waiveExcess} onToggle={() => setAcceptInput({ ...acceptInput, waiveExcess: !acceptInput.waiveExcess })} />
               </div>
             )}
           </div>

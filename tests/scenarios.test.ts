@@ -112,12 +112,19 @@ describe("scenario: bags handed over at the counter", () => {
   });
 
   it("refuses to mint a code past the printable range instead of wrapping", () => {
-    expect(formatBagCode("bronze", MAX_PER_KIND)).toBe("B999");
+    // widened to 4 digits (Sep 2026) for the owner's 1000-series printed stock
+    expect(formatBagCode("bronze", MAX_PER_KIND)).toBe("B9999");
     expect(formatBagCode("bronze", MAX_PER_KIND + 1)).toBeNull();
   });
 
+  it("reads the owner's printed 4-digit codes", () => {
+    expect(parseBagCode("B1001")).toEqual({ kind: "bronze", n: 1001 });
+    expect(parseBagCode("G1100")).toEqual({ kind: "gold", n: 1100 });
+  });
+
   it("a smudged or mistyped code is rejected, never guessed", () => {
-    for (const bad of ["BOO1", "B 01", "b1", "G1000", "Z001"]) {
+    // G1000 left this list when 4-digit codes became real
+    for (const bad of ["BOO1", "B 01", "b1", "G10000", "Z001"]) {
       expect(parseBagCode(bad), bad).toBeNull();
     }
   });

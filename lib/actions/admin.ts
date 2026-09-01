@@ -31,9 +31,8 @@ export async function registerStudent(input: { name: string; phone: string; coll
     if (!(await db.student.findUnique({ where: { id } }))) break;
   }
   const stu = await db.student.create({ data: { id, phone, name, collegeId: college.id } });
-  // Assign a wash day now, spreading load evenly across the campus's week
-  // (soft guidance — shown to the student, not enforced at drop-off).
-  await assignWashDay(stu.id, college.id);
+  // Wash day rota PARKED (owner, Sep 2026): students drop off any day, so no
+  // day is assigned. assignWashDay and the data stay for when it returns.
   await audit("Student registered", `${name} · +91 ${phone} · ${college.name}`, st.id);
   void notifyOwner("New student registered", `${name} (+91 ${phone}) registered at the counter (${college.name}) by ${st.name} — ID ${stu.id}.`);
   return { ok: true as const, id: stu.id };
@@ -133,8 +132,7 @@ export async function updateStudentDetails(
 
   await db.student.update({ where: { id: studentId }, data });
 
-  // A move leaves them without a day; give them one on the new campus's rota.
-  if (data.collegeId) await assignWashDay(studentId, data.collegeId);
+  // Rota parked: a moved student simply has no wash day until it returns.
 
   await audit("Student updated", `${stu.name} (${stu.id}) · ${changes.join("; ")}`, st.id);
   /* Both campuses on a move: the old one has to drop them from its wash-day

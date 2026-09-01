@@ -1,19 +1,19 @@
-/* The 7 kg cycle allowance.
+/* The 5 kg cycle allowance.
 
-   Owner's rule: every plan includes 7 kg per cycle. Under it, the cycle pays.
-   Over it, the student pays for the weight that is actually over — and the
-   counter shows a UPI QR for that amount. */
+   Owner's rule (revised Sep 2026): every plan includes 5 kg per cycle. Under
+   it, the cycle pays. Over it, Rs 50 per STARTED kilogram — flat everywhere,
+   rounded up, and waivable by staff with the waiver recorded. */
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { CYCLE_KG_LIMIT, excessWeightCharge, computeBill } from "../lib/money";
 
 const read = (p: string) => fs.readFileSync(path.resolve(__dirname, "..", p), "utf8");
-const RATE = 15; // base garment rate in the seeded config → ₹45/kg over
+const RATE = 15; // legacy 2nd arg — ignored since the flat Rs 50/kg rule
 
 describe("the allowance is the same for every tier", () => {
-  it("is 7 kg", () => {
-    expect(CYCLE_KG_LIMIT).toBe(7);
+  it("is 5 kg", () => {
+    expect(CYCLE_KG_LIMIT).toBe(5);
   });
   it("billing no longer reads the per-plan or per-bucket kgPerCycle", () => {
     /* Reading those columns meant two students on the same plan could get
@@ -23,7 +23,7 @@ describe("the allowance is the same for every tier", () => {
     const orders = read("lib/actions/orders.ts");
     expect(orders).not.toMatch(/kgLimit/);
     expect(orders).not.toMatch(/Number\(sub\.kgPerCycle\)/);
-    expect(orders).toMatch(/excessWeightCharge\(input\.weightKg, cfg\.rates\.washIron\.items\[0\]\[1\]\)/);
+    expect(orders).toMatch(/excessWeightCharge\(input\.weightKg, undefined, \{ waived: !!input\.waiveExcess \}\)/);
   });
   it("applies at BOTH billing sites, not just the counter", () => {
     const orders = read("lib/actions/orders.ts");
@@ -32,33 +32,37 @@ describe("the allowance is the same for every tier", () => {
 });
 
 describe("under the limit, the cycle pays", () => {
-  it.each([0, 1, 4.9, 6.9, 7])("charges nothing at %s kg", (kg) => {
+  it.each([0, 1, 3.9, 4.9, 5])("charges nothing at %s kg", (kg) => {
     expect(excessWeightCharge(kg, RATE)).toBe(0);
   });
   it("a cycle order with no excess totals zero", () => {
-    expect(computeBill(200, 0, 18, { usedCycle: true, excessCharge: excessWeightCharge(6.4, RATE) }))
+    expect(computeBill(200, 0, 18, { usedCycle: true, excessCharge: excessWeightCharge(4.4, RATE) }))
       .toEqual({ gst: 0, total: 0 });
   });
 });
 
 describe("over the limit, only the excess is charged", () => {
-  it("bills the weight actually over, not a rounded-up kilo", () => {
-    // 7.2 kg → 0.2 kg over → ₹9, NOT ₹45. The old Math.ceil billed a whole
-    // extra kilo for 200 g, which is the charge students argue about.
-    expect(excessWeightCharge(7.2, RATE)).toBe(9);
+  it("rounds a started kilogram UP — owner's rule, reversing the old fractional billing", () => {
+    /* 5.2 kg bills as 1 kg over (Rs 50): "one kg over, fifty rupees" is a
+       sentence staff can say, and a scale reading 5.2 then 5.4 must not
+       change the price. The OLD rule billed the fraction; deliberately gone. */
+    expect(excessWeightCharge(5.2, RATE)).toBe(50);
   });
-  // 1 kg over = ₹45 (15 x 3); 2.5 over = ₹112.5 -> ₹113; 5 over = ₹225
-  it.each([[8, 45], [9.5, 113], [12, 225]])("%s kg → ₹%s", (kg, want) => {
+  // started kg over × Rs 50 flat
+  it.each([[6, 50], [6.5, 100], [8, 150], [10, 250]])("%s kg → ₹%s", (kg, want) => {
     expect(excessWeightCharge(kg, RATE)).toBe(want);
+  });
+  it("staff can waive it, and waived means zero at any weight", () => {
+    expect(excessWeightCharge(12, RATE, { waived: true })).toBe(0);
   });
   it("the excess is the whole bill on a cycle order — no GST, no piece total", () => {
     const excess = excessWeightCharge(8, RATE);
     expect(computeBill(200, 0, 18, { usedCycle: true, excessCharge: excess }))
-      .toEqual({ gst: 0, total: 45 });
+      .toEqual({ gst: 0, total: 150 });
   });
   it("still adds the urgent premium when both apply", () => {
     expect(computeBill(200, 59, 18, { usedCycle: true, excessCharge: excessWeightCharge(8, RATE) }).total)
-      .toBe(45 + 59);
+      .toBe(150 + 59);
   });
 });
 
@@ -66,8 +70,8 @@ describe("it can't go negative or NaN", () => {
   it.each([null, undefined, NaN, -3])("handles %s", (kg) => {
     expect(excessWeightCharge(kg as number, RATE)).toBe(0);
   });
-  it("a missing rate charges nothing rather than NaN", () => {
-    expect(excessWeightCharge(11, undefined as unknown as number)).toBe(0);
+  it("a missing legacy rate arg changes nothing — the flat rate ignores it", () => {
+    expect(excessWeightCharge(11, undefined as unknown as number)).toBe(300);
   });
 });
 
@@ -76,13 +80,15 @@ describe("the counter can see it before committing", () => {
   it("quotes the charge with the SAME function that bills it", () => {
     // a hand-rolled preview is how the quoted number drifts from the charged one
     expect(ui).toMatch(/import \{ CYCLE_KG_LIMIT, excessWeightCharge \} from "@\/lib\/money"/);
-    expect(ui).toMatch(/excessWeightCharge\(acceptInput\.weightKg, baseGarmentRate\)/);
+    expect(ui).toMatch(/excessWeightCharge\(acceptInput\.weightKg, undefined, \{ waived: acceptInput\.waiveExcess \}\)/);
   });
   it("says plainly when the bag is within the cycle", () => {
     expect(ui).toMatch(/Within the \{CYCLE_KG_LIMIT\} kg cycle/);
   });
   it("names the amount to collect when it is over", () => {
     expect(ui).toMatch(/over the \{CYCLE_KG_LIMIT\} kg cycle — collect \{fmt\(excessNow\)\}/);
+    // and it quotes STARTED kilograms, matching what bills
+    expect(ui).toMatch(/Math\.ceil\(overKg\)/);
   });
 });
 

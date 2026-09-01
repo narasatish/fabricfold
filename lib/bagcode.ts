@@ -38,12 +38,21 @@ export type BagKind = Tier | "walkin";
 export const BAG_LETTER: Record<BagKind, string> = { bronze: "B", silver: "S", gold: "G", walkin: "W" };
 export const BAG_LABEL: Record<BagKind, string> = { bronze: "Bronze", silver: "Silver", gold: "Gold", walkin: "Walk-in" };
 
-/** Highest sequence a single kind can issue before the scheme needs widening. */
-export const MAX_PER_KIND = 999;
+/** Highest sequence a single kind can issue before the scheme needs widening.
+
+    Widened from 999 (Sep 2026): the owner's printed stock is numbered from
+    1000 (B1001, G1002…), so the ceiling moved to four digits. Three-digit
+    codes already in the database stay valid — a printed bag is never
+    invalidated by a numbering change. */
+export const MAX_PER_KIND = 9999;
+
+/** New codes START here, because 1000-series bags are what is physically
+    printed. The 1–999 range is reserved for codes that already exist. */
+export const MINT_FROM = 1000;
 
 /** Start warning here. Running out is not recoverable at the counter — bags are
     printed in advance — so the Owner needs lead time, not a surprise error. */
-export const WARN_AT = 900;
+export const WARN_AT = 9900;
 
 export function codesRemaining(lastIssued: number) {
   return Math.max(0, MAX_PER_KIND - lastIssued);
@@ -58,15 +67,19 @@ export function bagKindFor(tier: string | null | undefined): BagKind {
   return isTier(tier) ? tier : "walkin";
 }
 
-/** "bronze", 42 → "B042". Null when the number is outside 1..999. */
+/** "bronze", 42 → "B042"; "gold", 1002 → "G1002". Three digits below 1000
+    (matching bags already printed that way), plain number above. */
 export function formatBagCode(kind: BagKind, n: number): string | null {
   if (!Number.isInteger(n) || n < 1 || n > MAX_PER_KIND) return null;
-  return BAG_LETTER[kind] + String(n).padStart(3, "0");
+  return BAG_LETTER[kind] + (n < 1000 ? String(n).padStart(3, "0") : String(n));
 }
 
-/** "B042" → { kind: "bronze", n: 42 }. Null for anything malformed. */
+/** "B042" or "G1002" → { kind, n }. Null for anything malformed. */
 export function parseBagCode(code: string): { kind: BagKind; n: number } | null {
-  const m = /^([BSGW])(\d{3})$/.exec((code || "").trim().toUpperCase());
+  /* A 4-digit code may not lead with 0: "B0001" is a mistyping of B001, and
+     a parser that guesses which code a smudge meant will one day hand a bag
+     to the wrong student. Canonical forms only. */
+  const m = /^([BSGW])(\d{3}|[1-9]\d{3})$/.exec((code || "").trim().toUpperCase());
   if (!m) return null;
   const kinds = Object.keys(BAG_LETTER) as BagKind[];
   const kind = kinds.find((k) => BAG_LETTER[k] === m[1]);
@@ -103,11 +116,21 @@ export async function allocateBagCode(tx: Prisma.TransactionClient, kind: BagKin
   const recycled = released.find((r) => !taken.has(r.code));
   if (recycled) return recycled.code;
 
-  const row = await tx.fySequence.upsert({
+  /* Sequence starts at MINT_FROM: printed stock is numbered from 1000, and a
+     freshly minted B037 would clash with nothing in the database while
+     matching no bag anyone can hold. An existing sequence below that (from
+     the 3-digit era) jumps forward once and never looks back. */
+  let row = await tx.fySequence.upsert({
     where: { kind_fyTag: { kind: "bagcode", fyTag: letter } },
-    create: { kind: "bagcode", fyTag: letter, value: 1 },
+    create: { kind: "bagcode", fyTag: letter, value: MINT_FROM },
     update: { value: { increment: 1 } },
   });
+  if (row.value < MINT_FROM) {
+    row = await tx.fySequence.update({
+      where: { kind_fyTag: { kind: "bagcode", fyTag: letter } },
+      data: { value: MINT_FROM },
+    });
+  }
   const code = formatBagCode(kind, row.value);
   if (!code) {
     throw new Error(

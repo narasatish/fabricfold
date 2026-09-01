@@ -1,44 +1,27 @@
-/* Guarantees that turning on a subscription never disturbs an EXISTING
-   wash-day assignment, and only fills one in for a student who doesn't have
-   one yet (e.g. registered before the feature existed).
-
-   activateSubscription/assignSubscription both call requireStaff(), which
-   reads the session from next/headers cookies() — same constraint noted in
-   registration-lockdown.test.ts, so this asserts the guard at the source
-   level rather than driving a live session. */
+/* Wash day is PARKED (owner, Sep 2026): students drop off any day, so no
+   path assigns one any more. These tests pin the parked state — the old
+   guarantee ("never REASSIGN an existing day") is vacuously kept by assigning
+   nothing at all, and the balancing code survives untouched for the return. */
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 
-const src = fs.readFileSync(path.resolve(__dirname, "../lib/actions/subscription.ts"), "utf8");
+const read = (p: string) => fs.readFileSync(path.resolve(__dirname, "..", p), "utf8");
+const sub = read("lib/actions/subscription.ts");
 
-function body(fnName: string) {
-  const start = src.indexOf(`export async function ${fnName}`);
-  expect(start, `${fnName} not found`).toBeGreaterThan(-1);
-  const nextExport = src.indexOf("\nexport async function", start + 1);
-  return src.slice(start, nextExport === -1 ? undefined : nextExport);
-}
-
-describe("subscription activation never reassigns an existing wash day", () => {
-  it("activateSubscription only assigns a wash day when the student doesn't already have one", () => {
-    const fn = body("activateSubscription");
-    expect(fn).toMatch(/stu\.washDay === null/);
-    expect(fn).toMatch(/assignWashDay\(stu\.id, stu\.collegeId\)/);
-    // must be conditional -- an unconditional call would silently reshuffle
-    // an existing student onto a different day every time they resubscribe
-    expect(fn).not.toMatch(/^\s*await assignWashDay/m);
+describe("wash day stays parked", () => {
+  it("no subscription path assigns a day", () => {
+    expect(sub).not.toMatch(/await assignWashDay\(/);
   });
-
-  it("assignSubscription (Manager+ direct assign) has the same guard", () => {
-    const fn = body("assignSubscription");
-    expect(fn).toMatch(/stu\.washDay === null/);
-    expect(fn).toMatch(/assignWashDay\(stu\.id, stu\.collegeId\)/);
-    expect(fn).not.toMatch(/^\s*await assignWashDay/m);
+  it("registration doesn't either", () => {
+    expect(read("lib/actions/students.ts")).not.toMatch(/await assignWashDay\(/);
+    expect(read("lib/actions/admin.ts")).not.toMatch(/await assignWashDay\(/);
   });
-
-  it("requestSubscription (just a pending request, not yet active) never touches wash day at all", () => {
-    const fn = body("requestSubscription");
-    expect(fn).not.toMatch(/washDay/);
-    expect(fn).not.toMatch(/assignWashDay/);
+  it("an existing day is never overwritten — the column is left alone", () => {
+    // activation/upgrade must not touch washDay at all while parked
+    expect(sub).not.toMatch(/washDay:/);
+  });
+  it("the balancer itself survives for when the rota returns", () => {
+    expect(read("lib/washday-server.ts")).toMatch(/export async function assignWashDay/);
   });
 });

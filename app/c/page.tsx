@@ -5,9 +5,7 @@ import { TopBar } from "@/components/chrome";
 import { Svg, type IconName } from "@/components/icons";
 import { fmt, timeAgo, dateStr, loyaltyBadge, STATUS_LABEL } from "@/lib/format";
 import Link from "next/link";
-import { Qr } from "@/components/qr";
 import HomeClient from "./_components/HomeClient";
-import { WEEKDAY_NAMES } from "@/lib/washday";
 
 export default async function CustomerHome() {
   const student = await requireStudent();
@@ -116,8 +114,9 @@ export default async function CustomerHome() {
                 flex: "none",
               }}
             >
-              {/* must fit the 52px chip — a larger size overflows the whole ID card */}
-              <Qr text={activeBag?.code ?? student.id} size={40} dark="#fff" light="transparent" />
+              {/* QR removed (owner, Sep 2026) — nothing scans it; the CODE is
+                  what counters read out. Chip kept so the card layout holds. */}
+              <span style={{ fontWeight: 800, fontSize: 15, letterSpacing: ".04em" }}>{(activeBag?.code ?? student.id).slice(0, 5)}</span>
             </div>
           </div>
           <div className="between" style={{ marginTop: "12px" }}>
@@ -128,16 +127,9 @@ export default async function CustomerHome() {
           </div>
         </div>
 
-        {/* Wash day — soft guidance only, spreads the counter's daily load evenly */}
-        {student.washDay !== null && student.washDay !== undefined && (
-          <div className="card pad mt12" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <span style={{ color: "var(--teal-dark)" }}><Svg name="clock" size={20} /></span>
-            <div>
-              <div className="muted" style={{ fontSize: "11.5px", textTransform: "uppercase", letterSpacing: ".04em" }}>Your wash day</div>
-              <div className="h-sm">{WEEKDAY_NAMES[student.washDay]}</div>
-            </div>
-          </div>
-        )}
+        {/* Wash-day card removed — rota PARKED (owner, Sep 2026): drop off any
+            day. Data + washday-server.ts stay; restore the card from git when
+            the rota returns. */}
 
         {/* No separate bag card any more — the code is the Customer ID above.
             Repeating it here made the same number look like two things. */}

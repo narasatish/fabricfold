@@ -49,9 +49,16 @@ export async function closeDay(countedCash: number, note?: string) {
 
   await db.dayClose.create({ data: { date, expectedCash: expected, countedCash, variance, note: note?.trim() || null, by: st.id } });
   await audit("Day closed", `${date} · counted ₹${countedCash} vs expected ₹${expected} · variance ₹${variance}`, st.id);
-  void notifyOwner(
-    `Day closed — ${variance === 0 ? "drawer matches ✓" : `VARIANCE ₹${variance}`}`,
-    `${date}: expected ₹${expected}, counted ₹${countedCash}, variance ₹${variance}. Closed by ${st.name}.${note ? ` Note: ${note}` : ""}`,
+  /* Awaited, not void: a floating promise is abandoned when Vercel freezes
+     the instance, and the variance mail is the one this ritual exists for.
+     Above ₹200 the subject escalates to an explicit alert — a drawer that is
+     out by lunch money reads differently from one out by a day's takings. */
+  const alert = Math.abs(variance) > 200;
+  await notifyOwner(
+    alert
+      ? `⚠ CASH VARIANCE ₹${variance} — needs a look`
+      : `Day closed — ${variance === 0 ? "drawer matches ✓" : `variance ₹${variance}`}`,
+    `${date}: expected ₹${expected}, counted ₹${countedCash}, variance ₹${variance}. Closed by ${st.name}.${note ? ` Note: ${note}` : ""}${alert ? " || Over the ₹200 threshold — check the payments list for the day before the detail goes cold." : ""}`,
   );
   return { ok: true as const, expected, variance };
 }

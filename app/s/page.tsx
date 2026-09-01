@@ -15,7 +15,9 @@ export default async function StaffHomePage() {
 
   const orders = await db.order.findMany({
     where: { status: { in: ["draft", "received", "processing", "ready"] } },
-    include: { student: true },
+    // the ready EVENT, not createdAt, is what ages an uncollected bag — an
+    // order can spend days in processing before it ever waits on a student
+    include: { student: true, timeline: { where: { status: "ready" }, orderBy: { at: "desc" }, take: 1 } },
     orderBy: { createdAt: "desc" },
   });
 
@@ -77,6 +79,7 @@ export default async function StaffHomePage() {
     createdAt: o.createdAt.getTime(),
     receivedAt: o.receivedAt ? o.receivedAt.getTime() : null,
     dropSlotAt: o.dropSlotAt ? o.dropSlotAt.getTime() : null,
+    readyAt: o.timeline[0] ? o.timeline[0].at.getTime() : null,
     student: { id: o.student.id, name: o.student.name, phone: o.student.phone },
   }));
 

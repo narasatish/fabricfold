@@ -16,7 +16,9 @@ const src = fs.readFileSync(path.resolve(__dirname, "../lib/actions/orders.ts"),
 /** Slice out one function's source — works for exported actions and for
     module-local helpers like restoreCycleFor. */
 function body(fnName: string) {
-  const decl = [`export async function ${fnName}`, `async function ${fnName}`]
+  /* The "(" matters: without it, advanceStatus matches advanceStatusBatch —
+     which sits earlier in the file — and the slice tests the wrong function. */
+  const decl = [`export async function ${fnName}(`, `async function ${fnName}(`]
     .map((d) => src.indexOf(d))
     .filter((i) => i > -1)
     .sort((a, b) => a - b)[0];
@@ -145,7 +147,7 @@ describe("bag codes warn before they run out", () => {
   const ba = fs.readFileSync(path.resolve(__dirname, "../lib/actions/bags.ts"), "utf8");
 
   it("warns with lead time, since bags are printed in advance", () => {
-    expect(bc).toMatch(/WARN_AT\s*=\s*900/);
+    expect(bc).toMatch(/WARN_AT\s*=\s*9900/); // widened with the 4-digit scheme
     expect(ba).toMatch(/seq >= WARN_AT/);
     expect(ba).toMatch(/notifyOwner/);
   });

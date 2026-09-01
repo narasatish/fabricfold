@@ -51,7 +51,7 @@ export async function activateSubscription(studentId: string, method: "cash" | "
   // Safety net for students registered before wash-day allocation existed:
   // give them one now, based on current burden, WITHOUT touching anyone
   // else's already-assigned day.
-  if (stu.washDay === null) await assignWashDay(stu.id, stu.collegeId);
+  // wash-day rota parked — no day assigned on activation
 
   if (method === "cash") {
     const otp = await db.otp.findFirst({ where: { purpose: "subscription", refId: studentId, usedAt: null } });
@@ -96,7 +96,7 @@ export async function assignSubscription(studentId: string, planId: string, meth
 
   // Same safety net as activateSubscription — only fills a MISSING wash day,
   // never reassigns an existing one.
-  if (stu.washDay === null) await assignWashDay(stu.id, stu.collegeId);
+  // wash-day rota parked — no day assigned on activation
 
   const plan = await db.plan.findUnique({ where: { id: planId } });
   if (!plan || !plan.active) return { ok: false as const, error: "Pick a plan" };

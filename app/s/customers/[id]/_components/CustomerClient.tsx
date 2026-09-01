@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
-import { Qr } from "@/components/qr";
 import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, loyaltyBadge } from "@/lib/format";
 import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
@@ -345,7 +344,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
               )}
             </div>
           </div>
-          <Qr text={student.id} size={64} />
+          {/* student-ID QR removed (owner, Sep 2026) — staff search by code/phone */}
         </div>
         <div className="row gap8">
           <span className="pill" style={{ background: tier.bg, color: tier.fg }}>{tier.name}</span>
@@ -775,20 +774,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
             </div>
           )}
         </div>
-        <div className="field">
-          <label>Wash day</label>
-          <select
-            className="input"
-            value={details.washDay === null ? "" : details.washDay}
-            onChange={(e) => setDetails({ ...details, washDay: e.target.value === "" ? null : Number(e.target.value) })}
-          >
-            <option value="">Leave as it is</option>
-            {WEEKDAY_NAMES.map((n, i) => {
-              const closed = colleges.find((c) => c.id === details.collegeId)?.closedWeekday === i;
-              return <option key={i} value={i} disabled={closed}>{n}{closed ? " — campus closed" : ""}</option>;
-            })}
-          </select>
-        </div>
+        {/* Wash-day picker removed — rota parked (Sep 2026); restore from git. */}
         <button className="btn" onClick={doSaveDetails} disabled={detailsBusy || details.name.trim().length < 2}>
           {detailsBusy ? "Saving…" : "Save details"}
         </button>

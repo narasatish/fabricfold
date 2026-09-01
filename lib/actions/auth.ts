@@ -221,6 +221,18 @@ function genCode(phone: string) {
   return randomCode();
 }
 
+/** Every successful sign-in is recorded: who, how, from where.
+
+    The audit log is where "someone was in my account" gets answered, and a
+    login is the event that starts every other event. `by` carries the
+    student/staff id — the log's `by` column is a plain string. */
+async function recordSignIn(kind: "student" | "staff", id: string, name: string, method: "whatsapp" | "otp" | "passcode") {
+  try {
+    const ip = await requestIp();
+    await db.auditLog.create({ data: { action: kind === "staff" ? "Staff sign-in" : "Student sign-in", detail: `${name} (${id}) via ${method}${ip !== "unknown" ? ` · ${ip}` : ""}`, by: id } });
+  } catch { /* a failed log line must never block a login */ }
+}
+
 export async function requestOtp(phone: string, mode: "customer" | "staff") {
   phone = phone.replace(/\D/g, "").slice(-10);
   if (phone.length !== 10) return { ok: false as const, error: "Enter a valid 10-digit mobile number" };
@@ -349,6 +361,7 @@ export async function verifyOtp(
     if (!st || !st.active) return { ok: false as const, error: "Not registered as staff" };
     await db.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
     await createSession({ mode: "staff", staffId: st.id, role: st.role, epoch: st.sessionEpoch });
+    await recordSignIn("staff", st.id, st.name, "otp");
     return { ok: true as const };
   }
 
@@ -361,6 +374,7 @@ export async function verifyOtp(
   }
   await db.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
   await createSession({ mode: "customer", studentId: stu.id, epoch: stu.sessionEpoch });
+  await recordSignIn("student", stu.id, stu.name, "otp");
   return { ok: true as const };
 }
 
@@ -467,6 +481,7 @@ export async function loginWithPasscode(phone: string, passcode: string) {
     await db.student.update({ where: { id: stu.id }, data: { pwFailedAttempts: 0, pwLockedUntil: null } });
   }
   await createSession({ mode: "customer", studentId: stu.id, epoch: stu.sessionEpoch });
+  await recordSignIn("student", stu.id, stu.name, "passcode");
   return { ok: true as const };
 }
 

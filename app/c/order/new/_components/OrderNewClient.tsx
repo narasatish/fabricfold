@@ -14,7 +14,7 @@ type Slot = { startAt: string; endAt: string; dateStr: string; timeLabel: string
 export default function OrderNewClient({
   enabledServices,
   currentService,
-  rateItems,
+  allRates,
   gstPct,
   expressEnabled,
   hasActiveSubscription,
@@ -25,7 +25,7 @@ export default function OrderNewClient({
 }: {
   enabledServices: EnabledService[];
   currentService: string;
-  rateItems: [string, number][];
+  allRates: Record<string, [string, number][]>;
   gstPct: number;
   expressEnabled: boolean;
   hasActiveSubscription: boolean;
@@ -38,9 +38,12 @@ export default function OrderNewClient({
   const toast = useToast();
 
   const [service, setService] = useState(currentService);
+  /* Derived per selection. The old single-service prop froze the FIRST
+     service's items, so switching the tab quoted wrong names and prices. */
+  const rateItems = allRates[service] ?? [];
   const [quantities, setQuantities] = useState<Record<string, number>>(() => {
     const q: Record<string, number> = {};
-    rateItems.forEach(([label]) => {
+    (allRates[currentService] ?? []).forEach(([label]) => {
       q[label] = reorderItems.find((i) => i.label === label)?.qty || 0;
     });
     return q;
@@ -103,7 +106,7 @@ export default function OrderNewClient({
       <Seg<string>
         options={enabledServices.map((s) => [s.key, s.label])}
         value={service}
-        onChange={setService}
+        onChange={(sv) => { setService(sv); setQuantities({}); }}
       />
 
       {cycleBased ? (
@@ -250,7 +253,7 @@ export default function OrderNewClient({
       {/* Bill preview */}
       <div className="card pad mt20">
         <div className="kv">
-          <span className="k">Subtotal ({pieces} pcs)</span>
+          <span className="k">Subtotal ({cycleBased ? `${cycles} cycle${cycles === 1 ? "" : "s"}` : `${pieces} pcs`})</span>
           <span className="mono">{fmt(subtotal)}</span>
         </div>
         {surcharge > 0 && (

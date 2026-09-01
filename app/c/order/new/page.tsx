@@ -73,7 +73,7 @@ export default async function OrderNewPage({ searchParams }: { searchParams: Pro
         <OrderNewClient
           enabledServices={enabledServices}
           currentService={serviceParam}
-          rateItems={rate.items}
+          allRates={Object.fromEntries(enabledServices.map((sv) => [sv.key, rates[sv.key]?.items ?? []]))}
           gstPct={gstPct}
           expressEnabled={featureOn(feat, "express")}
           hasActiveSubscription={!!student.subscription?.active}

@@ -177,3 +177,21 @@ describe("the dry-clean menu", () => {
     expect(ui).toMatch(/removeRateItem/);
   });
 });
+
+describe("switching the service tab shows THAT service's menu", () => {
+  /* Found live: the page passed only the FIRST service's item list, so a
+     student on the Dry Clean tab was quoted Wash & Iron's names and prices.
+     A menu that lies about prices is the bug a laundry can least afford. */
+  it("the page hands over the whole rates map", () => {
+    expect(read("app/c/order/new/page.tsx")).toMatch(/allRates=\{Object\.fromEntries\(enabledServices\.map/);
+  });
+  it("the client derives items from the SELECTED service and clears stale counts", () => {
+    const ui = read("app/c/order/new/_components/OrderNewClient.tssx".replace(".tssx", ".tsx"));
+    expect(ui).toMatch(/const rateItems = allRates\[service\] \?\? \[\]/);
+    expect(ui).toMatch(/setService\(sv\); setQuantities\(\{\}\);/);
+  });
+  it("the subtotal counts cycles on a cycle order, not zero pieces", () => {
+    const ui = read("app/c/order/new/_components/OrderNewClient.tsx");
+    expect(ui).toMatch(/cycleBased \? `\$\{cycles\} cycle/);
+  });
+});

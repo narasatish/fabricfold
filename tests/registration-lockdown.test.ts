@@ -37,7 +37,9 @@ const NEW_NUMBER = "9812345670"; // never registered
  *  and, unlike a version file, it cannot drift out of date on its own. */
 async function schemaIsCurrent(): Promise<boolean> {
   try {
-    await db.sheetOutbox.count();
+    // probe the NEWEST additions — an old-table probe lets later columns drift
+    await db.waVerify.count();
+    await db.student.count({ where: { kind: "student" } });
     return true;
   } catch {
     return false;

@@ -14,7 +14,7 @@ import { isTier } from "../bagcode";
    Students cannot self-register — this is the ONLY way a student account is
    created. verifyOtp() will reject an unrecognised number with a message to
    come to the counter. */
-export async function registerStudent(input: { name: string; phone: string; collegeId: string }) {
+export async function registerStudent(input: { name: string; phone: string; collegeId: string; kind?: "student" | "faculty" }) {
   const st = await requireStaff(1);
   const name = input.name.trim();
   const phone = input.phone.replace(/\D/g, "").slice(-10);
@@ -30,10 +30,11 @@ export async function registerStudent(input: { name: string; phone: string; coll
     id = String(Math.floor(100000 + Math.random() * 900000));
     if (!(await db.student.findUnique({ where: { id } }))) break;
   }
-  const stu = await db.student.create({ data: { id, phone, name, collegeId: college.id } });
+  const kind = input.kind === "faculty" ? "faculty" : "student";
+  const stu = await db.student.create({ data: { id, phone, name, collegeId: college.id, kind } });
   // Wash day rota PARKED (owner, Sep 2026): students drop off any day, so no
   // day is assigned. assignWashDay and the data stay for when it returns.
-  await audit("Student registered", `${name} · +91 ${phone} · ${college.name}`, st.id);
+  await audit(kind === "faculty" ? "Faculty registered" : "Student registered", `${name} · +91 ${phone} · ${college.name}`, st.id);
   void notifyOwner("New student registered", `${name} (+91 ${phone}) registered at the counter (${college.name}) by ${st.name} — ID ${stu.id}.`);
   return { ok: true as const, id: stu.id };
 }

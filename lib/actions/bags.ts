@@ -38,7 +38,10 @@ export async function issueBag(
   }
 
   const tier = stu.subscription?.active ? stu.subscription.planRef?.tier : null;
-  const kind = bagKindFor(tier);
+  // Faculty carry the F series regardless of what they have bought — the
+  // letter tells the counter WHO this is, and a teacher on a cycle pack is
+  // still a teacher.
+  const kind = stu.kind === "faculty" ? ("faculty" as const) : bagKindFor(tier);
   const isFirstEver = stu.bags.length === 0;
   const subscribed = !!stu.subscription?.active;
 

@@ -23,7 +23,7 @@ describe("the allowance is the same for every tier", () => {
     const orders = read("lib/actions/orders.ts");
     expect(orders).not.toMatch(/kgLimit/);
     expect(orders).not.toMatch(/Number\(sub\.kgPerCycle\)/);
-    expect(orders).toMatch(/excessWeightCharge\(input\.weightKg, undefined, \{ waived: !!input\.waiveExcess \}\)/);
+    expect(orders).toMatch(/excessWeightCharge\(input\.weightKg, undefined, \{ waived: !!input\.waiveExcess, cycles: cyclesCount \}\)/);
   });
   it("applies at BOTH billing sites, not just the counter", () => {
     const orders = read("lib/actions/orders.ts");
@@ -42,15 +42,26 @@ describe("under the limit, the cycle pays", () => {
 });
 
 describe("over the limit, only the excess is charged", () => {
-  it("rounds a started kilogram UP — owner's rule, reversing the old fractional billing", () => {
-    /* 5.2 kg bills as 1 kg over (Rs 50): "one kg over, fifty rupees" is a
-       sentence staff can say, and a scale reading 5.2 then 5.4 must not
-       change the price. The OLD rule billed the fraction; deliberately gone. */
-    expect(excessWeightCharge(5.2, RATE)).toBe(50);
+  it("rounds UP to the started HALF kilogram — the owner's own worked example", () => {
+    /* 6.5 kg = 1.5 over = Rs 50 + Rs 25 = Rs 75. A scale reading 5.2 then
+       5.4 gives the same price; whole-kg rounding would double some bags. */
+    expect(excessWeightCharge(6.5, RATE)).toBe(75);
+    expect(excessWeightCharge(5.2, RATE)).toBe(25);   // 0.5 started
   });
-  // started kg over × Rs 50 flat
-  it.each([[6, 50], [6.5, 100], [8, 150], [10, 250]])("%s kg → ₹%s", (kg, want) => {
+  // started half-kg over × Rs 25
+  it.each([[5.5, 25], [6, 50], [6.1, 75], [8, 150], [10, 250]])("%s kg → ₹%s", (kg, want) => {
     expect(excessWeightCharge(kg, RATE)).toBe(want);
+  });
+  it("the allowance scales with the cycles used — 9 kg on two cycles is free", () => {
+    /* The owner's multi-cycle rule: a student may burn two cycles at once,
+       and 2 cycles = 10 kg of allowance. */
+    expect(excessWeightCharge(9, RATE, { cycles: 2 })).toBe(0);
+    expect(excessWeightCharge(11, RATE, { cycles: 2 })).toBe(50);
+    expect(excessWeightCharge(9, RATE, { cycles: 1 })).toBe(200);
+  });
+  it("a nonsense cycle count falls back to one cycle, never zero", () => {
+    expect(excessWeightCharge(6, RATE, { cycles: 0 })).toBe(50);
+    expect(excessWeightCharge(6, RATE, { cycles: -2 })).toBe(50);
   });
   it("staff can waive it, and waived means zero at any weight", () => {
     expect(excessWeightCharge(12, RATE, { waived: true })).toBe(0);
@@ -79,16 +90,16 @@ describe("the counter can see it before committing", () => {
   const ui = read("app/s/orders/[id]/_components/OrderClient.tsx");
   it("quotes the charge with the SAME function that bills it", () => {
     // a hand-rolled preview is how the quoted number drifts from the charged one
-    expect(ui).toMatch(/import \{ CYCLE_KG_LIMIT, excessWeightCharge \} from "@\/lib\/money"/);
-    expect(ui).toMatch(/excessWeightCharge\(acceptInput\.weightKg, undefined, \{ waived: acceptInput\.waiveExcess \}\)/);
+    expect(ui).toMatch(/import \{ CYCLE_KG_LIMIT, CYCLE_RATES, isCycleService, excessWeightCharge \} from "@\/lib\/money"/);
+    expect(ui).toMatch(/excessWeightCharge\(acceptInput\.weightKg, undefined, \{ waived: acceptInput\.waiveExcess, cycles: cycleBased \? acceptInput\.cycles : 1 \}\)/);
   });
   it("says plainly when the bag is within the cycle", () => {
-    expect(ui).toMatch(/Within the \{CYCLE_KG_LIMIT\} kg cycle/);
+    expect(ui).toMatch(/Within the \{allowanceKg\} kg allowance/); // allowance scales with cycles now
   });
   it("names the amount to collect when it is over", () => {
-    expect(ui).toMatch(/over the \{CYCLE_KG_LIMIT\} kg cycle — collect \{fmt\(excessNow\)\}/);
-    // and it quotes STARTED kilograms, matching what bills
-    expect(ui).toMatch(/Math\.ceil\(overKg\)/);
+    expect(ui).toMatch(/over the \{allowanceKg\} kg allowance — collect \{fmt\(excessNow\)\}/);
+    // and it quotes started HALF kilograms, matching what bills
+    expect(ui).toMatch(/Math\.ceil\(overKg \* 2\) \/ 2/);
   });
 });
 

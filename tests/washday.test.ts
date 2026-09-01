@@ -25,7 +25,10 @@ beforeAll(async () => {
   // conditional, shared â€” see tests/_schema.ts for why five parallel pushes
   // were producing three different intermittent failures
   await ensureTestSchema(TEST_URL, async () => {
-    try { await db.sheetOutbox.count(); return true; } catch { return false; }
+    /* Probe the NEWEST schema addition, not an old table: a probe that checks
+       something ancient reports "current" forever and lets every later column
+       drift past it — exactly how Student.kind went missing here once. */
+      try { await db.waVerify.count(); await db.student.count({ where: { kind: "student" } }); return true; } catch { return false; }
   });
   ({ assignWashDay, washDayDistribution } = await import("../lib/washday-server"));
   ({ isOffWashDay } = await import("../lib/washday"));

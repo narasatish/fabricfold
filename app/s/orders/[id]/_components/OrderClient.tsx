@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { Qr } from "@/components/qr";
 import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, upiLink } from "@/lib/format";
-import { CYCLE_KG_LIMIT, excessWeightCharge } from "@/lib/money";
+import { CYCLE_KG_LIMIT, CYCLE_RATES, isCycleService, excessWeightCharge } from "@/lib/money";
 import { isOverdue } from "@/lib/money";
 import { useToast, Sheet, Seg, Switch } from "@/components/chrome";
 import {
@@ -33,6 +33,7 @@ type Order = {
   actualPieces: number | null;
   declaredPieces: number | null;
   weightKg: number | null;
+  cyclesCount: number;
   express: boolean;
   surcharge: number;
   subtotal: number;
@@ -105,13 +106,15 @@ export default function StaffOrderClient({
   const canUseCycle = !!order.student.subscription?.active && subCyclesLeft > 0;
 
   // Sheet state
-  const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, useCycle: canUseCycle, noGst: false, waiveExcess: false, itemQtys: {} as Record<string, number> });
+  const cycleBased = isCycleService(order.service);
+  const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, cycles: Math.max(1, order.cyclesCount || 1), useCycle: canUseCycle, noGst: false, waiveExcess: false, itemQtys: {} as Record<string, number> });
   /* The weight field holds a STRING while being typed — see the input below. */
   const [weightText, setWeightText] = useState(order.weightKg ? String(order.weightKg) : "");
   /* Previewed with the same function that bills it, so the number staff quote
      at the counter is the number the order is charged. */
-  const overKg = Math.max(0, (acceptInput.weightKg || 0) - CYCLE_KG_LIMIT);
-  const excessNow = excessWeightCharge(acceptInput.weightKg, undefined, { waived: acceptInput.waiveExcess });
+  const allowanceKg = CYCLE_KG_LIMIT * (cycleBased ? acceptInput.cycles : 1);
+  const overKg = Math.max(0, (acceptInput.weightKg || 0) - allowanceKg);
+  const excessNow = excessWeightCharge(acceptInput.weightKg, undefined, { waived: acceptInput.waiveExcess, cycles: cycleBased ? acceptInput.cycles : 1 });
   const [intakePhotos, setIntakePhotos] = useState<string[]>([]);
   // Damage report — opens a complaint thread the student can see, so it needs
   // real evidence attached before it can be filed.
@@ -146,6 +149,7 @@ export default function StaffOrderClient({
       .map((it) => ({ label: it[0], qty: acceptInput.itemQtys[it[0]] }));
     const r = await acceptOrder(order.id, {
       weightKg: acceptInput.weightKg || null,
+      cycles: cycleBased ? acceptInput.cycles : undefined,
       useCycle: acceptInput.useCycle,
       noGst: acceptInput.noGst,
       waiveExcess: acceptInput.waiveExcess,
@@ -756,27 +760,44 @@ export default function StaffOrderClient({
                 setAcceptInput((a) => ({ ...a, weightKg: Number(t) || 0 }));
               }}
             />
-            {acceptInput.useCycle && (
+            {cycleBased && (
+              <div className="field" style={{ marginTop: "12px" }}>
+                <label>Cycles</label>
+                <div className="row gap8" style={{ alignItems: "center" }}>
+                  <div className="qty">
+                    <button onClick={() => setAcceptInput((a) => ({ ...a, cycles: Math.max(1, a.cycles - 1) }))}>−</button>
+                    <span className="mono">{acceptInput.cycles}</span>
+                    <button onClick={() => setAcceptInput((a) => ({ ...a, cycles: Math.min(10, a.cycles + 1) }))}>+</button>
+                  </div>
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    {acceptInput.useCycle
+                      ? `burns ${acceptInput.cycles} from the plan · ${allowanceKg} kg allowance`
+                      : `${fmt(CYCLE_RATES[order.service] * acceptInput.cycles)} · ${allowanceKg} kg allowance`}
+                  </span>
+                </div>
+              </div>
+            )}
+            {cycleBased && (
               <div className="muted" style={{ fontSize: "12px", marginTop: "7px" }}>
                 {overKg > 0 ? (
                   acceptInput.waiveExcess ? (
                     <span style={{ fontWeight: 600 }}>
-                      {Math.ceil(overKg)} kg over — charge waived, nothing to collect.
+                      {Math.ceil(overKg * 2) / 2} kg over — charge waived, nothing to collect.
                     </span>
                   ) : (
                     <span style={{ color: "var(--amber)", fontWeight: 600 }}>
-                      {/* Billed per STARTED kg — quote the same number that bills. */}
-                      {Math.ceil(overKg)} kg over the {CYCLE_KG_LIMIT} kg cycle — collect {fmt(excessNow)}
+                      {/* Billed per started HALF kg — quote the same number that bills. */}
+                      {Math.ceil(overKg * 2) / 2} kg over the {allowanceKg} kg allowance — collect {fmt(excessNow)}
                     </span>
                   )
                 ) : (
-                  <>Within the {CYCLE_KG_LIMIT} kg cycle — nothing to collect.</>
+                  <>Within the {allowanceKg} kg allowance — nothing extra.</>
                 )}
               </div>
             )}
             {/* The waiver appears only when there is a charge to waive; a
                 switch that mostly does nothing teaches staff to ignore it. */}
-            {acceptInput.useCycle && overKg > 0 && (
+            {cycleBased && overKg > 0 && (
               <div className="chip-toggle" style={{ marginTop: "10px" }}>
                 <div>
                   <div className="h-sm">Waive excess charge</div>
@@ -802,7 +823,7 @@ export default function StaffOrderClient({
               </span>
             </div>
           )}
-          {!acceptInput.useCycle && (
+          {!acceptInput.useCycle && !cycleBased && (
             <div className="chip-toggle" style={{ marginBottom: "16px" }}>
               <div>
                 <div className="h-sm">Bill without GST</div>

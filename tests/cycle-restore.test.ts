@@ -45,7 +45,8 @@ describe("cancelling an order returns the cycle", () => {
   });
 
   it("decrements the subscription's used-cycle count", () => {
-    expect(restore).toMatch(/cyclesUsed\s*[:=]\s*\{\s*decrement:\s*1\s*\}/);
+    // N-cycle orders (Sep 2026) restore N, clamped so nothing goes negative
+    expect(restore).toMatch(/decrement: Math\.min\(n, sub\.cyclesUsed\)/);
   });
 
   it("never drives cyclesUsed below zero", () => {
@@ -54,7 +55,7 @@ describe("cancelling an order returns the cycle", () => {
 
   it("gives the cycle back to the bucket for THAT service, not just the total", () => {
     expect(restore).toMatch(/b\.service === ord\.service/);
-    expect(restore).toMatch(/used:\s*buckets\[idx\]\.used\s*-\s*1/);
+    expect(restore).toMatch(/used: Math\.max\(0, buckets\[idx\]\.used - n\)/);
   });
 
   it("removes the cycle-use log row so history matches the balance", () => {

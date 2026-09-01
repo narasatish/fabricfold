@@ -7,7 +7,7 @@ import { featureOn, serviceOn } from "../features";
 import { enqueueSheetEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import type { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff } from "../auth";
-import { expressSurcharge, urgentCycleCharge, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT } from "../money";
+import { expressSurcharge, urgentCycleCharge, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, isCycleService } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit } from "../notify";
@@ -35,7 +35,18 @@ function bcast(o: { id: string; collegeId: string; studentId: string }, type = "
 }
 
 /* ---------- Customer: place order (draft to bring to the counter) ---------- */
-export async function placeOrder(input: { service: string; items: { label: string; qty: number }[]; express: boolean; dropSlotAt?: string }) {
+/* Cycle services (wash & fold / wash & iron) are sold by the CYCLE, not the
+   garment — owner's Sep 2026 model. Rather than a second billing pipeline,
+   a cycle order carries ONE synthetic line: { label: "… — cycle", rate: 200,
+   qty: cycles }. Everything downstream — subtotal, the Sheet row, refunds —
+   reads it like any other item, and `qty` doubles as the cycle count the way
+   the owner asked pieces to. */
+function cycleItems(service: string, label: string, cycles: number) {
+  const n = Math.min(10, Math.max(1, Math.floor(cycles)));
+  return [{ label: `${label} — cycle`, rate: CYCLE_RATES[service], qty: n }];
+}
+
+export async function placeOrder(input: { service: string; items: { label: string; qty: number }[]; cycles?: number; express: boolean; dropSlotAt?: string }) {
   const stu = await requireStudent();
   const cfg = await getConfig();
   const rate = cfg.rates[input.service];
@@ -44,14 +55,17 @@ export async function placeOrder(input: { service: string; items: { label: strin
     return { ok: false as const, error: "This service is not available at your campus" };
   }
 
-  const items = input.items
-    .filter((i) => i.qty > 0)
-    .map((i) => {
-      const found = rate.items.find((r) => r[0] === i.label);
-      if (!found) throw new Error("Unknown item " + i.label);
-      return { label: found[0], rate: found[1], qty: Math.min(99, Math.floor(i.qty)) };
-    });
-  if (!items.length) return { ok: false as const, error: "Add at least one piece" };
+  const cyclesCount = isCycleService(input.service) ? Math.min(10, Math.max(1, Math.floor(input.cycles ?? 1))) : 1;
+  const items = isCycleService(input.service)
+    ? cycleItems(input.service, rate.label, cyclesCount)
+    : input.items
+        .filter((i) => i.qty > 0)
+        .map((i) => {
+          const found = rate.items.find((r) => r[0] === i.label);
+          if (!found) throw new Error("Unknown item " + i.label);
+          return { label: found[0], rate: found[1], qty: Math.min(99, Math.floor(i.qty)) };
+        });
+  if (!items.length) return { ok: false as const, error: isCycleService(input.service) ? "Pick at least one cycle" : "Add at least one piece" };
 
   // Drop-off slot is optional; when given, re-validate server-side (existence,
   // still in the future, and capacity) — never trust the client's pick.
@@ -71,13 +85,15 @@ export async function placeOrder(input: { service: string; items: { label: strin
      turned on by an absent flag rather than a deliberate one. */
   const express = input.express && featureOn(stu.college.features, "express");
   const surcharge = express ? expressSurcharge(sub) : 0;
-  const gst = cfg.gstEnabled ? Math.round((sub + surcharge) * (cfg.gstPct / 100)) : 0;
+  // Rs 200/250 per cycle is the FINAL price (owner): cycle orders never add GST.
+  const gst = !isCycleService(input.service) && cfg.gstEnabled ? Math.round((sub + surcharge) * (cfg.gstPct / 100)) : 0;
   const total = sub + surcharge + gst;
 
   const o = await db.order.create({
     data: {
       id: orderCode(), studentId: stu.id, collegeId: stu.collegeId, service: input.service,
       items, declaredPieces: items.reduce((s, i) => s + i.qty, 0),
+      cyclesCount, noGst: isCycleService(input.service),
       express, surcharge, status: "draft",
       dropSlotAt, dropSlotEndAt,
       subtotal: sub, gst, gstPctSnapshot: cfg.gstEnabled ? cfg.gstPct : 0, total,
@@ -93,7 +109,7 @@ export async function placeOrder(input: { service: string; items: { label: strin
 }
 
 /* ---------- Staff: verify & accept (receive) ---------- */
-export async function acceptOrder(orderId: string, input: { weightKg: number | null; useCycle: boolean; noGst?: boolean; waiveExcess?: boolean; items?: { label: string; qty: number }[]; intakePhotos?: string[] }) {
+export async function acceptOrder(orderId: string, input: { weightKg: number | null; useCycle: boolean; noGst?: boolean; waiveExcess?: boolean; cycles?: number; items?: { label: string; qty: number }[]; intakePhotos?: string[] }) {
   const st = await requireStaff(1);
   const cfg = await getConfig();
 
@@ -103,9 +119,15 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
     const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { student: { include: { subscription: { include: { planRef: true } } } } } });
     if (o.status !== "draft") throw new Error("Order already received");
 
-    // staff may adjust quantities at the counter
+    // staff may adjust quantities at the counter — for a cycle service the
+    // only adjustable quantity IS the cycle count (a 9 kg bag becomes two)
     let items = o.items as unknown as { label: string; rate: number; qty: number }[];
-    if (input.items) {
+    const cyclesCount = isCycleService(o.service)
+      ? Math.min(10, Math.max(1, Math.floor(input.cycles ?? o.cyclesCount ?? 1)))
+      : 1;
+    if (isCycleService(o.service)) {
+      items = cycleItems(o.service, cfg.rates[o.service].label, cyclesCount);
+    } else if (input.items) {
       const rate = cfg.rates[o.service];
       items = input.items.filter((i) => i.qty > 0).map((i) => {
         const found = rate.items.find((r) => r[0] === i.label);
@@ -114,9 +136,15 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       });
     }
     const declaredPieces = items.reduce((s, i) => s + i.qty, 0);
-    if (!declaredPieces) throw new Error("Add at least one piece");
+    if (!declaredPieces) throw new Error(isCycleService(o.service) ? "Pick at least one cycle" : "Add at least one piece");
 
     let usedCycle = false, excessCharge = 0, urgentCharge = 0;
+    /* Weight excess applies to EVERY cycle-service order — plan-paid or
+       cash-paid, 5 kg x cycles is the allowance either way. Zero for
+       per-piece services, whose weight is informational. */
+    if (isCycleService(o.service)) {
+      excessCharge = excessWeightCharge(input.weightKg, undefined, { waived: !!input.waiveExcess, cycles: cyclesCount });
+    }
     if (input.useCycle) {
       const sub = o.student.subscription;
       const blocked = subscriptionBlocker(sub);
@@ -124,21 +152,19 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
       const buckets = (sub.buckets as unknown as Bucket[] | null) || null;
       if (buckets && buckets.length) {
-        // multi-bucket plan: consume a cycle from the bucket matching THIS service
-        const idx = buckets.findIndex((b) => b.service === o.service && b.used < b.cycles);
-        if (idx < 0) throw new Error(`No ${cfg.rates[o.service]?.label || o.service} cycles left on this plan`);
-        buckets[idx] = { ...buckets[idx], used: buckets[idx].used + 1 };
-        await tx.subscription.update({ where: { id: sub.id }, data: { buckets, cyclesUsed: { increment: 1 } } });
+        // multi-bucket plan: consume N cycles from the bucket matching THIS service
+        const idx = buckets.findIndex((b) => b.service === o.service && b.used + cyclesCount <= b.cycles);
+        if (idx < 0) throw new Error(`Not enough ${cfg.rates[o.service]?.label || o.service} cycles left on this plan (needs ${cyclesCount})`);
+        buckets[idx] = { ...buckets[idx], used: buckets[idx].used + cyclesCount };
+        await tx.subscription.update({ where: { id: sub.id }, data: { buckets, cyclesUsed: { increment: cyclesCount } } });
       } else {
         // legacy single-bucket subscription
-        if (sub.cyclesUsed >= sub.cyclesTotal) throw new Error("No active subscription cycle available");
-        await tx.subscription.update({ where: { id: sub.id }, data: { cyclesUsed: { increment: 1 } } });
+        if (sub.cyclesUsed + cyclesCount > sub.cyclesTotal) throw new Error(`Not enough subscription cycles left (needs ${cyclesCount})`);
+        await tx.subscription.update({ where: { id: sub.id }, data: { cyclesUsed: { increment: cyclesCount } } });
       }
       usedCycle = true;
-      await tx.cycleUse.create({ data: { subscriptionId: sub.id, orderId: o.id } });
-      // 5 kg allowance on every plan, Rs 50 per started kg over; staff may
-      // waive it (recorded below) when the scale or the situation argues.
-      excessCharge = excessWeightCharge(input.weightKg, undefined, { waived: !!input.waiveExcess });
+      // One row per cycle burned, so cancelling restores exactly what was taken.
+      await tx.cycleUse.createMany({ data: Array.from({ length: cyclesCount }, () => ({ subscriptionId: sub.id, orderId: o.id })) });
       // Urgent (same-day) on a cycle order: the cycle is already prepaid, so
       // only the 40% urgent premium on its average value is charged, in cash,
       // right now — see urgentCycleCharge().
@@ -153,7 +179,8 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
     // switched off app-wide in Admin.
     const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
     const surcharge = usedCycle ? urgentCharge : (o.express ? expressSurcharge(sub) : 0);
-    const noGst = !usedCycle && (!!input.noGst || !cfg.gstEnabled);
+    // Cycle rates are FINAL (owner): Rs 200 means Rs 200, so GST never applies.
+    const noGst = !usedCycle && (isCycleService(o.service) || !!input.noGst || !cfg.gstEnabled);
     const { gst, total } = computeBill(sub, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });
 
     // per-garment QR tags — one per piece. Parked feature, off by default.
@@ -165,7 +192,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
     const updated = await tx.order.update({
       where: { id: o.id },
       data: {
-        items, declaredPieces, actualPieces: declaredPieces, weightKg: input.weightKg,
+        items, declaredPieces, actualPieces: declaredPieces, weightKg: input.weightKg, cyclesCount,
         intakePhotos: input.intakePhotos?.length ? input.intakePhotos.slice(0, 6) : undefined,
         usedCycle, noGst, paid: usedCycle && total === 0 ? true : o.paid,
         paymentMethod: usedCycle && total === 0 ? "cycle" : o.paymentMethod,
@@ -218,7 +245,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
    plan cycle) — so offline drop-offs are tracked exactly like app orders. */
 export async function walkInOrder(
   studentId: string,
-  input: { service: string; items: { label: string; qty: number }[]; weightKg: number | null; useCycle: boolean; noGst?: boolean; waiveExcess?: boolean; express?: boolean; idemKey?: string | null },
+  input: { service: string; items: { label: string; qty: number }[]; cycles?: number; weightKg: number | null; useCycle: boolean; noGst?: boolean; waiveExcess?: boolean; express?: boolean; idemKey?: string | null },
 ) {
   const st = await requireStaff(1);
   const cfg = await getConfig();
@@ -238,20 +265,27 @@ export async function walkInOrder(
   const rate = cfg.rates[input.service];
   if (!rate) return { ok: false as const, error: "Unknown service" };
 
-  const items = input.items
-    .filter((i) => i.qty > 0)
-    .map((i) => {
-      const found = rate.items.find((r) => r[0] === i.label);
-      if (!found) throw new Error("Unknown item " + i.label);
-      return { label: found[0], rate: found[1], qty: Math.min(99, Math.floor(i.qty)) };
-    });
-  if (!items.length) return { ok: false as const, error: "Add at least one piece" };
+  const cyclesCount = isCycleService(input.service) ? Math.min(10, Math.max(1, Math.floor(input.cycles ?? 1))) : 1;
+  const items = isCycleService(input.service)
+    ? cycleItems(input.service, rate.label, cyclesCount)
+    : input.items
+        .filter((i) => i.qty > 0)
+        .map((i) => {
+          const found = rate.items.find((r) => r[0] === i.label);
+          if (!found) throw new Error("Unknown item " + i.label);
+          return { label: found[0], rate: found[1], qty: Math.min(99, Math.floor(i.qty)) };
+        });
+  if (!items.length) return { ok: false as const, error: isCycleService(input.service) ? "Pick at least one cycle" : "Add at least one piece" };
 
   let result;
   try {
     result = await db.$transaction(async (tx) => {
       // optional plan-cycle burn (same rules as acceptOrder)
       let usedCycle = false, excessCharge = 0, urgentCharge = 0;
+      if (isCycleService(input.service)) {
+        // 5 kg x cycles allowance, plan-paid or cash-paid alike
+        excessCharge = excessWeightCharge(input.weightKg, undefined, { waived: !!input.waiveExcess, cycles: cyclesCount });
+      }
       if (input.useCycle) {
         const sub = stu.subscription;
         const blocked = subscriptionBlocker(sub);
@@ -259,17 +293,15 @@ export async function walkInOrder(
         type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
         const buckets = (sub.buckets as unknown as Bucket[] | null) || null;
         if (buckets && buckets.length) {
-          const idx = buckets.findIndex((b) => b.service === input.service && b.used < b.cycles);
-          if (idx < 0) throw new Error(`No ${rate.label} cycles left on this plan`);
-          buckets[idx] = { ...buckets[idx], used: buckets[idx].used + 1 };
-          await tx.subscription.update({ where: { id: sub.id }, data: { buckets, cyclesUsed: { increment: 1 } } });
+          const idx = buckets.findIndex((b) => b.service === input.service && b.used + cyclesCount <= b.cycles);
+          if (idx < 0) throw new Error(`Not enough ${rate.label} cycles left on this plan (needs ${cyclesCount})`);
+          buckets[idx] = { ...buckets[idx], used: buckets[idx].used + cyclesCount };
+          await tx.subscription.update({ where: { id: sub.id }, data: { buckets, cyclesUsed: { increment: cyclesCount } } });
         } else {
-          if (sub.cyclesUsed >= sub.cyclesTotal) throw new Error("No subscription cycles left");
-          await tx.subscription.update({ where: { id: sub.id }, data: { cyclesUsed: { increment: 1 } } });
+          if (sub.cyclesUsed + cyclesCount > sub.cyclesTotal) throw new Error(`Not enough subscription cycles left (needs ${cyclesCount})`);
+          await tx.subscription.update({ where: { id: sub.id }, data: { cyclesUsed: { increment: cyclesCount } } });
         }
         usedCycle = true;
-        // Same 7 kg allowance as the counter flow — one rule, one function.
-        excessCharge = excessWeightCharge(input.weightKg, undefined, { waived: !!input.waiveExcess });
         // Urgent (same-day) on a cycle order: the cycle is already prepaid, so
         // only the 40% urgent premium on its average value is charged, in cash.
         if (input.express) {
@@ -280,7 +312,8 @@ export async function walkInOrder(
 
       const sub2 = items.reduce((s, i) => s + i.rate * i.qty, 0);
       const surcharge = usedCycle ? urgentCharge : (input.express ? expressSurcharge(sub2) : 0);
-      const noGst = !usedCycle && (!!input.noGst || !cfg.gstEnabled);
+      // Cycle rates are FINAL (owner): Rs 200 means Rs 200, so GST never applies.
+      const noGst = !usedCycle && (isCycleService(input.service) || !!input.noGst || !cfg.gstEnabled);
       const { gst, total } = computeBill(sub2, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });
       const declaredPieces = items.reduce((s, i) => s + i.qty, 0);
       const id = orderCode();
@@ -293,7 +326,7 @@ export async function walkInOrder(
         data: {
           id, idemKey: input.idemKey || null,
           studentId: stu.id, collegeId: stu.collegeId, service: input.service,
-          items, declaredPieces, actualPieces: declaredPieces, weightKg: input.weightKg,
+          items, declaredPieces, actualPieces: declaredPieces, weightKg: input.weightKg, cyclesCount,
           express: !!input.express, surcharge, usedCycle, noGst,
           paid: usedCycle && total === 0, paymentMethod: usedCycle && total === 0 ? "cycle" : null,
           subtotal: sub2, gst, gstPctSnapshot: noGst ? 0 : cfg.gstPct, total,
@@ -638,18 +671,22 @@ function subscriptionBlocker(sub: { active: boolean; expiresAt: Date | null } | 
    half-restore is worse than none. */
 async function restoreCycleFor(
   tx: Prisma.TransactionClient,
-  ord: { id: string; service: string; usedCycle: boolean },
+  ord: { id: string; service: string; usedCycle: boolean; cyclesCount?: number },
   sub: { id: string; cyclesUsed: number; buckets: unknown } | null,
 ) {
   if (!ord.usedCycle || !sub) return false;
+  /* Restore exactly what the order burned — a 2-cycle order gives 2 back.
+     Clamped to what is actually recorded as used, so a legacy row can never
+     drive a balance negative. */
+  const n = Math.max(1, Math.floor(ord.cyclesCount ?? 1));
   type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
   const buckets = (sub.buckets as unknown as Bucket[] | null) || null;
   const data: { cyclesUsed?: { decrement: number }; buckets?: Bucket[] } = {};
-  if (sub.cyclesUsed > 0) data.cyclesUsed = { decrement: 1 };
+  if (sub.cyclesUsed > 0) data.cyclesUsed = { decrement: Math.min(n, sub.cyclesUsed) };
   if (buckets && buckets.length) {
     const idx = buckets.findIndex((b) => b.service === ord.service && b.used > 0);
     if (idx >= 0) {
-      buckets[idx] = { ...buckets[idx], used: buckets[idx].used - 1 };
+      buckets[idx] = { ...buckets[idx], used: Math.max(0, buckets[idx].used - n) };
       data.buckets = buckets;
     }
   }

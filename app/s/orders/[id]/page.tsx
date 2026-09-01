@@ -41,6 +41,7 @@ export default async function StaffOrderPage({ params }: { params: Promise<{ id:
     actualPieces: order.actualPieces,
     declaredPieces: order.declaredPieces,
     weightKg: order.weightKg == null ? null : N(order.weightKg),
+      cyclesCount: order.cyclesCount,
     express: order.express,
     surcharge: N(order.surcharge),
     subtotal: N(order.subtotal),

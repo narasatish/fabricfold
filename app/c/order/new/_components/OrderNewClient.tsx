@@ -6,7 +6,7 @@ import { Seg, Switch } from "@/components/chrome";
 import { Svg } from "@/components/icons";
 import { fmt } from "@/lib/format";
 import { placeOrder } from "@/lib/actions/orders";
-import { EXPRESS_PCT, expressSurcharge } from "@/lib/money";
+import { EXPRESS_PCT, expressSurcharge, CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService } from "@/lib/money";
 
 type EnabledService = { key: string; flag: string; label: string };
 type Slot = { startAt: string; endAt: string; dateStr: string; timeLabel: string; left: number; full: boolean };
@@ -45,6 +45,7 @@ export default function OrderNewClient({
     });
     return q;
   });
+  const [cycles, setCycles] = useState(1);
   const [express, setExpress] = useState(false);
   const [dropSlotAt, setDropSlotAt] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -54,9 +55,11 @@ export default function OrderNewClient({
     .filter(([label]) => quantities[label] > 0)
     .map(([label, rate]) => ({ label, rate, qty: quantities[label] }));
 
-  const subtotal = items.reduce((s, i) => s + i.rate * i.qty, 0);
+  const cycleBased = isCycleService(service);
+  const subtotal = cycleBased ? cycles * CYCLE_RATES[service] : items.reduce((s, i) => s + i.rate * i.qty, 0);
   const surcharge = express ? expressSurcharge(subtotal) : 0;
-  const gst = Math.round((subtotal + surcharge) * (gstPct / 100));
+  // Cycle rates are FINAL — Rs 200 means Rs 200, no GST line on cycle orders.
+  const gst = cycleBased ? 0 : Math.round((subtotal + surcharge) * (gstPct / 100));
   const total = subtotal + surcharge + gst;
   const pieces = items.reduce((s, i) => s + i.qty, 0);
 
@@ -68,16 +71,19 @@ export default function OrderNewClient({
   };
 
   const handleSubmit = async () => {
-    if (pieces === 0) {
+    if (!cycleBased && pieces === 0) {
       toast("Add at least one piece", true);
       return;
     }
     setLoading(true);
     const r = await placeOrder({
       service,
-      items: rateItems
-        .filter(([label]) => quantities[label] > 0)
-        .map(([label]) => ({ label, qty: quantities[label] })),
+      cycles: cycleBased ? cycles : undefined,
+      items: cycleBased
+        ? []
+        : rateItems
+            .filter(([label]) => quantities[label] > 0)
+            .map(([label]) => ({ label, qty: quantities[label] })),
       express,
       dropSlotAt: dropSlotAt || undefined,
     });
@@ -100,6 +106,37 @@ export default function OrderNewClient({
         onChange={setService}
       />
 
+      {cycleBased ? (
+        <>
+          <div className="muted mt12" style={{ fontSize: "12.5px" }}>
+            One cycle = up to {CYCLE_KG_LIMIT} kg. A heavier bag can simply use more cycles —
+            your choice; anything over the allowance is ₹50 per kg at the counter.
+          </div>
+          <div className="list mt12">
+            <div className="list-item">
+              <div style={{ flex: 1 }}>
+                <div className="h-sm">Cycles</div>
+                <div className="muted" style={{ fontSize: "12.5px" }}>
+                  {fmt(CYCLE_RATES[service])} per cycle · up to {CYCLE_KG_LIMIT * cycles} kg total
+                </div>
+              </div>
+              <div className="step">
+                <div className="qty">
+                  <button onClick={() => setCycles((c) => Math.max(1, c - 1))}>−</button>
+                  <span className="mono">{cycles}</span>
+                  <button onClick={() => setCycles((c) => Math.min(10, c + 1))}>+</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          {hasActiveSubscription && (
+            <div className="muted mt8" style={{ fontSize: "12px", padding: "0 4px" }}>
+              On a plan? Staff can burn {cycles === 1 ? "this cycle" : `these ${cycles} cycles`} from it at drop-off instead of charging you.
+            </div>
+          )}
+        </>
+      ) : (
+      <>
       <div className="muted mt12" style={{ fontSize: "12.5px" }}>
         Add the pieces you plan to drop off. Counter staff will confirm the actual count on arrival.
       </div>
@@ -127,6 +164,8 @@ export default function OrderNewClient({
           );
         })}
       </div>
+      </>
+      )}
 
       {/* Express option */}
       {expressEnabled && (

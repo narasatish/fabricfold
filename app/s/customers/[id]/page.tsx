@@ -49,6 +49,7 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
   const plain = {
     id: student.id,
     name: student.name,
+    kind: student.kind,
     phone: student.phone,
     credits: N(student.credits),
     lifetimePieces: student.lifetimePieces,

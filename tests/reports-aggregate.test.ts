@@ -51,7 +51,10 @@ let ORDERS = 0;
 beforeAll(async () => {
   db = (await import("../lib/db")).db;
   await ensureTestSchema(TEST_URL, async () => {
-    try { await db.sheetOutbox.count(); return true; } catch { return false; }
+    /* Probe the NEWEST schema addition, not an old table: a probe that checks
+       something ancient reports "current" forever and lets every later column
+       drift past it — exactly how Student.kind went missing here once. */
+      try { await db.waVerify.count(); await db.student.count({ where: { kind: "student" } }); return true; } catch { return false; }
   });
 
   for (const t of ["orderEvent", "order", "student", "college"] as const) {

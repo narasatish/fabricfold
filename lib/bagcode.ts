@@ -32,11 +32,14 @@ import type { Prisma } from "./generated/prisma/client";
 export const TIERS = ["bronze", "silver", "gold"] as const;
 export type Tier = (typeof TIERS)[number];
 
-/** Subscribed students get their tier's letter; everyone else gets "walkin". */
-export type BagKind = Tier | "walkin";
+/** Subscribed students get their tier's letter; non-subscribers "walkin";
+    college FACULTY get their own F series (Sep 2026) — they buy cycle packs
+    rather than tiered plans, so no tier letter fits them, and the counter
+    needs to see at a glance that a bag belongs to a teacher. */
+export type BagKind = Tier | "walkin" | "faculty";
 
-export const BAG_LETTER: Record<BagKind, string> = { bronze: "B", silver: "S", gold: "G", walkin: "W" };
-export const BAG_LABEL: Record<BagKind, string> = { bronze: "Bronze", silver: "Silver", gold: "Gold", walkin: "Walk-in" };
+export const BAG_LETTER: Record<BagKind, string> = { bronze: "B", silver: "S", gold: "G", walkin: "W", faculty: "F" };
+export const BAG_LABEL: Record<BagKind, string> = { bronze: "Bronze", silver: "Silver", gold: "Gold", walkin: "Walk-in", faculty: "Faculty" };
 
 /** Highest sequence a single kind can issue before the scheme needs widening.
 
@@ -79,7 +82,7 @@ export function parseBagCode(code: string): { kind: BagKind; n: number } | null 
   /* A 4-digit code may not lead with 0: "B0001" is a mistyping of B001, and
      a parser that guesses which code a smudge meant will one day hand a bag
      to the wrong student. Canonical forms only. */
-  const m = /^([BSGW])(\d{3}|[1-9]\d{3})$/.exec((code || "").trim().toUpperCase());
+  const m = /^([BSGWF])(\d{3}|[1-9]\d{3})$/.exec((code || "").trim().toUpperCase());
   if (!m) return null;
   const kinds = Object.keys(BAG_LETTER) as BagKind[];
   const kind = kinds.find((k) => BAG_LETTER[k] === m[1]);

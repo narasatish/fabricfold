@@ -121,21 +121,29 @@ export async function POST(req: Request) {
     if (name.length < 2) { problems.push(`row ${r}: name missing`); continue; }
     if (phone.length !== 10) { problems.push(`row ${r}: "${name}" — mobile must be 10 digits`); continue; }
     const parsed = parseBagCode(codeRaw);
-    if (!parsed || parsed.kind === "walkin") { problems.push(`row ${r}: "${name}" — customer ID "${codeRaw}" isn't B/S/G + number`); continue; }
-    const tier = parsed.kind as Tier;
-    const plan = planByTier.get(tier);
-    if (!plan) { problems.push(`row ${r}: "${name}" — no active ${tier} plan exists for ${college.name}; create it in Admin first`); continue; }
-    /* A plan whose buckets JSON is empty would import a subscription with 0
-       cycles — active on paper, unusable at the counter. Refuse loudly. */
-    const planBuckets = (plan.buckets as unknown as PlanBucket[] | null) ?? [];
-    if (!planBuckets.length || planBuckets.reduce((n, b) => n + (b.cycles || 0), 0) === 0) {
-      problems.push(`row ${r}: "${name}" — the ${tier} plan has no cycles configured; fix the plan in Admin first`);
-      continue;
+    if (!parsed || parsed.kind === "walkin") { problems.push(`row ${r}: "${name}" — customer ID "${codeRaw}" isn't B/S/G/F + number`); continue; }
+
+    /* FACULTY rows (F codes) register the person and their bag, nothing
+       more: faculty buy cycle packs at the counter (sellCyclePack), so an
+       import that invented a subscription would invent money. */
+    const isFaculty = parsed.kind === "faculty";
+    const tier = isFaculty ? null : (parsed.kind as Tier);
+    const plan = tier ? planByTier.get(tier) : null;
+    if (!isFaculty) {
+      if (!plan) { problems.push(`row ${r}: "${name}" — no active ${tier} plan exists for ${college.name}; create it in Admin first`); continue; }
+      /* A plan whose buckets JSON is empty would import a subscription with 0
+         cycles — active on paper, unusable at the counter. Refuse loudly. */
+      const pb = (plan.buckets as unknown as PlanBucket[] | null) ?? [];
+      if (!pb.length || pb.reduce((n, b) => n + (b.cycles || 0), 0) === 0) {
+        problems.push(`row ${r}: "${name}" — the ${tier} plan has no cycles configured; fix the plan in Admin first`);
+        continue;
+      }
     }
+    const planBuckets = plan ? ((plan.buckets as unknown as PlanBucket[] | null) ?? []) : [];
 
     // Amount is a CROSS-CHECK, never the source of truth — the letter is
     // printed on a physical bag; a discount changes the amount, not the tier.
-    if (amount && Math.abs(amount - Number(await planGross(plan))) > 1) {
+    if (plan && amount && Math.abs(amount - Number(await planGross(plan))) > 1) {
       warnings.push(`row ${r}: "${name}" paid ₹${amount}, ${tier} plan is ₹${await planGross(plan)} — imported as ${tier} (the bag letter wins)`);
     }
 
@@ -153,23 +161,25 @@ export async function POST(req: Request) {
           id = String(Math.floor(100000 + Math.random() * 900000));
           if (!(await tx.student.findUnique({ where: { id } }))) break;
         }
-        await tx.student.create({ data: { id, phone, name, collegeId } });
+        await tx.student.create({ data: { id, phone, name, collegeId, kind: isFaculty ? "faculty" : "student" } });
 
-        const buckets = usageBuckets(planBuckets);
-        const cyclesTotal = buckets.reduce((s: number, b: { cycles: number }) => s + b.cycles, 0);
-        await tx.subscription.create({
-          data: {
-            studentId: id, active: true, plan: plan.name, planId: plan.id,
-            buckets: buckets as unknown as object, cyclesTotal, kgPerCycle: 5,
-            startedAt: new Date(),
-          },
-        });
+        if (plan) {
+          const buckets = usageBuckets(planBuckets);
+          const cyclesTotal = buckets.reduce((s: number, b: { cycles: number }) => s + b.cycles, 0);
+          await tx.subscription.create({
+            data: {
+              studentId: id, active: true, plan: plan.name, planId: plan.id,
+              buckets: buckets as unknown as object, cyclesTotal, kgPerCycle: 5,
+              startedAt: new Date(),
+            },
+          });
+        }
         await tx.bag.create({
-          data: { code: codeRaw, studentId: id, tier, complimentary: true, price: 0, issuedBy: staff.id, note: "imported from enrolment sheet" },
+          data: { code: codeRaw, studentId: id, tier, complimentary: true, price: 0, issuedBy: staff.id, note: isFaculty ? "imported from faculty sheet" : "imported from enrolment sheet" },
         });
       });
       added.push(`${name} — ${codeRaw}`);
-      const letter = BAG_LETTER[tier];
+      const letter = BAG_LETTER[parsed.kind];
       maxPerLetter.set(letter, Math.max(maxPerLetter.get(letter) ?? 0, parsed.n));
     } catch (e) {
       problems.push(`row ${r}: "${name}" — ${(e as Error).message.split("\n")[0].slice(0, 120)}`);

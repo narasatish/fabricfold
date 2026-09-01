@@ -69,6 +69,13 @@ model Student {
   id             String   @id // human FabricFold code (6 digits) — shown on card/QR
   phone          String   @unique
   name           String
+  /**
+   * "student" | "faculty" (Sep 2026). Faculty use the same app, same orders,
+   * same tracking — the difference is commercial: they buy flexible cycle
+   * PACKS (N cycles at the per-cycle rate) instead of tiered plans, and their
+   * bags carry the F series. A field, not a table: everything else is shared.
+   */
+  kind           String   @default("student")
   collegeId      String
   college        College  @relation(fields: [collegeId], references: [id])
   credits        Decimal  @default(0)
@@ -284,6 +291,12 @@ model Order {
   paymentMethod           String? // upi | cash | credit | upi+credit | cash+credit | redo
   creditApplied           Decimal   @default(0)
   usedCycle               Boolean   @default(false)
+  /**
+   * How many cycles this order burns (Sep 2026, cycle-basis billing). A 9 kg
+   * bag may deliberately use two cycles — the student's choice — and the
+   * 5 kg allowance scales with it. 1 for every order that predates the rule.
+   */
+  cyclesCount             Int       @default(1)
   noGst                   Boolean   @default(false) // staff chose to bill without GST at accept; never invoiced
   redoOfId                String?
   refunded                Boolean   @default(false)

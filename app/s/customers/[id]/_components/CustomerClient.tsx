@@ -8,6 +8,8 @@ import { submitCompensation } from "@/lib/actions/credits";
 import { assignSubscription, upgradeSubscription, cancelSubscription } from "@/lib/actions/subscription";
 import { issueBag, retireBag, releaseBagCode, setBagCode, reissueBagSameCode } from "@/lib/actions/bags";
 import { walkInOrder } from "@/lib/actions/orders";
+import { sellCyclePack } from "@/lib/actions/subscription";
+import { CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService } from "@/lib/money";
 import { enqueueIntake, newIdemKey } from "@/lib/offline-queue";
 import { topUpCredits } from "@/lib/actions/ops";
 import { updateStudentPhone, updateStudentDetails } from "@/lib/actions/admin";
@@ -16,6 +18,7 @@ import { WEEKDAY_NAMES } from "@/lib/washday";
 type Student = {
   id: string;
   name: string;
+  kind: string;
   phone: string;
   credits: number;
   lifetimePieces: number;
@@ -78,6 +81,11 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
   const [showWalkIn, setShowWalkIn] = useState(false);
   const [wiService, setWiService] = useState(serviceKeys[0] || "washIron");
   const [wiQty, setWiQty] = useState<Record<string, number>>({});
+  const [wiCycles, setWiCycles] = useState(1);
+  const [packSvc, setPackSvc] = useState<"washFold" | "washIron">("washFold");
+  const [packCycles, setPackCycles] = useState(16);
+  const [packMethod, setPackMethod] = useState<"cash" | "upi">("cash");
+  const [packBusy, setPackBusy] = useState(false);
   const [wiWeight, setWiWeight] = useState(0);
   const [wiUseCycle, setWiUseCycle] = useState(false);
   const [wiNoGst, setWiNoGst] = useState(false);
@@ -239,11 +247,23 @@ Currently ${current}. Type the code printed on the bag they are being given.
     router.refresh();
   };
 
+  const doSellPack = async () => {
+    const price = packCycles * CYCLE_RATES[packSvc];
+    if (!confirm(`Sell ${packCycles} ${packSvc === "washFold" ? "Wash & Fold" : "Wash & Iron"} cycles for ₹${price} (${packMethod})?`)) return;
+    setPackBusy(true);
+    const r = await sellCyclePack(student.id, { service: packSvc, cycles: packCycles, method: packMethod });
+    setPackBusy(false);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(`${r.cycles} cycles added — ₹${r.price} recorded`);
+    router.refresh();
+  };
+
   const doWalkIn = async () => {
     const intake = {
       studentId: student.id,
       studentLabel: student.name,
       service: wiService,
+      cycles: isCycleService(wiService) ? wiCycles : undefined,
       items: wiItems.map(([label]) => ({ label, qty: wiQty[label] || 0 })).filter((i) => i.qty > 0),
       weightKg: wiWeight || null,
       useCycle: wiUseCycle,
@@ -436,6 +456,37 @@ Currently ${current}. Type the code printed on the bag they are being given.
       {/* Orders */}
       {student.orders.length > 0 && (
         <>
+          {/* Faculty buy flexible cycle PACKS, not tiered plans — the owner's
+              "6 months x 4 a month" model. Manager+ takes the money here. */}
+          {student.kind === "faculty" && staffRole >= 2 && (
+            <>
+              <div className="sec-title mt20">Cycle pack (faculty)</div>
+              <div className="card pad mt10">
+                <div className="row gap8" style={{ flexWrap: "wrap", alignItems: "center" }}>
+                  <select className="input" style={{ width: "auto" }} value={packSvc} onChange={(e) => setPackSvc(e.target.value as "washFold" | "washIron")}>
+                    <option value="washFold">Wash &amp; Fold · ₹{CYCLE_RATES.washFold}/cycle</option>
+                    <option value="washIron">Wash &amp; Iron · ₹{CYCLE_RATES.washIron}/cycle</option>
+                  </select>
+                  <div className="qty">
+                    <button onClick={() => setPackCycles((c) => Math.max(1, c - 4))}>−</button>
+                    <span className="mono">{packCycles}</span>
+                    <button onClick={() => setPackCycles((c) => Math.min(200, c + 4))}>+</button>
+                  </div>
+                  <select className="input" style={{ width: "auto" }} value={packMethod} onChange={(e) => setPackMethod(e.target.value as "cash" | "upi")}>
+                    <option value="cash">Cash</option>
+                    <option value="upi">UPI</option>
+                  </select>
+                </div>
+                <div className="muted mt8" style={{ fontSize: 12.5 }}>
+                  e.g. 6 months × 4/month = 24 cycles. Steps of 4 — a month at a time. Top-ups ADD to unused cycles, never replace them.
+                </div>
+                <button className="btn mt10" disabled={packBusy} onClick={doSellPack}>
+                  {packBusy ? "Recording…" : `Sell ${packCycles} cycles — ₹${packCycles * CYCLE_RATES[packSvc]}`}
+                </button>
+              </div>
+            </>
+          )}
+
           <div className="sec-title mt20">Bag</div>
           <div className="card pad mt10">
             {activeBag ? (
@@ -568,16 +619,29 @@ Currently ${current}. Type the code printed on the bag they are being given.
               {serviceKeys.map((k) => <option key={k} value={k}>{rates[k].label}</option>)}
             </select>
           </div>
-          {wiItems.map(([label, price]) => (
-            <div key={label} className="between" style={{ padding: "7px 0" }}>
-              <span style={{ fontSize: 14 }}>{label} <span className="muted" style={{ fontSize: 12 }}>₹{price}</span></span>
+          {isCycleService(wiService) ? (
+            <div className="between" style={{ padding: "7px 0" }}>
+              <span style={{ fontSize: 14 }}>
+                Cycles <span className="muted" style={{ fontSize: 12 }}>₹{CYCLE_RATES[wiService]} each · {CYCLE_KG_LIMIT * wiCycles} kg allowance</span>
+              </span>
               <div className="step"><div className="qty">
-                <button onClick={() => setWiQty({ ...wiQty, [label]: Math.max(0, (wiQty[label] || 0) - 1) })}>−</button>
-                <span>{wiQty[label] || 0}</span>
-                <button onClick={() => setWiQty({ ...wiQty, [label]: (wiQty[label] || 0) + 1 })}>+</button>
+                <button onClick={() => setWiCycles((c) => Math.max(1, c - 1))}>−</button>
+                <span>{wiCycles}</span>
+                <button onClick={() => setWiCycles((c) => Math.min(10, c + 1))}>+</button>
               </div></div>
             </div>
-          ))}
+          ) : (
+            wiItems.map(([label, price]) => (
+              <div key={label} className="between" style={{ padding: "7px 0" }}>
+                <span style={{ fontSize: 14 }}>{label} <span className="muted" style={{ fontSize: 12 }}>₹{price}</span></span>
+                <div className="step"><div className="qty">
+                  <button onClick={() => setWiQty({ ...wiQty, [label]: Math.max(0, (wiQty[label] || 0) - 1) })}>−</button>
+                  <span>{wiQty[label] || 0}</span>
+                  <button onClick={() => setWiQty({ ...wiQty, [label]: (wiQty[label] || 0) + 1 })}>+</button>
+                </div></div>
+              </div>
+            ))
+          )}
           <div className="field mt8">
             <label>Weight (kg)</label>
             <input className="input" type="number" step="0.1" value={wiWeight || ""} onChange={(e) => setWiWeight(Number(e.target.value))} />
@@ -591,7 +655,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
               <Switch on={wiUseCycle} onToggle={() => setWiUseCycle(!wiUseCycle)} />
             </div>
           )}
-          {!wiUseCycle && gstEnabled && (
+          {!wiUseCycle && gstEnabled && !isCycleService(wiService) && (
             <div className="chip-toggle" style={{ marginBottom: "12px" }}>
               <div>
                 <div className="h-sm">Bill without GST</div>

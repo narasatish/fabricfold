@@ -13,11 +13,10 @@ describe("overweight — 5 kg, Rs 50, round UP", () => {
     expect(CYCLE_KG_LIMIT).toBe(5);
     expect(EXCESS_PER_KG).toBe(50);
   });
-  it("rounds a started kilogram up: 5.2 kg bills as 1 kg over", () => {
-    // a scale reading 5.2 then 5.4 must not change the price
-    expect(excessWeightCharge(5.2)).toBe(50);
+  it("rounds to the started HALF kilogram: the owner's 6.5 kg → ₹75 example", () => {
+    expect(excessWeightCharge(5.2)).toBe(25);
     expect(excessWeightCharge(6)).toBe(50);
-    expect(excessWeightCharge(6.01)).toBe(100);
+    expect(excessWeightCharge(6.5)).toBe(75);
     expect(excessWeightCharge(8)).toBe(150);
   });
   it("charges nothing at or under the limit", () => {
@@ -34,9 +33,9 @@ describe("overweight — 5 kg, Rs 50, round UP", () => {
     // and only when there was actually something to waive
     expect(src).toMatch(/input\.waiveExcess && Number\(input\.weightKg\) > CYCLE_KG_LIMIT/);
   });
-  it("the accept sheet quotes the same rounded number that bills", () => {
+  it("the accept sheet quotes the same half-kg-rounded number that bills", () => {
     const ui = read("app/s/orders/[id]/_components/OrderClient.tsx");
-    expect(ui).toMatch(/Math\.ceil\(overKg\)/);
+    expect(ui).toMatch(/Math\.ceil\(overKg \* 2\) \/ 2/);
     expect(ui).toMatch(/Waive excess charge/);
   });
 });

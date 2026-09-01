@@ -86,31 +86,53 @@ export function shouldInvoiceOrder(o: { noGst?: boolean }, method: string, staff
    when billing a new order. */
 export const CYCLE_KG_LIMIT = 5;
 
-/* Flat rupees per kg over the allowance. Owner-set (Sep 2026): every plan has
-   the same 5 kg allowance and the same Rs 50/kg excess — replacing the old
-   3x-garment-rate derivation, which produced a different number per campus
-   and could not be quoted from memory at the counter. */
+/* Flat rupees per kg over the allowance, charged in HALF-kg steps. Owner-set
+   (Sep 2026, refined): 6.5 kg = 1.5 kg over = Rs 50 + Rs 25 = Rs 75. Half-kg
+   granularity is the owner's own worked example — whole-kg rounding would
+   charge Rs 100 for the same bag, and Rs 25 steps are still sayable at the
+   counter. The 500-600 g grace the owner allows is not a rule here: it is
+   staff judgement, which is exactly what the waive toggle records. */
 export const EXCESS_PER_KG = 50;
+export const EXCESS_PER_HALF_KG = 25;
+
+/* ─── Cycle-basis billing (owner, Sep 2026) ────────────────────────────────
+
+   Wash services are sold by the CYCLE, not the garment: Rs 200 per Wash &
+   Fold cycle, Rs 250 per Wash & Iron, each cycle carrying the 5 kg
+   allowance. The rate is FINAL — what the student hands over — so cycle
+   orders are always billed without GST. Dry cleaning (and Iron Only) stay
+   per-piece; a saree and a blanket are not a weight class. */
+export const CYCLE_RATES: Record<string, number> = { washFold: 200, washIron: 250 };
+export function isCycleService(service: string) {
+  return service in CYCLE_RATES;
+}
 
 /**
  * What the student owes for weight beyond the cycle's 5 kg.
  *
  * PROPORTIONAL, not rounded up to the next whole kilo. The old code did
  * `Math.ceil(over)`, so a bag 200 g over the limit was billed a full extra
- * Rounded UP to whole kilograms — owner's call (Sep 2026), reversing the old
- * fractional billing: 5.2 kg is billed as 1 kg over, because "one kg over,
- * fifty rupees" is a sentence staff can say at the counter, and a scale that
- * reads 5.2 on one weighing and 5.4 on the next should not change the price.
+ * Rounded UP to the started HALF kilogram: 5.2 kg bills as 0.5 over (Rs 25),
+ * 6.5 kg as 1.5 over (Rs 75) — the owner's own example. A scale reading 5.2
+ * on one weighing and 5.4 on the next gives the same price.
  *
- * `waived` zeroes the charge — staff judgement (a bedsheet week, a scale
- * acting up). The waiver is recorded on the order via surchargeWaivedBy, so
- * "why was this free?" has an answer months later.
+ * `cycles` is how many cycles this order uses — a student may burn two at
+ * once for a 9 kg bag, and the allowance scales with them: 2 cycles = 10 kg
+ * free before the excess starts.
+ *
+ * `waived` zeroes the charge — staff judgement (the ~half-kg grace the owner
+ * allows, a bedsheet week, a scale acting up). Audited with who did it.
  */
-export function excessWeightCharge(weightKg: number | null | undefined, _basePieceRate?: number, opts: { waived?: boolean } = {}) {
+export function excessWeightCharge(
+  weightKg: number | null | undefined,
+  _basePieceRate?: number,
+  opts: { waived?: boolean; cycles?: number } = {},
+) {
   if (opts.waived) return 0;
-  const over = (Number(weightKg) || 0) - CYCLE_KG_LIMIT;
+  const cycles = Math.max(1, Math.floor(opts.cycles ?? 1));
+  const over = (Number(weightKg) || 0) - CYCLE_KG_LIMIT * cycles;
   if (over <= 0) return 0;
-  return Math.ceil(over) * EXCESS_PER_KG;
+  return Math.ceil(over * 2) * EXCESS_PER_HALF_KG;
 }
 
 /** Bill math shared by acceptOrder and tests. Cycle orders carry only the excess charge. */
@@ -123,7 +145,11 @@ export function computeBill(sub: number, surcharge: number, gstPct: number, opts
   if (opts.usedCycle) return { gst: 0, total: (opts.excessCharge || 0) + surcharge };
   const taxable = sub + surcharge;
   const gst = opts.noGst ? 0 : Math.round(taxable * (gstPct / 100));
-  return { gst, total: taxable + gst };
+  /* excessCharge also reaches this branch now: a NON-subscriber paying
+     Rs 200 for a 6 kg cycle owes 200 + 50, and the excess sits outside the
+     taxable base — it is the same flat per-kg charge a plan holder pays,
+     never a priced garment. Zero for every per-piece service. */
+  return { gst, total: taxable + gst + (opts.excessCharge || 0) };
 }
 
 /** Create the GST tax invoice for an order (inside the payment transaction). */

@@ -31,7 +31,8 @@ export const DEFAULT_RATES = {
   washIron: { label: "Wash & Iron", items: [["Regular garment", 15], ["Bed sheet", 25]] },
   washFold: { label: "Wash & Fold", items: [["Regular garment", 12], ["Bed sheet", 20]] },
   ironOnly: { label: "Iron Only", items: [["Shirt / T-shirt / Pant", 10], ["Ladies' top", 15], ["Saree", 30], ["Pyjama", 10], ["Blouse", 10], ["Dupatta", 10]] },
-  dryClean: { label: "Dry Clean", items: [["Shirt / Pant / T-shirt", 100], ["Ladies' top", 129], ["Pyjama", 70], ["Dupatta", 60], ["Blouse (light)", 60], ["Blouse (medium)", 100], ["Blouse (heavy)", 140], ["Shoes / Sneakers", 350]] },
+  // Owner's menu, Sep 2026 — replaced wholesale; add items from Admin → Rates.
+  dryClean: { label: "Dry Clean", items: [["Shirt / T-shirt / Pant", 80], ["Kurta", 100], ["Saree", 200], ["Single blanket", 200], ["Double blanket", 250]] },
 } as const;
 
 function rid(n: number) { let s = ""; for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10); return s; }
@@ -124,10 +125,10 @@ async function main() {
 
   const orders = [
     await mkOrder(students[0], "washIron", [["Regular garment", 9]], "processing", false, 1),
-    await mkOrder(students[0], "dryClean", [["Shirt / Pant / T-shirt", 3], ["Ladies' top", 1]], "ready", false, 2),
+    await mkOrder(students[0], "dryClean", [["Shirt / T-shirt / Pant", 3], ["Kurta", 1]], "ready", false, 2),
     await mkOrder(students[1], "ironOnly", [["Shirt / T-shirt / Pant", 6], ["Saree", 1]], "received", false, 0),
     await mkOrder(students[1], "washIron", [["Regular garment", 5]], "draft", false, 0),
-    await mkOrder(students[2], "dryClean", [["Shoes / Sneakers", 1], ["Shirt / Pant / T-shirt", 2]], "collected", true, 5),
+    await mkOrder(students[2], "dryClean", [["Saree", 1], ["Shirt / T-shirt / Pant", 2]], "collected", true, 5),
     await mkOrder(students[2], "washIron", [["Regular garment", 7]], "collected", false, 9),
     await mkOrder(students[3], "ironOnly", [["Shirt / T-shirt / Pant", 4]], "ready", false, 1),
   ];

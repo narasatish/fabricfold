@@ -93,6 +93,18 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
     next[svc].items[idx][1] = price;
     setRates(next);
   };
+  const setRateItem = (svc: string, i: number, name: string, price: number) => {
+    setRates((r) => {
+      const items = r[svc].items.map((it, j) => (j === i ? ([name, price] as [string, number]) : it));
+      return { ...r, [svc]: { ...r[svc], items } };
+    });
+  };
+  const addRateItem = (svc: string) => {
+    setRates((r) => ({ ...r, [svc]: { ...r[svc], items: [...r[svc].items, ["New item", 0] as [string, number]] } }));
+  };
+  const removeRateItem = (svc: string, i: number) => {
+    setRates((r) => ({ ...r, [svc]: { ...r[svc], items: r[svc].items.filter((_, j) => j !== i) } }));
+  };
 
   return (
     <div className="pad">
@@ -397,15 +409,28 @@ Students already registered there keep their records and can be restored with th
       {/* ---------- Sheets ---------- */}
       <Sheet open={sheet === "rates"} onClose={() => setSheet(null)}>
         <div className="h-md" style={{ padding: "0 4px 12px" }}>Rates &amp; GST</div>
+        {/* Items are editable in full — name, price, add, remove. The menu is
+            the owner's to change (the Sep 2026 dry-clean list came in this
+            way); wash services bill by the CYCLE now, so their item lists are
+            legacy and hidden from editing to avoid implying they still bill. */}
         {Object.entries(rates).map(([svc, r]) => (
           <div key={svc} className="card pad" style={{ marginBottom: 12 }}>
-            <div className="h-sm" style={{ marginBottom: 8 }}>{r.label}</div>
-            {r.items.map(([name, price], i) => (
-              <div key={name} className="between" style={{ padding: "5px 0" }}>
-                <span style={{ fontSize: 13.5 }}>{name}</span>
-                <input className="input" type="number" value={price} style={{ width: 90, height: 38, textAlign: "right" }} onChange={(e) => setRatePrice(svc, i, Number(e.target.value))} />
+            <div className="h-sm" style={{ marginBottom: 8 }}>
+              {r.label}
+              {(svc === "washFold" || svc === "washIron") && (
+                <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}> — billed per cycle ({svc === "washFold" ? "₹200" : "₹250"}), items below are legacy</span>
+              )}
+            </div>
+            {(svc === "washFold" || svc === "washIron") ? null : r.items.map(([name, price], i) => (
+              <div key={i} className="row gap8" style={{ padding: "5px 0", alignItems: "center" }}>
+                <input className="input" value={name} style={{ flex: 1, height: 38 }} onChange={(e) => setRateItem(svc, i, e.target.value, price)} />
+                <input className="input" type="number" value={price} style={{ width: 90, height: 38, textAlign: "right" }} onChange={(e) => setRateItem(svc, i, name, Number(e.target.value))} />
+                <button className="btn xs sec" onClick={() => removeRateItem(svc, i)} aria-label={`Remove ${name}`}>×</button>
               </div>
             ))}
+            {!(svc === "washFold" || svc === "washIron") && (
+              <button className="btn xs ghost mt8" onClick={() => addRateItem(svc)}>+ Add item</button>
+            )}
           </div>
         ))}
         <div className="chip-toggle" style={{ marginBottom: 14 }}>

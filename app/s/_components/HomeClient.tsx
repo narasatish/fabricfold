@@ -2,7 +2,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
-import { Seg, Sheet, useToast } from "@/components/chrome";
+import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { fmt, timeAgo, initials } from "@/lib/format";
 import { isOverdue } from "@/lib/money";
 import { dayLabel, hhmm, istDateStr, istMinutes } from "@/lib/slots";
@@ -66,7 +66,7 @@ export default function StaffHomeClient({
   const [batchMode, setBatchMode] = useState(false);
   const [batchIds, setBatchIds] = useState<Set<string>>(new Set());
   const [batchBusy, setBatchBusy] = useState(false);
-  const [reg, setReg] = useState({ name: "", phone: "", collegeId: colleges[0]?.id || "" });
+  const [reg, setReg] = useState({ name: "", phone: "", collegeId: colleges[0]?.id || "", kind: "student" as "student" | "faculty" });
   const [regLoading, setRegLoading] = useState(false);
 
   const q = search.trim().toLowerCase();
@@ -124,7 +124,7 @@ export default function StaffHomeClient({
     if (!r.ok) return toast(r.error || "Failed", true);
     toast(`Student registered — ID ${r.id}`);
     setShowRegister(false);
-    setReg({ name: "", phone: "", collegeId: colleges[0]?.id || "" });
+    setReg({ name: "", phone: "", collegeId: colleges[0]?.id || "", kind: "student" });
     router.push(`/s/customers/${r.id}`);
   };
 
@@ -458,6 +458,15 @@ export default function StaffHomeClient({
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
+          </div>
+          {/* Faculty get the F bag series and buy cycle packs instead of
+              plans — everything else about their account is identical. */}
+          <div className="chip-toggle mt8">
+            <div>
+              <div className="h-sm">College faculty</div>
+              <div className="muted" style={{ fontSize: 12 }}>F-series ID · buys cycle packs, not plans</div>
+            </div>
+            <Switch on={reg.kind === "faculty"} onToggle={() => setReg({ ...reg, kind: reg.kind === "faculty" ? "student" : "faculty" })} />
           </div>
           <button className="btn mt16" onClick={handleRegister} disabled={regLoading || !reg.name.trim() || reg.phone.length !== 10}>
             <Svg name="check" size={18} /> {regLoading ? "Registering…" : "Register student"}

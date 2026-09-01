@@ -11,6 +11,8 @@ import { pushNotif, audit } from "../notify";
 import { notifyOwner } from "../mail";
 import { assignWashDay } from "../washday-server";
 import { syncBagToPlan } from "./bags";
+import { CYCLE_RATES } from "../money";
+import { enqueueSheetEvent, flushSoon, istStamp } from "../sheet-events";
 
 const rid = (n: number) => { let s = ""; for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10); return s; };
 
@@ -276,4 +278,77 @@ export async function cancelSubscriptionRequest() {
     await db.otp.deleteMany({ where: { purpose: "subscription", refId: stu.id } });
   }
   return { ok: true as const };
+}
+
+/* ─── Faculty cycle packs (Sep 2026) ───────────────────────────────────────
+
+   Faculty are not sold tiered plans — they pay for however many cycles they
+   want up front ("6 months × 4 a month" = 24), at the flat per-cycle rate:
+   Rs 200 Wash & Fold, Rs 250 Wash & Iron. The rate is FINAL, so the payment
+   is recorded (drawer, reports, Sheet all see the money) but NO GST invoice
+   is minted — the owner's call, consistent with cycle pricing everywhere.
+
+   Mechanically a pack IS a subscription with a custom bucket: planId stays
+   null, the snapshot names the pack, and every existing consumer — the
+   order flow, cancellation restore, the customer's balance screen — works
+   unchanged. A second pack TOPS UP the first rather than replacing it:
+   unused cycles are paid-for cycles, and a top-up that silently discarded
+   them would be theft by bookkeeping. */
+export async function sellCyclePack(
+  studentId: string,
+  input: { service: "washFold" | "washIron"; cycles: number; method: "cash" | "upi" },
+) {
+  const st = await requireStaff(2); // Manager+ — this takes money
+  const rate = CYCLE_RATES[input.service];
+  const cycles = Math.floor(input.cycles);
+  if (!rate) return { ok: false as const, error: "Pick Wash & Fold or Wash & Iron" };
+  if (!Number.isFinite(cycles) || cycles < 1 || cycles > 200) {
+    return { ok: false as const, error: "Cycles must be between 1 and 200" };
+  }
+
+  const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: true } });
+  if (!stu) return { ok: false as const, error: "Student not found" };
+  if (stu.kind !== "faculty") {
+    return { ok: false as const, error: "Cycle packs are for faculty — students buy plans" };
+  }
+
+  const price = cycles * rate;
+  const label = input.service === "washFold" ? "Wash & Fold" : "Wash & Iron";
+
+  await db.$transaction(async (tx) => {
+    type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
+    const existing = stu.subscription;
+    const buckets: Bucket[] = ((existing?.buckets as unknown as Bucket[] | null) ?? []).map((b) => ({ ...b }));
+    const idx = buckets.findIndex((b) => b.service === input.service);
+    if (idx >= 0) buckets[idx] = { ...buckets[idx], cycles: buckets[idx].cycles + cycles };
+    else buckets.push({ service: input.service, cycles, used: 0, kgPerCycle: 5 });
+    const cyclesTotal = buckets.reduce((n, b) => n + b.cycles, 0);
+
+    await tx.subscription.upsert({
+      where: { studentId },
+      create: {
+        studentId, active: true, plan: `Cycle pack — ${label}`,
+        buckets: buckets as unknown as object, cyclesTotal, kgPerCycle: 5, startedAt: new Date(),
+      },
+      update: {
+        active: true, plan: existing?.plan?.startsWith("Cycle pack") ? existing.plan : `Cycle pack — ${label}`,
+        buckets: buckets as unknown as object, cyclesTotal,
+        cancelledAt: null, cancelledReason: null, cancelledBy: null,
+      },
+    });
+    await tx.payment.create({
+      data: {
+        method: input.method, amount: price, collegeId: stu.collegeId, studentId,
+        note: `Cycle pack: ${cycles}× ${label} @ ₹${rate}`,
+      },
+    });
+    await enqueueSheetEvent(tx, "payment", [
+      istStamp(), stu.name, `Cycle pack ${cycles}× ${label}`, price, input.method, "—",
+    ]);
+  });
+
+  await audit("Cycle pack sold", `${stu.name} (${stu.id}) · ${cycles}× ${label} · ₹${price} ${input.method}`, st.id);
+  await pushNotif(studentId, `${cycles} ${label} cycles added to your account — ₹${price} received. Happy washing!`, "credit");
+  flushSoon();
+  return { ok: true as const, price, cycles };
 }

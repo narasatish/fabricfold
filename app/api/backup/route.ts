@@ -66,6 +66,34 @@ export async function GET(req: Request) {
     } catch {
       return new Response("unauthorized", { status: 401 });
     }
+
+    const url = new URL(req.url);
+
+    /* ?check — WHERE do off-site backups go? Names the storage host and
+       whether it answers; never a key. Exists because the Sydney→Mumbai
+       migration left this exact question unanswerable from outside: the env
+       vars are sensitive, the dashboard shows only one project at a time,
+       and "backups are configured" is not "backups are landing". */
+    if (url.searchParams.get("check") !== null) {
+      const base = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_KEY;
+      if (!base || !key) return Response.json({ configured: false });
+      const probe = await fetch(`${base}/storage/v1/bucket/backups`, {
+        headers: { Authorization: `Bearer ${key}`, apikey: key },
+      }).catch(() => null);
+      return Response.json({
+        configured: true,
+        host: new URL(base).host,
+        bucketExists: probe?.ok ?? false,
+        bucketStatus: probe?.status ?? "unreachable",
+      });
+    }
+
+    /* ?upload — the nightly push, on demand. The Owner should not have to
+       wait for 1:30am to prove a backup lands after fixing storage. */
+    if (url.searchParams.get("upload") !== null) {
+      return pushToStorage();
+    }
+
     const snap = await snapshot();
     const name = `fabricfold-backup-${snap.takenAt.replace(/[:.]/g, "-")}.json`;
     return new Response(JSON.stringify(snap), {
@@ -78,6 +106,10 @@ export async function GET(req: Request) {
   }
 
   // Cron path: push the snapshot to Supabase Storage.
+  return pushToStorage();
+}
+
+async function pushToStorage() {
   const base = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_KEY;
   if (!base || !key) return new Response("storage not configured — set SUPABASE_URL & SUPABASE_SERVICE_KEY", { status: 503 });
 
@@ -90,8 +122,11 @@ export async function GET(req: Request) {
     body: JSON.stringify(snap),
   });
   if (!res.ok) {
-    console.error("backup upload failed", res.status, await res.text().catch(() => ""));
-    return new Response("backup upload failed", { status: 500 });
+    const detail = await res.text().catch(() => "");
+    console.error("backup upload failed", res.status, detail);
+    // The DETAIL reaches the caller: "Bucket not found" and "bad key" need
+    // different fixes, and a bare 500 hid that difference for weeks.
+    return new Response(`backup upload failed (${res.status}): ${detail.slice(0, 300)}`, { status: 500 });
   }
   return Response.json({ ok: true, stored: name, counts: snap.counts });
 }

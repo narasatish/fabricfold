@@ -255,6 +255,31 @@ try {
       }
     }
   }
+  /* ---- Row Level Security: ON for every table, with NO policies. ----
+
+     Supabase auto-exposes a REST API (PostgREST) over every table, and with
+     RLS off, anyone holding the project's anon key can read them through it —
+     the "RLS Disabled in Public" wall Supabase's Advisor raises (32 findings,
+     Sep 2026). This app never uses that API: it speaks Postgres directly as
+     the table owner, and OWNERS BYPASS RLS, so enabling it with zero policies
+     closes the REST door completely while changing nothing for the app.
+     Enforced here, on every deploy, so a new table can never ship exposed. */
+  {
+    const tables = await client.query(
+      `SELECT tablename FROM pg_tables WHERE schemaname = $1`, [SCHEMA]);
+    let rlsEnabled = 0;
+    for (const { tablename } of tables.rows) {
+      const st = await client.query(
+        `SELECT relrowsecurity FROM pg_class c
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = $1 AND c.relname = $2`, [SCHEMA, tablename]);
+      if (!st.rows[0]?.relrowsecurity) {
+        await client.query(`ALTER TABLE "${SCHEMA}"."${tablename}" ENABLE ROW LEVEL SECURITY`);
+        rlsEnabled++;
+      }
+    }
+    console.log(`[guards] RLS — ${rlsEnabled} table(s) enabled, ${tables.rows.length - rlsEnabled} already on`);
+  }
 } catch (e) {
   // A deploy without ledger protection is worse than no deploy: fail the build
   // and leave the previous deployment live.

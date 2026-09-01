@@ -155,6 +155,16 @@ model Staff {
   // Same revocation mechanism as Student — see the note there. Matters more
   // here: a staff session can take payments and issue refunds.
   sessionEpoch Int @default(0)
+
+  /**
+   * Per-person overrides on top of the role's defaults (Sep 2026): the owner
+   * grants or revokes named tools — money reports, refunds, day close —
+   * without inventing a new role for every trust decision. {"reports": true}
+   * grants; {"reports": false} revokes; absent = the role decides. Owners are
+   * exempt from revocation: a control panel that can lock out its own owner
+   * is a footgun, not a feature.
+   */
+  perms Json?
 }
 
 // ───────────── Subscription (cycle-based) ─────────────
@@ -615,8 +625,15 @@ model WaVerify {
   claimHash String
 
   status    String  @default("pending") // pending | verified | failed | claimed
+  /**
+   * Which door this attempt opens: "customer" or "staff" (Sep 2026 — the
+   * owner wants staff in through WhatsApp too). The webhook checks the
+   * matching table, and the claim mints the matching session; a student
+   * can never ride a staff attempt in, or vice versa.
+   */
+  mode      String  @default("customer")
   phone     String? // filled from Meta's payload — this is the VERIFIED number
-  studentId String?
+  studentId String? // the matched account id — a Student id or a Staff id, per mode
   reason    String? // why it failed, in words the student can act on
 
   expiresAt DateTime

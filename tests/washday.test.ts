@@ -28,7 +28,7 @@ beforeAll(async () => {
     /* Probe the NEWEST schema addition, not an old table: a probe that checks
        something ancient reports "current" forever and lets every later column
        drift past it — exactly how Student.kind went missing here once. */
-      try { await db.waVerify.count(); await db.student.count({ where: { kind: "student" } }); return true; } catch { return false; }
+      try { await db.waVerify.count({ where: { mode: "customer" } }); await db.student.count({ where: { kind: "student" } }); return true; } catch { return false; }
   });
   ({ assignWashDay, washDayDistribution } = await import("../lib/washday-server"));
   ({ isOffWashDay } = await import("../lib/washday"));

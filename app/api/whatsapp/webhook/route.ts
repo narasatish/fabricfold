@@ -121,23 +121,35 @@ async function resolveSignIn(from: string, text: string) {
     if (!row || row.status !== "pending") return;          // already handled, or not ours
     if (row.expiresAt.getTime() < Date.now()) return;      // let it expire quietly
 
-    /* Meta gives the number with country code and no plus. Students are
+    /* Meta gives the number with country code and no plus. Accounts are
        stored as the last 10 digits, the same normalisation used everywhere
        else a phone is compared. */
     const phone = from.replace(/\D/g, "").slice(-10);
-    const stu = await db.student.findUnique({ where: { phone } });
 
-    /* No account is a FAILURE, recorded with a reason, not silence. The
-       student is staring at a spinner; "visit the counter" is the one thing
-       that actually helps them, and matches what OTP sign-in already says. */
-    /* updateMany, not update: it takes a non-unique filter, so `status`
-       stays in the WHERE and a duplicate delivery — Meta retries — cannot
-       overwrite an already-resolved row. */
+    /* The attempt's MODE decides which table answers. A staff attempt from a
+       number that is only a student FAILS — same wording as OTP staff login,
+       and deliberately no hint about which numbers are staff. */
+    let accountId: string | null = null;
+    let failReason: string;
+    if (row.mode === "staff") {
+      const st = await db.staff.findUnique({ where: { phone } });
+      accountId = st && st.active ? st.id : null;
+      failReason = "This number is not registered as staff.";
+    } else {
+      const stu = await db.student.findUnique({ where: { phone } });
+      accountId = stu?.id ?? null;
+      failReason = "This WhatsApp number isn't registered yet — please visit the counter to be registered.";
+    }
+
+    /* No account is a FAILURE, recorded with a reason, not silence — the
+       person is staring at a spinner. updateMany, not update: it takes a
+       non-unique filter, so `status` stays in the WHERE and a duplicate
+       delivery — Meta retries — cannot overwrite an already-resolved row. */
     await db.waVerify.updateMany({
       where: { id: row.id, status: "pending" },
-      data: stu
-        ? { status: "verified", phone, studentId: stu.id }
-        : { status: "failed", phone, reason: "This WhatsApp number isn't registered yet — please visit the counter to be registered." },
+      data: accountId
+        ? { status: "verified", phone, studentId: accountId }
+        : { status: "failed", phone, reason: failReason },
     });
   } catch (e) {
     console.error("[wa-inbound] sign-in match failed", e);

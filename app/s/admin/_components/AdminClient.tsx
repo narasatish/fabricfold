@@ -11,6 +11,7 @@ import {
   saveRates, savePlan, togglePlan, savePaymentConfig, saveSettings,
   toggleFeature, saveCollege, deleteCollege, setCollegeActive, saveStaff, setStaffActive, createPayslip,
 } from "@/lib/actions/admin";
+import { PERM_DEFS } from "@/lib/perms";
 import { markErrorsSeen, syncSheetsNow } from "@/lib/actions/ops";
 import { saveSlotWindow, toggleSlotWindow, deleteSlotWindow } from "@/lib/actions/slots";
 import { hhmm as slotTime } from "@/lib/slots"; // local `hhmm` below formats a timestamp — don't collide
@@ -32,7 +33,7 @@ type Props = {
   };
   colleges: { id: string; name: string; address: string; closedWeekday: number | null; active: boolean; features: Record<string, boolean> }[];
   washDayByCollege: Record<string, number[]>;
-  staff: { id: string; name: string; phone: string; role: number; collegeId: string | null; active: boolean }[];
+  staff: { id: string; name: string; phone: string; role: number; collegeId: string | null; active: boolean; perms: Record<string, boolean> }[];
   payslips: { id: string; number: string; month: string; net: number; staffName: string }[];
   plans: PlanRow[];
   attendance: { staffId: string; name: string; todayIn: number | null; todayOut: number | null; daysThisMonth: number }[];
@@ -72,7 +73,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   const [pay, setPay] = useState({ ...config.payment });
   const [settings, setSettings] = useState({ reportEmail: config.settings.reportEmail || "", dailyEmail: !!config.settings.dailyEmail, sendHour: config.settings.sendHour ?? 21, openingFloat: config.settings.openingFloat ?? 0, garmentTagsEnabled: config.settings.garmentTagsEnabled === true });
   const [colEdit, setColEdit] = useState<{ id?: string; name: string; address: string; closedWeekday: number | null }>({ name: "", address: "", closedWeekday: null });
-  const [stEdit, setStEdit] = useState<{ id?: string; name: string; phone: string; role: number; active?: boolean }>({ name: "", phone: "", role: 1 });
+  const [stEdit, setStEdit] = useState<{ id?: string; name: string; phone: string; role: number; active?: boolean; perms: Record<string, boolean> }>({ name: "", phone: "", role: 1, perms: {} });
   const [impCollege, setImpCollege] = useState(colleges.find((c) => c.active)?.id || colleges[0]?.id || "");
   const [impBusy, setImpBusy] = useState(false);
   const [impResult, setImpResult] = useState<null | { added: string[]; skipped: string[]; problems: string[]; warnings: string[] }>(null);
@@ -357,7 +358,7 @@ Students already registered there keep their records and can be restored with th
              past payslips and payments — and you need a way back if the wrong
              person was removed. */
           <button key={x.id} className="list-item tap" style={{ width: "100%", textAlign: "left", opacity: x.active ? 1 : 0.45 }}
-            onClick={() => { setStEdit({ id: x.id, name: x.name, phone: x.phone, role: x.role, active: x.active }); setSheet("staff"); }}>
+            onClick={() => { setStEdit({ id: x.id, name: x.name, phone: x.phone, role: x.role, active: x.active, perms: { ...x.perms } }); setSheet("staff"); }}>
             <div className="avatar" style={{ width: 38, height: 38, fontSize: 14 }}>{x.name[0]}</div>
             <div className="grow">
               <div className="h-sm">{x.name}</div>
@@ -367,7 +368,7 @@ Students already registered there keep their records and can be restored with th
           </button>
         ))}
       </div>
-      <button className="btn ghost mt12" onClick={() => { setStEdit({ name: "", phone: "", role: 1 }); setSheet("staff"); }}>
+      <button className="btn ghost mt12" onClick={() => { setStEdit({ name: "", phone: "", role: 1, perms: {} }); setSheet("staff"); }}>
         <Svg name="plus" size={17} /> Add staff
       </button>
 
@@ -550,6 +551,25 @@ Students already registered there keep their records and can be restored with th
             {currentRole >= 4 && <option value={4}>Owner</option>}
           </select>
         </div>
+        {/* Named tools: the role sets the default, these switches bend the
+            person. Owners are exempt by design — no lockout footguns. */}
+        {stEdit.role < 4 && (
+          <div style={{ marginBottom: 12 }}>
+            <div className="sec-title" style={{ marginTop: 4 }}>Tools</div>
+            {Object.entries(PERM_DEFS).map(([key, def]) => {
+              const effective = stEdit.perms[key] ?? stEdit.role >= def.minRole;
+              return (
+                <div key={key} className="chip-toggle" style={{ marginBottom: 8 }}>
+                  <div>
+                    <div className="h-sm">{def.label}</div>
+                    <div className="muted" style={{ fontSize: 12 }}>{def.hint}{stEdit.perms[key] !== undefined ? " · overridden" : " · role default"}</div>
+                  </div>
+                  <Switch on={effective} onToggle={() => setStEdit({ ...stEdit, perms: { ...stEdit.perms, [key]: !effective } })} />
+                </div>
+              );
+            })}
+          </div>
+        )}
         <button className="btn" onClick={() => run(() => saveStaff({ ...stEdit, collegeId: null }), "Staff saved")}>{stEdit.id ? "Save" : "Create staff account"}</button>
         <div className="muted center mt8" style={{ fontSize: 12 }}>They sign in to the staff app with this mobile.</div>
 

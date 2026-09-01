@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getSession } from "@/lib/auth";
+import { staffCan } from "@/lib/perms";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { parsePeriod, computeReport } from "@/lib/report";
@@ -12,6 +13,10 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
   const sp = await searchParams;
   const s = await getSession();
   if (!s || s.mode !== "staff") redirect("/login");
+  /* Money reports are a named tool, not a staff birthright: Counter staff
+     see the queue, not the revenue. The owner grants exceptions per person. */
+  const me = await db.staff.findUnique({ where: { id: s.staffId } });
+  if (!me || !staffCan(me, "reports")) redirect("/s");
   const staff = await db.staff.findUnique({ where: { id: s.staffId } });
   if (!staff) redirect("/login");
 

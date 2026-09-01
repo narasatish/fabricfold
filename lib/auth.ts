@@ -95,6 +95,16 @@ export async function liveSession(): Promise<Session | null> {
   }
 }
 
+/** requireStaff + a named-tool check. The tool gate sits on top of the role
+    floor, so a revoked manager is refused here even though their role would
+    have passed — and a granted counter member gets through. */
+export async function requireStaffPerm(key: import("./perms").PermKey) {
+  const st = await requireStaff(1);
+  const { staffCan, PERM_DEFS } = await import("./perms");
+  if (!staffCan(st, key)) throw new AuthError(`Your account doesn't have "${PERM_DEFS[key].label}" — ask the owner`);
+  return st;
+}
+
 export class AuthError extends Error {
   status = 401;
 }

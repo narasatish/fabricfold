@@ -1,7 +1,7 @@
 /* Real XLSX exports via exceljs — full report / transactions / GST / expenses.
    Amounts are raw numbers so they sum in Excel. Staff-only. */
 import ExcelJS from "exceljs";
-import { requireStaff } from "@/lib/auth";
+import { requireStaff, requireStaffPerm } from "@/lib/auth";
 import { parsePeriod, computeReport } from "@/lib/report";
 import { db } from "@/lib/db";
 
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
-    await requireStaff(1);
+    await requireStaffPerm("reports");
   } catch {
     return new Response("unauthorized", { status: 401 });
   }

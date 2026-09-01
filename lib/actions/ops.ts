@@ -1,7 +1,7 @@
 "use server";
 /* Operations: staff attendance, day-close cash ritual, wallet top-ups. */
 import { db } from "../db";
-import { requireStaff } from "../auth";
+import { requireStaff, requireStaffPerm } from "../auth";
 import { audit } from "../notify";
 import { notifyOwner } from "../mail";
 import { computeReport, parsePeriod } from "../report";
@@ -38,7 +38,7 @@ export async function clockOut() {
    Staff physically count the cash drawer; the app records counted vs expected.
    A non-zero variance is permanent evidence — the anti-theft ritual. */
 export async function closeDay(countedCash: number, note?: string) {
-  const st = await requireStaff(2);
+  const st = await requireStaffPerm("dayclose");
   const date = istToday();
   if (await db.dayClose.findUnique({ where: { date } })) return { ok: false as const, error: "Today is already closed" };
   if (countedCash < 0 || !Number.isFinite(countedCash)) return { ok: false as const, error: "Enter the counted cash amount" };

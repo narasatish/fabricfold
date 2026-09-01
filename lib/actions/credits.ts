@@ -2,7 +2,7 @@
 /* Compensation — credits by default; cash is Manager+ only, posts a cash_out
    payment and (if the order was invoiced) raises a proportional credit note. */
 import { db } from "../db";
-import { requireStaff } from "../auth";
+import { requireStaffPerm } from "../auth";
 import { createCreditNote } from "../money";
 import { publish } from "../realtime";
 import { pushNotif, audit } from "../notify";
@@ -10,7 +10,12 @@ import { pushNotif, audit } from "../notify";
 const KIND_LABEL: Record<string, string> = { damage: "Damage", stain: "Stain/re-do", missing: "Missing item", goodwill: "Goodwill", manual: "Adjustment" };
 
 export async function submitCompensation(input: { studentId: string; orderId?: string | null; complaintId?: string | null; kind: string; amount: number; method: "credit" | "cash"; comment: string }) {
-  const st = await requireStaff(input.method === "cash" ? 2 : 1); // cash comp = Manager+
+  /* Compensation gives money away, so it rides the refunds tool. The old
+     "credit comp = any staff" quietly meant Counter could mint wallet money;
+     grantable now, but a deliberate grant rather than a default. Cash still
+     additionally needs Manager+ — notes leave a drawer, not a database. */
+  const st = await requireStaffPerm("refunds");
+  if (input.method === "cash" && st.role < 2) return { ok: false as const, error: "Cash compensation needs a Manager" };
   const amount = Math.floor(input.amount);
   if (!amount || amount <= 0) return { ok: false as const, error: "Enter a valid amount" };
   const stu = await db.student.findUniqueOrThrow({ where: { id: input.studentId } });

@@ -6,7 +6,7 @@ import { db } from "../db";
 import { featureOn, serviceOn } from "../features";
 import { enqueueSheetEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import type { Prisma } from "../generated/prisma/client";
-import { requireStudent, requireStaff } from "../auth";
+import { requireStudent, requireStaff, requireStaffPerm } from "../auth";
 import { expressSurcharge, urgentCycleCharge, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, isCycleService } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
@@ -596,7 +596,9 @@ export type ActionResult = { ok: boolean; error?: string; id?: string; status?: 
    means the wash happened, so handing the cycle back too would pay the student
    twice. Staff decide. */
 export async function refundOrder(orderId: string, amount: number, via: "upi" | "cash" | "credit", reason: string, restoreCycle = false): Promise<ActionResult> {
-  const st = await requireStaff(1);
+  /* Was requireStaff(1) — ANY staff could give money back. Refunds are now a
+     named tool: Manager+ by default, grantable or revocable per person. */
+  const st = await requireStaffPerm("refunds");
   if (!amount || amount <= 0) return { ok: false, error: "Enter a valid amount" };
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId }, include: { invoice: true, student: { include: { subscription: true } } } });
 

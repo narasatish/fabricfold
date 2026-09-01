@@ -4,6 +4,7 @@
 import { db } from "../db";
 import { FEATURE_DEFAULTS, featureOn, type FeatureKey } from "../features";
 import { requireStaff } from "../auth";
+import { PERM_DEFS } from "../perms";
 import { audit } from "../notify";
 import { publish } from "../realtime";
 import { notifyOwner } from "../mail";
@@ -279,14 +280,20 @@ export async function deleteCollege(collegeId: string) {
 }
 
 /* ----- Staff management (Admin+) ----- */
-export async function saveStaff(input: { id?: string; name: string; phone: string; role: number; collegeId: string | null }) {
+export async function saveStaff(input: { id?: string; name: string; phone: string; role: number; collegeId: string | null; perms?: Record<string, boolean> }) {
   const st = await requireStaff(3);
   const phone = input.phone.replace(/\D/g, "").slice(-10);
   if (!input.name.trim() || phone.length !== 10) return { ok: false as const, error: "Name and a valid mobile are required" };
   if (input.role >= 4 && st.role < 4) return { ok: false as const, error: "Only the owner can grant Owner" };
+  /* Only known tool keys survive, and only real booleans — the override map
+     reaches every permission check, so a stray key must die at the door. */
+  const perms = input.perms
+    ? Object.fromEntries(Object.entries(input.perms).filter(([k, v]) => k in PERM_DEFS && typeof v === "boolean"))
+    : undefined;
   if (input.id) {
-    await db.staff.update({ where: { id: input.id }, data: { name: input.name.trim(), phone, role: input.role, collegeId: input.collegeId } });
-    await audit("Staff updated", `${input.name} (role ${input.role})`, st.id);
+    await db.staff.update({ where: { id: input.id }, data: { name: input.name.trim(), phone, role: input.role, collegeId: input.collegeId, ...(perms !== undefined ? { perms } : {}) } });
+    const granted = perms ? Object.entries(perms).map(([k, v]) => `${v ? "+" : "-"}${k}`).join(" ") : "";
+    await audit("Staff updated", `${input.name} (role ${input.role})${granted ? ` · tools ${granted}` : ""}`, st.id);
   } else {
     await db.staff.create({ data: { name: input.name.trim(), phone, role: input.role, collegeId: input.collegeId } });
     await audit("Staff added", `${input.name} (role ${input.role})`, st.id);

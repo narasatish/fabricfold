@@ -90,10 +90,21 @@ describe("abuse limits", () => {
 });
 
 describe("the login screen", () => {
-  it("offers it to customers only, never staff", () => {
-    // a staff account takes payments; it keeps the harder door
-    expect(ui).toMatch(/mode === "customer" && \(\s*\n\s*<>/);
+  it("offers it to BOTH doors, and the mode travels with the attempt", () => {
+    /* Owner's call (Sep 2026): staff sign in by WhatsApp too. The number must
+       already be registered as staff — WhatsApp changes the handshake, not
+       who gets in — and the attempt's mode is fixed at start, so a student
+       can never ride a staff attempt into a staff session. */
     expect(ui).toMatch(/Continue with WhatsApp/);
+    expect(ui).toMatch(/startWhatsAppLogin\(mode\)/);
+    expect(act).toMatch(/mode: "customer" \| "staff" = "customer"/);
+  });
+  it("a staff claim mints a staff session with role and epoch", () => {
+    expect(act).toMatch(/createSession\(\{ mode: "staff", staffId: st\.id, role: st\.role, epoch: st\.sessionEpoch \}\)/);
+  });
+  it("the webhook refuses a staff attempt from a non-staff number, same wording as OTP", () => {
+    expect(hook).toMatch(/This number is not registered as staff/);
+    expect(hook).toMatch(/st && st\.active \? st\.id : null/);
   });
   it("opens WhatsApp in the same tick as the tap", () => {
     // a popup opened from an async callback is blocked on iOS Safari

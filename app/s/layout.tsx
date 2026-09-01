@@ -7,6 +7,7 @@ import { InstallPrompt } from "@/components/pwa";
 import { OfflineBanner } from "@/components/offline";
 import StaffTabBar from "./_components/StaffTabBar";
 import { db } from "@/lib/db";
+import { staffCan } from "@/lib/perms";
 
 // Every staff screen is session-scoped — never statically prerender this segment.
 export const dynamic = "force-dynamic";
@@ -52,7 +53,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
           member must see it before they wonder why a tap did nothing. */}
       <OfflineBanner />
       {children}
-      <StaffTabBar openComplaints={openComplaints} role={staff.role} />
+      <StaffTabBar openComplaints={openComplaints} role={staff.role} canReports={staffCan(staff, "reports")} />
       <InstallPrompt />
       <RealtimeRefresh intervalMs={10000} />
     </>

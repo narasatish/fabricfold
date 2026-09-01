@@ -45,7 +45,7 @@ function businessNumber(): string | null {
  * Begin a sign-in. Returns the deep link to open WhatsApp with the code
  * already typed, so the student's only action is to hit send.
  */
-export async function startWhatsAppLogin() {
+export async function startWhatsAppLogin(mode: "customer" | "staff" = "customer") {
   const number = businessNumber();
   if (!number) return { ok: false as const, error: "WhatsApp sign-in isn't switched on yet — use your passcode, or ask at the counter." };
 
@@ -63,7 +63,9 @@ export async function startWhatsAppLogin() {
   const claimSecret = crypto.randomBytes(32).toString("base64url");
 
   await db.waVerify.create({
-    data: { code, claimHash: sha(claimSecret), expiresAt: new Date(Date.now() + TTL_MS) },
+    // mode decides which table the webhook checks and which session the
+    // claim mints — a student can never ride a staff attempt in.
+    data: { code, claimHash: sha(claimSecret), mode, expiresAt: new Date(Date.now() + TTL_MS) },
   });
 
   const jar = await cookies();
@@ -113,12 +115,23 @@ export async function checkWhatsAppLogin(code: string) {
     return { ok: false as const, status: "wrong-device" as const, error: "Finish signing in on the device where you started." };
   }
 
-  const stu = await db.student.findUnique({ where: { id: row.studentId } });
-  if (!stu) return { ok: false as const, status: "failed" as const, error: "That account no longer exists." };
-
   /* Mark claimed BEFORE issuing the session, and only from `verified`, so two
      simultaneous polls cannot both mint one. updateMany returns a count, which
      makes losing the race observable rather than silent. */
+  if (row.mode === "staff") {
+    const st = await db.staff.findUnique({ where: { id: row.studentId } });
+    if (!st || !st.active) return { ok: false as const, status: "failed" as const, error: "That staff account no longer exists." };
+    const won = await db.waVerify.updateMany({ where: { id: row.id, status: "verified" }, data: { status: "claimed" } });
+    if (won.count !== 1) return { ok: false as const, status: "claimed" as const, error: "That sign-in was already used — start again." };
+    await createSession({ mode: "staff", staffId: st.id, role: st.role, epoch: st.sessionEpoch });
+    await db.auditLog.create({ data: { action: "Staff sign-in", detail: `${st.name} (${st.id}) via whatsapp`, by: st.id } }).catch(() => {});
+    jar.delete(CLAIM_COOKIE);
+    return { ok: true as const, status: "signed-in" as const, staff: true };
+  }
+
+  const stu = await db.student.findUnique({ where: { id: row.studentId } });
+  if (!stu) return { ok: false as const, status: "failed" as const, error: "That account no longer exists." };
+
   const won = await db.waVerify.updateMany({
     where: { id: row.id, status: "verified" },
     data: { status: "claimed" },
@@ -130,5 +143,5 @@ export async function checkWhatsAppLogin(code: string) {
      starts every other event, so it must not be invisible in the audit log. */
   await db.auditLog.create({ data: { action: "Student sign-in", detail: `${stu.name} (${stu.id}) via whatsapp`, by: stu.id } }).catch(() => {});
   jar.delete(CLAIM_COOKIE);
-  return { ok: true as const, status: "signed-in" as const };
+  return { ok: true as const, status: "signed-in" as const, staff: false };
 }

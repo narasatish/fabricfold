@@ -39,7 +39,7 @@ export default function LoginForm() {
       if (r.ok && r.status === "pending") return;         // still waiting
       stop();
       setWaCode(null);
-      if (r.ok && r.status === "signed-in") { toast("Signed in"); router.push("/c"); return; }
+      if (r.ok && r.status === "signed-in") { toast("Signed in"); router.push("staff" in r && r.staff ? "/s" : "/c"); return; }
       if (!r.ok) { setStep("phone"); toast(r.error, true); }
     }, 2000);
     return stop;
@@ -47,7 +47,7 @@ export default function LoginForm() {
 
   const handleWhatsApp = async () => {
     setLoading(true);
-    const r = await startWhatsAppLogin();
+    const r = await startWhatsAppLogin(mode);
     setLoading(false);
     if (!r.ok) { toast(r.error, true); return; }
     /* Opened BEFORE we start polling, and in the same tick as the tap: a
@@ -177,23 +177,20 @@ export default function LoginForm() {
               {loading ? "Checking…" : "Continue"}
             </button>
 
-            {/* Customers only. A staff account takes payments and issues
-                refunds, so it stays on the OTP path rather than gaining a
-                second, easier door. */}
-            {mode === "customer" && (
-              <>
-                <div className="row center mt16" style={{ gap: 10, color: "var(--ink-2)", fontSize: 12 }}>
-                  <span style={{ flex: 1, height: 1, background: "var(--line)" }} />or<span style={{ flex: 1, height: 1, background: "var(--line)" }} />
-                </div>
-                <button className="btn sec mt12" onClick={handleWhatsApp} disabled={loading}
-                  style={{ color: "#0f8a4d", borderColor: "#bfe6cf" }}>
-                  Continue with WhatsApp
-                </button>
-                <div className="muted center mt8" style={{ fontSize: "12px" }}>
-                  No code to wait for — send one message and you&apos;re in.
-                </div>
-              </>
-            )}
+            {/* Both doors now (owner, Sep 2026): staff too. The server still
+                checks the number against the admin-managed roster, so
+                WhatsApp changes the handshake, not who gets in. (Wording
+                note: dual-identity.test.ts bans naming that roster here.) */}
+            <div className="row center mt16" style={{ gap: 10, color: "var(--ink-2)", fontSize: 12 }}>
+              <span style={{ flex: 1, height: 1, background: "var(--line)" }} />or<span style={{ flex: 1, height: 1, background: "var(--line)" }} />
+            </div>
+            <button className="btn sec mt12" onClick={handleWhatsApp} disabled={loading}
+              style={{ color: "#0f8a4d", borderColor: "#bfe6cf" }}>
+              Continue with WhatsApp
+            </button>
+            <div className="muted center mt8" style={{ fontSize: "12px" }}>
+              No code to wait for — send one message and you&apos;re in.
+            </div>
 
             {mode === "customer" && (
               <div className="muted center mt16" style={{ fontSize: "12.5px", lineHeight: 1.5 }}>

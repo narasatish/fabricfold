@@ -38,7 +38,7 @@ const NEW_NUMBER = "9812345670"; // never registered
 async function schemaIsCurrent(): Promise<boolean> {
   try {
     // probe the NEWEST additions — an old-table probe lets later columns drift
-    await db.waVerify.count();
+    await db.waVerify.count({ where: { mode: "customer" } });
     await db.student.count({ where: { kind: "student" } });
     return true;
   } catch {

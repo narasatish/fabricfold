@@ -8,6 +8,10 @@ import StaffAdminClient from "./_components/AdminClient";
 export default async function StaffAdminPage() {
   const s = await getSession();
   if (!s || s.mode !== "staff") redirect("/login");
+  const gate = await db.staff.findUnique({ where: { id: s.staffId }, select: { role: true } });
+  // Admin+ only: this page carries payment config and staff phone numbers.
+  // Client-side section-hiding was never a wall.
+  if (!gate || gate.role < 3) redirect("/s");
   const staff = await db.staff.findUnique({ where: { id: s.staffId } });
   if (!staff) redirect("/login");
   if (staff.role < 3) redirect("/s");
@@ -60,7 +64,7 @@ export default async function StaffAdminPage() {
         }}
         colleges={colleges.map((c) => ({ id: c.id, name: c.name, address: c.address, closedWeekday: c.closedWeekday, active: c.active, features: c.features as Record<string, boolean> }))}
         washDayByCollege={washDayByCollege}
-        staff={staffList.map((x) => ({ id: x.id, name: x.name, phone: x.phone, role: x.role, collegeId: x.collegeId, active: x.active }))}
+        staff={staffList.map((x) => ({ id: x.id, name: x.name, phone: x.phone, role: x.role, collegeId: x.collegeId, active: x.active, perms: (x.perms as Record<string, boolean> | null) ?? {} }))}
         plans={plans.map((p) => ({ id: p.id, collegeId: p.collegeId, name: p.name, price: N(p.price), gstFree: p.gstFree, tier: p.tier, active: p.active, buckets: p.buckets as { service: string; cycles: number; kgPerCycle: number }[] }))}
         attendance={staffList.map((x) => {
           const today = attToday.find((a) => a.staffId === x.id);

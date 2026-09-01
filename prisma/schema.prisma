@@ -14,22 +14,24 @@ datasource db {
 
 // ───────────── Org ─────────────
 model College {
-  id            String    @id @default(cuid())
+  id            String       @id @default(cuid())
   name          String
-  address       String    @default("")
-  active        Boolean   @default(true)
+  address       String       @default("")
+  active        Boolean      @default(true)
   closedWeekday Int? // this college's fixed weekly holiday, 0=Sun..6=Sat; null = none
-  features Json // per-college flags: svc_wash, svc_iron, svc_dryclean, svc_washfold, subscriptions, credits, express, chat
-  students Student[]
-  staff    Staff[]
-  orders   Order[]
-  plans    Plan[]
-  slots    SlotWindow[]
+  features      Json // per-college flags: svc_wash, svc_iron, svc_dryclean, svc_washfold, subscriptions, credits, express, chat
+  students      Student[]
+  staff         Staff[]
+  orders        Order[]
+  plans         Plan[]
+  slots         SlotWindow[]
 }
 
-/* A recurring weekly drop-off window for one campus, e.g. Mon 09:00–11:00 cap 15.
-   Students book a concrete date against one of these; capacity caps how many
-   orders may be dropped in that window so the counter queue stays spread. */
+/**
+ * A recurring weekly drop-off window for one campus, e.g. Mon 09:00–11:00 cap 15.
+ * Students book a concrete date against one of these; capacity caps how many
+ * orders may be dropped in that window so the counter queue stays spread.
+ */
 model SlotWindow {
   id        String   @id @default(cuid())
   collegeId String
@@ -74,31 +76,36 @@ model Student {
   washDay        Int? // assigned weekly drop-off day, 0=Sun..6=Sat; spreads load evenly across the week (soft guidance, not enforced)
   createdAt      DateTime @default(now())
 
-  /* Optional passcode, so a student who has signed in once by OTP can get back
-     in without waiting for a text — useful on a campus with poor signal.
-
-     NEVER the passcode itself: scrypt hash + per-user salt. OTP remains the way
-     to RESET it, because the phone is the thing we can actually verify.
-     Failures are counted and the account locks briefly, otherwise a 4-6 digit
-     passcode is trivially brute-forced. */
+  /**
+   * Optional passcode, so a student who has signed in once by OTP can get back
+   * in without waiting for a text — useful on a campus with poor signal.
+   * NEVER the passcode itself: scrypt hash + per-user salt. OTP remains the way
+   * to RESET it, because the phone is the thing we can actually verify.
+   * Failures are counted and the account locks briefly, otherwise a 4-6 digit
+   * passcode is trivially brute-forced.
+   */
   passwordHash     String?
   passwordSalt     String?
   passwordSetAt    DateTime?
   pwFailedAttempts Int       @default(0)
   pwLockedUntil    DateTime?
 
-  /* Bumped to revoke every existing session at once. A JWT cannot be recalled
-     once issued, so without this a lost phone stays signed in for up to 30
-     days — "sign out everywhere" would be a button that does nothing. The
-     epoch is carried in the token and compared on each authenticated request,
-     which costs nothing extra because that request already loads this row. */
+  /**
+   * Bumped to revoke every existing session at once. A JWT cannot be recalled
+   * once issued, so without this a lost phone stays signed in for up to 30
+   * days — "sign out everywhere" would be a button that does nothing. The
+   * epoch is carried in the token and compared on each authenticated request,
+   * which costs nothing extra because that request already loads this row.
+   */
   sessionEpoch Int @default(0)
 
-  /* Erasure request. The financial ledger is immutable by law and by trigger,
-     so a student's orders and payments cannot be deleted — what CAN go is
-     everything identifying them: name, phone, notification history. The rows
-     stay so the accounts still balance, but they no longer name a person.
-     Recorded rather than silent, because an erasure must itself be auditable. */
+  /**
+   * Erasure request. The financial ledger is immutable by law and by trigger,
+   * so a student's orders and payments cannot be deleted — what CAN go is
+   * everything identifying them: name, phone, notification history. The rows
+   * stay so the accounts still balance, but they no longer name a person.
+   * Recorded rather than silent, because an erasure must itself be auditable.
+   */
   anonymisedAt DateTime?
 
   subscription  Subscription?
@@ -110,28 +117,32 @@ model Student {
   notifications Notification[]
   bags          Bag[]
 
-  /* Student had NO indexes at all. Every campus filter was a sequential scan,
-     and the students list orders by createdAt on every load. Cheap to add,
-     and the cost only grows. */
+  /**
+   * Student had NO indexes at all. Every campus filter was a sequential scan,
+   * and the students list orders by createdAt on every load. Cheap to add,
+   * and the cost only grows.
+   */
   @@index([collegeId])
   @@index([createdAt])
 }
 
 model Staff {
-  id         String   @id @default(cuid())
-  phone      String   @unique
+  id         String       @id @default(cuid())
+  phone      String       @unique
   name       String
   role       Int // 1 Counter · 2 Manager · 3 Admin · 4 Owner (server-enforced)
   collegeId  String?
-  college    College? @relation(fields: [collegeId], references: [id])
+  college    College?     @relation(fields: [collegeId], references: [id])
   payslips   Payslip[]
   attendance Attendance[]
 
-  /* Removing a staff member DEACTIVATES rather than deletes.
-     They own payslips and attendance rows, and their id appears against every
-     payment they took and every audit entry they caused. A hard delete would
-     either fail on those references or erase the record of who handled the
-     money — which is exactly the record you need after someone leaves. */
+  /**
+   * Removing a staff member DEACTIVATES rather than deletes.
+   * They own payslips and attendance rows, and their id appears against every
+   * payment they took and every audit entry they caused. A hard delete would
+   * either fail on those references or erase the record of who handled the
+   * money — which is exactly the record you need after someone leaves.
+   */
   active Boolean @default(true)
 
   // Same revocation mechanism as Student — see the note there. Matters more
@@ -141,18 +152,18 @@ model Staff {
 
 // ───────────── Subscription (cycle-based) ─────────────
 model Subscription {
-  id          String    @id @default(cuid())
-  studentId   String    @unique
-  student     Student   @relation(fields: [studentId], references: [id])
-  active      Boolean   @default(false) // false = pending Manager+ approval
+  id          String     @id @default(cuid())
+  studentId   String     @unique
+  student     Student    @relation(fields: [studentId], references: [id])
+  active      Boolean    @default(false) // false = pending Manager+ approval
   plan        String // plan name snapshot
   planId      String?
-  planRef     Plan?     @relation(fields: [planId], references: [id])
+  planRef     Plan?      @relation(fields: [planId], references: [id])
   buckets     Json? // usage snapshot: [{service, cycles, used, kgPerCycle}]
   startedAt   DateTime?
   expiresAt   DateTime?
   cyclesTotal Int // sum across buckets (kept for dashboards/legacy)
-  cyclesUsed  Int       @default(0)
+  cyclesUsed  Int        @default(0)
   kgPerCycle  Decimal
   cycleLog    CycleUse[]
 
@@ -174,24 +185,28 @@ model Subscription {
 model Bag {
   id String @id @default(cuid())
 
-  /* NOT globally unique any more — unique only among codes still IN SERVICE.
-     A code is the student's customer ID printed on the bag, and it is recycled
-     when they graduate, so B001 legitimately appears on several Bag rows across
-     the years. The guarantee that still matters — one code never points at two
-     students at the same time — is enforced by a partial unique index created
-     in scripts/ensure-guards.mjs:  UNIQUE(code) WHERE status <> 'released'.
-     Prisma cannot express a partial unique index, hence the raw one. */
+  /**
+   * NOT globally unique any more — unique only among codes still IN SERVICE.
+   * A code is the student's customer ID printed on the bag, and it is recycled
+   * when they graduate, so B001 legitimately appears on several Bag rows across
+   * the years. The guarantee that still matters — one code never points at two
+   * students at the same time — is enforced by a partial unique index created
+   * in scripts/ensure-guards.mjs:  UNIQUE(code) WHERE status <> 'released'.
+   * Prisma cannot express a partial unique index, hence the raw one.
+   */
   code          String
   studentId     String
-  student       Student  @relation(fields: [studentId], references: [id])
+  student       Student @relation(fields: [studentId], references: [id])
   tier          String? // bronze | silver | gold | null (walk-in)
-  complimentary Boolean  @default(false) // first bag free, later ones charged
-  price         Decimal  @default(0)
+  complimentary Boolean @default(false) // first bag free, later ones charged
+  price         Decimal @default(0)
 
-  /* active | lost | replaced | released
-     Only `released` frees the code for a new student. A lost bag keeps its
-     code reserved: bags turn up weeks later, and it must still identify the
-     person it was issued to rather than whoever inherited the number. */
+  /**
+   * active | lost | replaced | released
+   * Only `released` frees the code for a new student. A lost bag keeps its
+   * code reserved: bags turn up weeks later, and it must still identify the
+   * person it was issued to rather than whoever inherited the number.
+   */
   status     String    @default("active")
   releasedAt DateTime?
   issuedAt   DateTime  @default(now())
@@ -202,16 +217,16 @@ model Bag {
   @@index([code])
 }
 
-/* Rows waiting to reach the Google Sheet.
-
-   A transactional outbox. The event is written in the SAME transaction as the
-   order or payment that caused it, so the Sheet can never miss something that
-   really happened — and, just as important, can never record something that
-   was rolled back. Delivery is separate and best-effort: Google being slow or
-   down must never make an order fail at the counter.
-
-   Rows are kept briefly after sending so a sync can be proved rather than
-   assumed; the cron prunes them. */
+/**
+ * Rows waiting to reach the Google Sheet.
+ * A transactional outbox. The event is written in the SAME transaction as the
+ * order or payment that caused it, so the Sheet can never miss something that
+ * really happened — and, just as important, can never record something that
+ * was rolled back. Delivery is separate and best-effort: Google being slow or
+ * down must never make an order fail at the counter.
+ * Rows are kept briefly after sending so a sync can be proved rather than
+ * assumed; the cron prunes them.
+ */
 model SheetOutbox {
   id      String   @id @default(cuid())
   kind    String // order | payment | complaint | collection
@@ -238,52 +253,54 @@ model CycleUse {
 model Order {
   id String @id // human order code (#tag, last 4/6 shown)
 
-  /* Client-generated key for an order captured while the counter was OFFLINE.
-     The queued intake is replayed when the connection returns, and a replay
-     can happen twice — the tab reconnects, the staff member also taps retry,
-     the request times out after the server already committed. This key is what
-     makes a repeat harmless: a partial unique index (ensure-guards) rejects the
-     second insert, and walkInOrder returns the order that already exists
-     instead of taking the clothes in twice. Null for anything taken online. */
+  /**
+   * Client-generated key for an order captured while the counter was OFFLINE.
+   * The queued intake is replayed when the connection returns, and a replay
+   * can happen twice — the tab reconnects, the staff member also taps retry,
+   * the request times out after the server already committed. This key is what
+   * makes a repeat harmless: a partial unique index (ensure-guards) rejects the
+   * second insert, and walkInOrder returns the order that already exists
+   * instead of taking the clothes in twice. Null for anything taken online.
+   */
   idemKey String?
 
-  studentId      String
-  student        Student   @relation(fields: [studentId], references: [id])
-  collegeId      String
-  college        College   @relation(fields: [collegeId], references: [id])
-  service        String // wash | iron | dryclean
-  items          Json // [{label, qty, price}] snapshot at order time
-  declaredPieces Int       @default(0)
-  actualPieces   Int?
-  weightKg       Decimal?
-  express        Boolean   @default(false)
-  surcharge      Decimal   @default(0)
-  status         String    @default("draft") // draft|received|processing|ready|collected|cancelled
-  subtotal       Decimal // GST-INCLUSIVE pricing
-  gst            Decimal // tax component of total at gstPctSnapshot
-  gstPctSnapshot Decimal
-  total          Decimal
-  paid           Boolean   @default(false)
-  paymentMethod  String? // upi | cash | credit | upi+credit | cash+credit | redo
-  creditApplied  Decimal   @default(0)
-  usedCycle      Boolean   @default(false)
-  noGst          Boolean   @default(false) // staff chose to bill without GST at accept; never invoiced
-  redoOfId       String?
-  refunded       Boolean   @default(false)
-  refundAmount   Decimal?
-  rating         Int?
-  ratingComment  String?
-  ratedAt        DateTime?
-  intakePhotos   Json? // storage keys of photos taken at drop-off (pre-existing damage)
-  dropSlotAt     DateTime? // booked drop-off window START (null = no slot booked)
-  dropSlotEndAt  DateTime? // booked drop-off window END
-  cancelledAt    DateTime?
-  createdAt      DateTime  @default(now())
-  receivedAt     DateTime? // SLA: due = receivedAt + (express ? 1 : 2) days
+  studentId               String
+  student                 Student   @relation(fields: [studentId], references: [id])
+  collegeId               String
+  college                 College   @relation(fields: [collegeId], references: [id])
+  service                 String // wash | iron | dryclean
+  items                   Json // [{label, qty, price}] snapshot at order time
+  declaredPieces          Int       @default(0)
+  actualPieces            Int?
+  weightKg                Decimal?
+  express                 Boolean   @default(false)
+  surcharge               Decimal   @default(0)
+  status                  String    @default("draft") // draft|received|processing|ready|collected|cancelled
+  subtotal                Decimal // GST-INCLUSIVE pricing
+  gst                     Decimal // tax component of total at gstPctSnapshot
+  gstPctSnapshot          Decimal
+  total                   Decimal
+  paid                    Boolean   @default(false)
+  paymentMethod           String? // upi | cash | credit | upi+credit | cash+credit | redo
+  creditApplied           Decimal   @default(0)
+  usedCycle               Boolean   @default(false)
+  noGst                   Boolean   @default(false) // staff chose to bill without GST at accept; never invoiced
+  redoOfId                String?
+  refunded                Boolean   @default(false)
+  refundAmount            Decimal?
+  rating                  Int?
+  ratingComment           String?
+  ratedAt                 DateTime?
+  intakePhotos            Json? // storage keys of photos taken at drop-off (pre-existing damage)
+  dropSlotAt              DateTime? // booked drop-off window START (null = no slot booked)
+  dropSlotEndAt           DateTime? // booked drop-off window END
+  cancelledAt             DateTime?
+  createdAt               DateTime  @default(now())
+  receivedAt              DateTime? // SLA: due = receivedAt + (express ? 1 : 2) days
   // How many "please collect" nudges have gone out for this order. Counting
   // them (rather than a bool) is what stops the daily cron re-sending the same
   // reminder every run while a bag sits uncollected for a fortnight.
-  collectionRemindersSent Int @default(0)
+  collectionRemindersSent Int       @default(0)
 
   timeline OrderEvent[]
   tags     GarmentTag[]
@@ -328,8 +345,10 @@ model Payment {
   gatewayRef String? // Razorpay payment id when auto-captured
 
   @@index([collegeId, at])
-  /* The reports page filters on `at` alone (8-week revenue bars). The
-     composite above leads with collegeId, so it cannot serve that query. */
+  /**
+   * The reports page filters on `at` alone (8-week revenue bars). The
+   * composite above leads with collegeId, so it cannot serve that query.
+   */
   @@index([at])
 }
 
@@ -384,17 +403,17 @@ model CreditUse {
 }
 
 model Compensation {
-  id        String   @id @default(cuid())
-  studentId String
-  student   Student  @relation(fields: [studentId], references: [id])
+  id          String   @id @default(cuid())
+  studentId   String
+  student     Student  @relation(fields: [studentId], references: [id])
   orderId     String?
   complaintId String? // set when this payout settles a specific complaint
-  kind      String // damage | stain | missing | goodwill | manual
-  amount    Decimal
-  method    String // credit | cash (cash = Manager+, posts cash_out)
-  comment   String?
-  by        String // staffId
-  at        DateTime @default(now())
+  kind        String // damage | stain | missing | goodwill | manual
+  amount      Decimal
+  method      String // credit | cash (cash = Manager+, posts cash_out)
+  comment     String?
+  by          String // staffId
+  at          DateTime @default(now())
 }
 
 model Expense {
@@ -427,19 +446,19 @@ model Payslip {
 
 // ───────────── Support / comms ─────────────
 model Complaint {
-  id         String    @id @default(cuid())
-  orderId    String?
-  collegeId  String    @default("")
-  studentId  String
-  student    Student   @relation(fields: [studentId], references: [id])
-  text       String
-  status     String    @default("open") // open | resolved
-  at         DateTime  @default(now())
-  resolvedAt DateTime?
+  id          String             @id @default(cuid())
+  orderId     String?
+  collegeId   String             @default("")
+  studentId   String
+  student     Student            @relation(fields: [studentId], references: [id])
+  text        String
+  status      String             @default("open") // open | resolved
+  at          DateTime           @default(now())
+  resolvedAt  DateTime?
   // Remedies granted for this complaint, so a free re-wash or a payout is
   // always traceable back to the grievance that caused it (and reportable).
   redoOrderId String? // the free re-service order raised for this complaint
-  messages   ComplaintMessage[]
+  messages    ComplaintMessage[]
 }
 
 model ComplaintMessage {
@@ -510,12 +529,13 @@ model ErrorLog {
   @@index([at])
 }
 
-/* Fixed-window rate limiting, keyed by whatever the caller chooses (an IP, a
-   phone, a pair of both).
-
-   Kept in the database rather than memory because serverless functions do not
-   share memory — an in-process counter resets on every cold start and each
-   instance counts separately, which is no limit at all. */
+/**
+ * Fixed-window rate limiting, keyed by whatever the caller chooses (an IP, a
+ * phone, a pair of both).
+ * Kept in the database rather than memory because serverless functions do not
+ * share memory — an in-process counter resets on every cold start and each
+ * instance counts separately, which is no limit at all.
+ */
 model RateLimit {
   key         String   @id // e.g. "otp:ip:1.2.3.4"
   windowStart DateTime
@@ -554,4 +574,40 @@ model AppConfig {
   rates    Json // {washIron:{label,items:[[name,price],...]}, ironOnly:..., dryClean:...}
   payment  Json // {upiId, payeeName, bankName, accountName, accountNo, ifsc, gatewayKey}
   settings Json // {reportEmail, dailyEmail, sendHour, lastSent, openingFloat}
+}
+
+/**
+ * ───────────── WhatsApp sign-in ─────────────
+ * Verification runs BACKWARDS compared with an OTP: the student sends us a
+ * code rather than receiving one. Meta gates AUTHENTICATION templates behind
+ * 2,000 unique recipients, which one campus never reaches — but that gate is
+ * only on business-initiated messages. A message the student sends needs no
+ * template at all, and Meta's delivery to our webhook carries their verified
+ * number, which is the thing an OTP was proving anyway.
+ */
+model WaVerify {
+  id        String @id @default(cuid())
+  /**
+   * Goes in the pre-filled WhatsApp message, so the student can read it and
+   * so can anyone looking over their shoulder. It identifies the attempt; it
+   * does NOT authorise it — see claimHash.
+   */
+  code      String @unique
+  /**
+   * sha256 of a secret held only in this browser's httpOnly cookie. The code
+   * travels through WhatsApp in clear text, so it cannot be the only thing
+   * standing between an onlooker and a session. Hashed rather than stored raw
+   * so a database leak still can't claim anyone's pending sign-in.
+   */
+  claimHash String
+
+  status    String  @default("pending") // pending | verified | failed | claimed
+  phone     String? // filled from Meta's payload — this is the VERIFIED number
+  studentId String?
+  reason    String? // why it failed, in words the student can act on
+
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([status, expiresAt])
 }

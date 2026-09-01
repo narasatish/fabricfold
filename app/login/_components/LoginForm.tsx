@@ -7,18 +7,55 @@ import { useState } from "react";
 import { Svg } from "@/components/icons";
 import { useToast } from "@/components/chrome";
 import { requestOtp, verifyOtp, hasPasscode, loginWithPasscode } from "@/lib/actions/auth";
+import { startWhatsAppLogin, checkWhatsAppLogin } from "@/lib/actions/wa-login";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 export default function LoginForm() {
   const router = useRouter();
   const toast = useToast();
-  const [step, setStep] = useState<"phone" | "otp" | "passcode">("phone");
+  const [step, setStep] = useState<"phone" | "otp" | "passcode" | "whatsapp">("phone");
   const [mode, setMode] = useState<"customer" | "staff">("customer");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [passcode, setPasscodeValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [notRegistered, setNotRegistered] = useState(false);
+
+  const [waCode, setWaCode] = useState<string | null>(null);
+  const waTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  /* Poll while a WhatsApp sign-in is outstanding.
+
+     Polling rather than a push: the student leaves the browser for WhatsApp
+     and comes back, and a socket does not survive that on every phone. Two
+     seconds is fast enough to feel instant on return and cheap enough at this
+     scale — the window is five minutes at most. */
+  useEffect(() => {
+    if (!waCode) return;
+    const stop = () => { if (waTimer.current) clearInterval(waTimer.current); waTimer.current = null; };
+    waTimer.current = setInterval(async () => {
+      const r = await checkWhatsAppLogin(waCode);
+      if (r.ok && r.status === "pending") return;         // still waiting
+      stop();
+      setWaCode(null);
+      if (r.ok && r.status === "signed-in") { toast("Signed in"); router.push("/c"); return; }
+      if (!r.ok) { setStep("phone"); toast(r.error, true); }
+    }, 2000);
+    return stop;
+  }, [waCode, router, toast]);
+
+  const handleWhatsApp = async () => {
+    setLoading(true);
+    const r = await startWhatsAppLogin();
+    setLoading(false);
+    if (!r.ok) { toast(r.error, true); return; }
+    /* Opened BEFORE we start polling, and in the same tick as the tap: a
+       popup opened from an async callback is blocked on iOS Safari. */
+    window.open(r.link, "_blank", "noopener");
+    setWaCode(r.code);
+    setStep("whatsapp");
+  };
 
   /* Students who have set a passcode go straight to it — no waiting for a text,
      and it works where the signal doesn't. Staff stay OTP-only: a staff account
@@ -140,11 +177,56 @@ export default function LoginForm() {
               {loading ? "Checking…" : "Continue"}
             </button>
 
+            {/* Customers only. A staff account takes payments and issues
+                refunds, so it stays on the OTP path rather than gaining a
+                second, easier door. */}
+            {mode === "customer" && (
+              <>
+                <div className="row center mt16" style={{ gap: 10, color: "var(--ink-2)", fontSize: 12 }}>
+                  <span style={{ flex: 1, height: 1, background: "var(--line)" }} />or<span style={{ flex: 1, height: 1, background: "var(--line)" }} />
+                </div>
+                <button className="btn sec mt12" onClick={handleWhatsApp} disabled={loading}
+                  style={{ color: "#0f8a4d", borderColor: "#bfe6cf" }}>
+                  Continue with WhatsApp
+                </button>
+                <div className="muted center mt8" style={{ fontSize: "12px" }}>
+                  No code to wait for — send one message and you&apos;re in.
+                </div>
+              </>
+            )}
+
             {mode === "customer" && (
               <div className="muted center mt16" style={{ fontSize: "12.5px", lineHeight: 1.5 }}>
                 New here? Visit your campus counter to get registered. Staff sign in on the Staff tab above.
               </div>
             )}
+          </>
+        )}
+
+        {step === "whatsapp" && (
+          <>
+            <div className="h-md" style={{ marginBottom: "8px" }}>Waiting for your message</div>
+            <div className="muted" style={{ fontSize: "13px", lineHeight: 1.6, marginBottom: "18px" }}>
+              WhatsApp should have opened with a message already typed. Press <b>send</b> and this
+              page signs you in by itself — nothing to type back here.
+            </div>
+
+            {/* The code is shown because WhatsApp may not have opened at all —
+                a blocked popup, or no WhatsApp on a desktop browser. Seeing it
+                means the student can still message us manually. */}
+            <div className="card" style={{ textAlign: "center", padding: "18px" }}>
+              <div className="muted" style={{ fontSize: 12 }}>Your code</div>
+              <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: ".12em", fontFamily: "ui-monospace, monospace" }}>{waCode}</div>
+            </div>
+
+            <div className="row center mt16" style={{ gap: 8 }}>
+              <div className="spinner" style={{ width: 16, height: 16 }} />
+              <span className="muted" style={{ fontSize: 13 }}>Waiting…</span>
+            </div>
+
+            <button className="btn ghost mt16" onClick={() => { setWaCode(null); setStep("phone"); }}>
+              Use my number instead
+            </button>
           </>
         )}
 

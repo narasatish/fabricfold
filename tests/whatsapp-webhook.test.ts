@@ -61,10 +61,13 @@ describe("payload handling", () => {
   it("survives malformed JSON without a 500", () => {
     expect(src).toMatch(/catch \{[\s\S]{0,120}return Response\.json\(\{ ok: true \}\)/);
   });
-  it("does NOT authenticate anyone yet", () => {
-    // this step proves delivery; a webhook that could sign people in before
-    // we have confirmed it works is the wrong order to build in
-    expect(src).not.toMatch(/createSession|db\.student|signIn/);
+  it("records a verification but never creates a session", () => {
+    /* The webhook proves WHO sent the message. It cannot know WHICH browser
+       is waiting for it — that needs the claim cookie, which only reaches
+       checkWhatsAppLogin. Looking the student up here is expected; minting a
+       session here would let anyone who read the code take it. */
+    expect(src).not.toMatch(/createSession/);
+    expect(src).toMatch(/db\.student\.findUnique/);   // lookup, not login
   });
 });
 

@@ -11,10 +11,12 @@
      GET  — Meta's subscription handshake, once, when you save the callback URL
      POST — every inbound message and status update, forever after
 
-   This step deliberately does NOT sign anyone in. It proves a real message
-   from a real phone reaches this server, which is the thing worth confirming
-   before a login depends on it. */
+   This endpoint only RECORDS a verification. It never creates a session: the
+   webhook proves who sent the message, but not which browser is waiting for
+   it. That second half needs the claim cookie, so it lives in
+   lib/actions/wa-login.ts where the request carries one. */
 import crypto from "node:crypto";
+import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -88,11 +90,8 @@ export async function POST(req: Request) {
         const from = msg.from;                      // sender's number, digits, country code included
         const text = msg.text?.body?.trim() ?? "";
         if (!from) continue;
-
-        /* Logged, not acted on — yet. The verification lookup lands here once
-           the flow is built; keeping this step inert means a webhook we can
-           prove works without it being able to authenticate anybody. */
         console.log(`[wa-inbound] from=${from} type=${msg.type} text=${JSON.stringify(text.slice(0, 80))}`);
+        await resolveSignIn(from, text);
       }
     }
   }
@@ -101,6 +100,48 @@ export async function POST(req: Request) {
      backoff and eventually disables a webhook that keeps failing, so an
      unrecognised shape must not look like an outage. */
   return Response.json({ ok: true });
+}
+
+/**
+ * Match an inbound message to a pending sign-in.
+ *
+ * Never throws: an exception here becomes a non-2xx, which makes Meta retry
+ * and eventually disable the webhook — losing every future sign-in over one
+ * bad message.
+ */
+async function resolveSignIn(from: string, text: string) {
+  try {
+    /* The code sits inside a sentence the student may have edited, so it is
+       extracted rather than parsed. Case-insensitive because some keyboards
+       auto-capitalise, and the alphabet has no ambiguous characters. */
+    const m = text.toUpperCase().match(/\b[ABCDEFGHJKLMNPQRTUVWXYZ2346789]{8}\b/);
+    if (!m) return;
+
+    const row = await db.waVerify.findUnique({ where: { code: m[0] } });
+    if (!row || row.status !== "pending") return;          // already handled, or not ours
+    if (row.expiresAt.getTime() < Date.now()) return;      // let it expire quietly
+
+    /* Meta gives the number with country code and no plus. Students are
+       stored as the last 10 digits, the same normalisation used everywhere
+       else a phone is compared. */
+    const phone = from.replace(/\D/g, "").slice(-10);
+    const stu = await db.student.findUnique({ where: { phone } });
+
+    /* No account is a FAILURE, recorded with a reason, not silence. The
+       student is staring at a spinner; "visit the counter" is the one thing
+       that actually helps them, and matches what OTP sign-in already says. */
+    /* updateMany, not update: it takes a non-unique filter, so `status`
+       stays in the WHERE and a duplicate delivery — Meta retries — cannot
+       overwrite an already-resolved row. */
+    await db.waVerify.updateMany({
+      where: { id: row.id, status: "pending" },
+      data: stu
+        ? { status: "verified", phone, studentId: stu.id }
+        : { status: "failed", phone, reason: "This WhatsApp number isn't registered yet — please visit the counter to be registered." },
+    });
+  } catch (e) {
+    console.error("[wa-inbound] sign-in match failed", e);
+  }
 }
 
 type WaPayload = {

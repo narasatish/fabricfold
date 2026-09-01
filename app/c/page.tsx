@@ -115,8 +115,11 @@ export default async function CustomerHome() {
               }}
             >
               {/* QR removed (owner, Sep 2026) — nothing scans it; the CODE is
-                  what counters read out. Chip kept so the card layout holds. */}
-              <span style={{ fontWeight: 800, fontSize: 15, letterSpacing: ".04em" }}>{(activeBag?.code ?? student.id).slice(0, 5)}</span>
+                  what counters read out. Chip kept so the card layout holds.
+                  Never truncated: a chip reading 31181 for ID 311815 sends the
+                  counter looking for a student who doesn't exist. Bag codes
+                  (≤5 chars) get the big size; a 6-digit fallback id shrinks. */}
+              <span style={{ fontWeight: 800, fontSize: (activeBag?.code ?? student.id).length > 5 ? 12 : 15, letterSpacing: ".03em" }}>{activeBag?.code ?? student.id}</span>
             </div>
           </div>
           <div className="between" style={{ marginTop: "12px" }}>

@@ -121,6 +121,9 @@ describe("every sign-in is recorded", () => {
 describe("QR removals — payment QR stays", () => {
   it("customer home and staff customer page lost their QRs", () => {
     expect(read("app/c/page.tsx")).not.toMatch(/<Qr /);
+    // and the chip shows the WHOLE id — a truncated 31181 for ID 311815
+    // sends the counter looking for a student who doesn't exist
+    expect(read("app/c/page.tsx")).not.toMatch(/\.slice\(0, 5\)/);
     expect(read("app/s/customers/[id]/_components/CustomerClient.tsx")).not.toMatch(/<Qr /);
   });
   it("the UPI payment QR is untouched — students pay with it", () => {

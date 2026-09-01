@@ -102,3 +102,19 @@ describe("dropping the proxy is a deliberate, covered trade", () => {
     expect(guards).toBe(true); // the portable half must always be present
   });
 });
+
+describe("delivery failure is never reported as success", () => {
+  it("the production fall-through THROWS instead of console.logging a code", () => {
+    /* Found live after removing the test logins: WhatsApp creds satisfied
+       smsConfigured(), the template send failed, and the fall-through ended
+       in console.log + "OTP sent". The student waits for a code that went
+       to a server log. requestOtp deletes the OTP on a throw, so the error
+       reaches the screen instead. */
+    const auth = fs.readFileSync(path.resolve(__dirname, "..", "lib/actions/auth.ts"), "utf8");
+    expect(auth).toMatch(/NODE_ENV === "production"[\s\S]{0,120}throw new Error\("Couldn't deliver the code/);
+  });
+  it("the undeliverable refusal points at the WhatsApp door that now exists", () => {
+    const auth = fs.readFileSync(path.resolve(__dirname, "..", "lib/actions/auth.ts"), "utf8");
+    expect(auth).toMatch(/use Continue with WhatsApp below/);
+  });
+});

@@ -171,6 +171,15 @@ async function sendSms(phone: string, code: string) {
     return;
   }
 
+  /* Nothing above delivered. In production that must be an ERROR the student
+     sees — a console.log nobody reads while the screen says "OTP sent" is
+     the exact lie this function once fixed, and the WhatsApp-first change
+     quietly reintroduced it: WhatsApp creds made smsConfigured() true, the
+     send failed (template unapproved), and the fall-through ended here.
+     Found live, minutes after removing the test logins. */
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("Couldn't deliver the code — use Continue with WhatsApp below, or ask at the counter");
+  }
   console.log(`[SMS -> ${phone}] ${text}`);
 }
 
@@ -290,8 +299,8 @@ export async function requestOtp(phone: string, mode: "customer" | "staff") {
     return {
       ok: false as const,
       error:
-        "We can't text a code to this number yet — SMS isn't switched on. " +
-        "Ask at the counter and staff will sign you in.",
+        "We can't text a code to this number yet — " +
+        "use Continue with WhatsApp below, or ask at the counter.",
     };
   }
 

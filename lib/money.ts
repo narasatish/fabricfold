@@ -103,6 +103,13 @@ export const EXCESS_PER_HALF_KG = 25;
    orders are always billed without GST. Dry cleaning (and Iron Only) stay
    per-piece; a saree and a blanket are not a weight class. */
 export const CYCLE_RATES: Record<string, number> = { washFold: 200, washIron: 250 };
+
+/* Urgent (same-day) on a cycle service is a FLAT fee — Rs 79 Wash & Fold,
+   Rs 99 Wash & Iron (owner, Sep 2026) — replacing the old 40%-of-value
+   formulas for these services. Flat because the owner quotes it flat; a
+   percentage of a flat cycle rate was just a worse way to write a constant.
+   Students and faculty alike; per-piece services keep the 40% rule. */
+export const EXPRESS_FLAT: Record<string, number> = { washFold: 79, washIron: 99 };
 export function isCycleService(service: string) {
   return service in CYCLE_RATES;
 }

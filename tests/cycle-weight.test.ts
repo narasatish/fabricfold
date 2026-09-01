@@ -90,7 +90,7 @@ describe("the counter can see it before committing", () => {
   const ui = read("app/s/orders/[id]/_components/OrderClient.tsx");
   it("quotes the charge with the SAME function that bills it", () => {
     // a hand-rolled preview is how the quoted number drifts from the charged one
-    expect(ui).toMatch(/import \{ CYCLE_KG_LIMIT, CYCLE_RATES, isCycleService, excessWeightCharge \} from "@\/lib\/money"/);
+    expect(ui).toMatch(/import \{ CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, isCycleService, excessWeightCharge \} from "@\/lib\/money"/);
     expect(ui).toMatch(/excessWeightCharge\(acceptInput\.weightKg, undefined, \{ waived: acceptInput\.waiveExcess, cycles: cycleBased \? acceptInput\.cycles : 1 \}\)/);
   });
   it("says plainly when the bag is within the cycle", () => {

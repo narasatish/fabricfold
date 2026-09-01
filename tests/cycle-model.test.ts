@@ -195,3 +195,31 @@ describe("switching the service tab shows THAT service's menu", () => {
     expect(ui).toMatch(/cycleBased \? `\$\{cycles\} cycle/);
   });
 });
+
+describe("urgent (same-day) is a flat fee on cycle services", () => {
+  it("Rs 79 Wash & Fold, Rs 99 Wash & Iron — students and faculty alike", async () => {
+    const { EXPRESS_FLAT } = await import("../lib/money");
+    expect(EXPRESS_FLAT.washFold).toBe(79);
+    expect(EXPRESS_FLAT.washIron).toBe(99);
+  });
+  it("a plan-paid urgent cycle order totals excess + the flat fee, nothing else", async () => {
+    const { EXPRESS_FLAT } = await import("../lib/money");
+    // 6 kg urgent W&I on a plan: Rs 50 excess + Rs 99 = 149
+    const excess = excessWeightCharge(6, undefined, { cycles: 1 });
+    expect(computeBill(250, EXPRESS_FLAT.washIron, 18, { usedCycle: true, excessCharge: excess }))
+      .toEqual({ gst: 0, total: 149 });
+  });
+  it("a cash urgent cycle order stays GST-free: 200 + 79 = 279 flat", async () => {
+    const { EXPRESS_FLAT } = await import("../lib/money");
+    expect(computeBill(200, EXPRESS_FLAT.washFold, 18, { usedCycle: false, excessCharge: 0, noGst: true }))
+      .toEqual({ gst: 0, total: 279 });
+  });
+  it("all three entry points use the flat fee for cycle services", () => {
+    // place, accept, walk-in — the 40% formulas survive only for per-piece
+    expect(orders.match(/EXPRESS_FLAT\[(input|o)\.service\]/g)?.length).toBe(3);
+  });
+  it("both apps SAY the flat fee", () => {
+    expect(read("app/c/order/new/_components/OrderNewClient.tsx")).toMatch(/Flat \$\{fmt\(EXPRESS_FLAT\[service\]\)\} — same-day/);
+    expect(read("app/s/orders/[id]/_components/OrderClient.tsx")).toMatch(/flat same-day fee of ₹\$\{EXPRESS_FLAT\[order\.service\]\}/);
+  });
+});

@@ -6,7 +6,7 @@ import { Seg, Switch } from "@/components/chrome";
 import { Svg } from "@/components/icons";
 import { fmt } from "@/lib/format";
 import { placeOrder } from "@/lib/actions/orders";
-import { EXPRESS_PCT, expressSurcharge, CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService } from "@/lib/money";
+import { EXPRESS_PCT, expressSurcharge, CYCLE_RATES, CYCLE_KG_LIMIT, EXPRESS_FLAT, isCycleService } from "@/lib/money";
 
 type EnabledService = { key: string; flag: string; label: string };
 type Slot = { startAt: string; endAt: string; dateStr: string; timeLabel: string; left: number; full: boolean };
@@ -60,7 +60,7 @@ export default function OrderNewClient({
 
   const cycleBased = isCycleService(service);
   const subtotal = cycleBased ? cycles * CYCLE_RATES[service] : items.reduce((s, i) => s + i.rate * i.qty, 0);
-  const surcharge = express ? expressSurcharge(subtotal) : 0;
+  const surcharge = express ? (cycleBased ? EXPRESS_FLAT[service] : expressSurcharge(subtotal)) : 0;
   // Cycle rates are FINAL — Rs 200 means Rs 200, no GST line on cycle orders.
   const gst = cycleBased ? 0 : Math.round((subtotal + surcharge) * (gstPct / 100));
   const total = subtotal + surcharge + gst;
@@ -182,13 +182,15 @@ export default function OrderNewClient({
               <div>
                 <div className="h-sm">Express (same-day)</div>
                 <div className="muted" style={{ fontSize: "12px" }}>
-                  +{Math.round(EXPRESS_PCT * 100)}% of order value{surcharge > 0 ? ` · ${fmt(surcharge)}` : ""}
+                  {cycleBased
+                    ? `Flat ${fmt(EXPRESS_FLAT[service])} — same-day turnaround`
+                    : `+${Math.round(EXPRESS_PCT * 100)}% of order value${surcharge > 0 ? ` · ${fmt(surcharge)}` : ""}`}
                 </div>
               </div>
             </div>
             <Switch on={express} onToggle={() => setExpress(!express)} />
           </div>
-          {express && hasActiveSubscription && (
+          {express && hasActiveSubscription && !cycleBased && (
             <div className="muted mt8" style={{ fontSize: "12px", padding: "0 4px" }}>
               Using a plan cycle for this order? The cycle already covers the wash — you'd pay just a {Math.round(EXPRESS_PCT * 100)}% premium on its per-cycle value in cash at pickup
               {urgentCyclePreview > 0 ? ` (≈${fmt(urgentCyclePreview)})` : ""}, not the surcharge above.

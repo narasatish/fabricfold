@@ -276,7 +276,10 @@ export default function OrderNewClient({
         </div>
       </div>
 
-      <button className="btn mt16" disabled={pieces === 0 || loading} onClick={handleSubmit}>
+      {/* pieces is ALWAYS 0 on a cycle order — gating on it left Pre-book
+          permanently dead for the two main services. Found by the owner on
+          their own phone, which is the review no test suite replaces. */}
+      <button className="btn mt16" disabled={loading || (!cycleBased && pieces === 0)} onClick={handleSubmit}>
         {loading ? "Creating…" : "Pre-book order"}
       </button>
       <div className="center muted mt12" style={{ fontSize: "12px" }}>

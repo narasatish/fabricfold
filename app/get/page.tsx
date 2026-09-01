@@ -6,6 +6,7 @@
    student helping a friend with the other kind of phone isn't stuck. */
 import type { Metadata } from "next";
 import Link from "next/link";
+import InstallButton from "./_components/InstallButton";
 
 export const metadata: Metadata = {
   title: "Get the FabricFold app",
@@ -22,6 +23,10 @@ export default function GetAppPage() {
         <p className="muted" style={{ fontSize: 14, marginTop: 6 }}>
           Track your laundry, get a ping when it&apos;s ready, sign in with one WhatsApp message.
         </p>
+
+        {/* Scan → ONE tap. Chrome/Android arms the native install dialog here;
+            iOS has no install API, so the steps below stay for it. */}
+        <InstallButton />
 
         <div className="card pad mt16" style={{ textAlign: "left" }}>
           <div className="h-sm">iPhone</div>

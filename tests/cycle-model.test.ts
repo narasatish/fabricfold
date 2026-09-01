@@ -223,3 +223,10 @@ describe("urgent (same-day) is a flat fee on cycle services", () => {
     expect(read("app/s/orders/[id]/_components/OrderClient.tsx")).toMatch(/flat same-day fee of ₹\$\{EXPRESS_FLAT\[order\.service\]\}/);
   });
 });
+
+describe("Pre-book is alive on cycle orders", () => {
+  it("the button no longer gates on pieces, which are always zero for cycles", () => {
+    const ui = read("app/c/order/new/_components/OrderNewClient.tsx");
+    expect(ui).toMatch(/disabled=\{loading \|\| \(!cycleBased && pieces === 0\)\}/);
+  });
+});

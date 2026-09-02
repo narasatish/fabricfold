@@ -8,6 +8,7 @@ import { Svg } from "@/components/icons";
 import { useToast } from "@/components/chrome";
 import { requestOtp, verifyOtp, hasPasscode, loginWithPasscode } from "@/lib/actions/auth";
 import { startWhatsAppLogin, checkWhatsAppLogin } from "@/lib/actions/wa-login";
+import InstallHint from "@/components/install-hint";
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
@@ -197,6 +198,10 @@ export default function LoginForm() {
                 New here? Visit your campus counter to get registered. Staff sign in on the Staff tab above.
               </div>
             )}
+
+            {/* A QR scan can land here instead of /get — the download must
+                still be one tap away (owner, after scanning the poster). */}
+            <InstallHint />
           </>
         )}
 

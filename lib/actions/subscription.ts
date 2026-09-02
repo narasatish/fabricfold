@@ -13,6 +13,7 @@ import { assignWashDay } from "../washday-server";
 import { syncBagToPlan } from "./bags";
 import { CYCLE_RATES } from "../money";
 import { enqueueSheetEvent, flushSoon, istStamp } from "../sheet-events";
+import { rosterSoon } from "../sheets-sync";
 
 const rid = (n: number) => { let s = ""; for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10); return s; };
 
@@ -84,6 +85,7 @@ export async function activateSubscription(studentId: string, method: "cash" | "
 
   await pushNotif(studentId, `Your "${stu.subscription.plan}" plan is active. Happy washing!`, "status");
   await audit("Subscription activated", `${stu.name} · ${stu.subscription.plan} · ₹${gross} (${method})${bag.ok && bag.code ? ` · ${bag.code}` : ""}`, st.id);
+  rosterSoon();
   void notifyOwner("Subscription activated", `${stu.name}: "${stu.subscription.plan}" — ₹${gross} received by ${method.toUpperCase()} (activated by ${st.name}).`);
   publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "subscription", payload: { studentId } });
   return { ok: true as const, code: bag.ok ? bag.code : undefined, bagError: bag.ok ? undefined : bag.error };
@@ -130,6 +132,7 @@ export async function assignSubscription(studentId: string, planId: string, meth
 
   await pushNotif(studentId, `Your "${plan.name}" plan is active. Happy washing!`, "status");
   await audit("Subscription assigned", `${stu.name} · ${plan.name} · ₹${gross} (${method})${bag.ok && bag.code ? ` · ${bag.code}` : ""}`, st.id);
+  rosterSoon();
   void notifyOwner("Subscription assigned", `${stu.name}: "${plan.name}" — ₹${gross} received by ${method.toUpperCase()} (assigned by ${st.name}).`);
   publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "subscription", payload: { studentId } });
   return { ok: true as const, code: bag.ok ? bag.code : undefined, bagError: bag.ok ? undefined : bag.error };
@@ -217,6 +220,7 @@ export async function upgradeSubscription(studentId: string, planId: string, met
 
   await pushNotif(studentId, `You're now on the "${plan.name}" plan. ${cyclesTotal - cyclesUsed} cycles left.`, "status");
   await audit("Plan changed", `${stu.name} · ${cur.plan} → ${plan.name} · ₹${difference} (${method})${bag.ok && bag.changed ? ` · ${bag.replaced} → ${bag.code}` : ""}`, st.id);
+  rosterSoon();
   void notifyOwner("Plan changed", `${stu.name}: ${cur.plan} → ${plan.name}. Collected ₹${difference} by ${method.toUpperCase()} (by ${st.name}).`);
   publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "subscription", payload: { studentId } });
   return { ok: true as const, difference, cyclesLeft: cyclesTotal - cyclesUsed, tierChanged: cur.planRef?.tier !== plan.tier, code: bag.ok ? bag.code : undefined };
@@ -262,6 +266,7 @@ export async function cancelSubscription(studentId: string, reason: string) {
     "status",
   );
   await audit("Subscription cancelled", `${stu.name} · ${sub.plan} · ${left} cycles unused · ${note}`, st.id);
+  rosterSoon();
   void notifyOwner(
     "Subscription cancelled",
     `${stu.name}: "${sub.plan}" cancelled by ${st.name}. ${left} unused cycle(s) forfeited. Reason: ${note}`,
@@ -348,6 +353,7 @@ export async function sellCyclePack(
   });
 
   await audit("Cycle pack sold", `${stu.name} (${stu.id}) · ${cycles}× ${label} · ₹${price} ${input.method}`, st.id);
+  rosterSoon();
   await pushNotif(studentId, `${cycles} ${label} cycles added to your account — ₹${price} received. Happy washing!`, "credit");
   flushSoon();
   return { ok: true as const, price, cycles };

@@ -18,6 +18,7 @@
    an already-registered mobile is skipped, never overwritten. */
 import ExcelJS from "exceljs";
 import { db } from "@/lib/db";
+import { rosterSoon } from "@/lib/sheets-sync";
 import { requireStaff, AuthError } from "@/lib/auth";
 import { parseBagCode, BAG_LETTER, type Tier } from "@/lib/bagcode";
 
@@ -207,5 +208,6 @@ export async function POST(req: Request) {
     },
   });
 
+  rosterSoon();
   return Response.json({ ok: true, added, skipped, problems, warnings });
 }

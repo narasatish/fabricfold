@@ -20,10 +20,27 @@ export default function InstallHint() {
   const [standalone, setStandalone] = useState(true); // assume installed until proven otherwise
 
   useEffect(() => {
-    setStandalone(window.matchMedia("(display-mode: standalone)").matches);
-    const onPrompt = (e: Event) => { e.preventDefault(); setDeferred(e as BIPEvent); };
+    /* Once installed, never ask again (owner). appinstalled sets a flag;
+       display-mode covers being INSIDE the app. If Chrome later fires
+       beforeinstallprompt again, the app was uninstalled — the flag clears,
+       because a hint that never comes back after a reinstall is as wrong as
+       one that never goes away. */
+    let installed = false;
+    try { installed = localStorage.getItem("ff-installed") === "1"; } catch { /* private mode */ }
+    setStandalone(window.matchMedia("(display-mode: standalone)").matches || installed);
+    const onPrompt = (e: Event) => {
+      e.preventDefault();
+      try { localStorage.removeItem("ff-installed"); } catch { /* ignore */ }
+      setStandalone(false);
+      setDeferred(e as BIPEvent);
+    };
+    const onInstalled = () => {
+      try { localStorage.setItem("ff-installed", "1"); } catch { /* ignore */ }
+      setStandalone(true);
+    };
     window.addEventListener("beforeinstallprompt", onPrompt);
-    return () => window.removeEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => { window.removeEventListener("beforeinstallprompt", onPrompt); window.removeEventListener("appinstalled", onInstalled); };
   }, []);
 
   if (standalone) return null;

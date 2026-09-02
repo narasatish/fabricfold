@@ -12,6 +12,7 @@
 import { db } from "../db";
 import { requireStaff } from "../auth";
 import { pushNotif, audit } from "../notify";
+import { rosterSoon } from "../sheets-sync";
 import { publish } from "../realtime";
 import { notifyOwner } from "../mail";
 import { allocateBagCode, bagKindFor, isTier, BAG_LABEL, BAG_LETTER, parseBagCode, codesRemaining, WARN_AT, MAX_PER_KIND } from "../bagcode";
@@ -273,6 +274,7 @@ export async function setBagCode(bagId: string, rawCode: string) {
   }
 
   await audit("Customer ID changed", `${bag.student.name} · ${before} → ${code}`, st.id);
+  rosterSoon();
   // They carry this number and quote it at the counter, so they are told.
   await pushNotif(bag.studentId, `Your FabricFold customer ID is now ${code} (was ${before}).`, "status");
   publish([`student:${bag.studentId}`, `orders:${bag.student.collegeId}`], { type: "bag", payload: { studentId: bag.studentId, code } });
@@ -315,6 +317,7 @@ export async function releaseBagCode(bagId: string, note?: string) {
     data: { status: "released", releasedAt: new Date(), note: note?.trim() || bag.note },
   });
   await audit("Customer ID released", `${bag.code} · ${bag.student.name}${note ? ` — ${note}` : ""}`, st.id);
+  rosterSoon();
   publish([`student:${bag.studentId}`], { type: "bag", payload: { studentId: bag.studentId } });
   return { ok: true as const, code: bag.code };
 }

@@ -152,11 +152,16 @@ export async function runSheetsSync() {
   await writeSheet("Daily", daily);
 
   /* ---- Plans ---- */
-  const [colleges, plans] = await Promise.all([
-    db.college.findMany({ select: { id: true, name: true } }),
+  const [colleges, plansAll] = await Promise.all([
+    db.college.findMany({ select: { id: true, name: true, active: true } }),
     db.plan.findMany({ select: { id: true, name: true, price: true, collegeId: true, active: true } }),
   ]);
   const colName = (id: string) => colleges.find((c) => c.id === id)?.name || id;
+  /* A removed campus takes its plans off the sheet with it (owner, Sep 2026 —
+     BVRIT rows kept resurfacing after the campus was gone). The database
+     keeps everything; the sheet shows the business that exists. */
+  const liveCollegeIds = new Set(colleges.filter((c) => c.active).map((c) => c.id));
+  const plans = plansAll.filter((p) => liveCollegeIds.has(p.collegeId));
   const planRows: (string | number)[][] = [["College", "Plan", "Price", "Active", "Subscribers", "Cycles used"]];
   for (const p of plans) {
     const subs = await db.subscription.findMany({ where: { planId: p.id }, select: { active: true, cyclesUsed: true } });
@@ -166,6 +171,12 @@ export async function runSheetsSync() {
     ]);
   }
   await writeSheet("Plans", planRows);
+
+  /* ---- Students (roster) ---- The owner's register: everyone who can walk
+     up to the counter, their customer ID, plan and balance. Phone numbers ARE
+     here — this is the owner's own operational sheet and they asked for them;
+     the privacy page names Google as a processor for exactly this data. */
+  await writeStudentsTab();
 
   /* ---- Complaints ---- Every grievance and what it cost to settle, so the
      true price of service failures is visible next to the revenue figures
@@ -203,15 +214,15 @@ export async function runSheetsSync() {
 
   /* ---- Staff (attendance + day-close) ---- */
   const m = istDate().slice(0, 7);
-  const staff = await db.staff.findMany({ select: { id: true, name: true, role: true } });
+  const staff = await db.staff.findMany({ select: { id: true, name: true, phone: true, role: true, active: true } });
   const ROLE: Record<number, string> = { 1: "Counter", 2: "Manager", 3: "Admin", 4: "Owner" };
-  const staffRows: (string | number)[][] = [["Staff", "Role", "Days present this month", "Last clock-in"]];
+  const staffRows: (string | number)[][] = [["Staff", "Phone", "Role", "Active", "Days present this month", "Last clock-in"]];
   for (const s of staff) {
     const att = await db.attendance.findMany({
       where: { staffId: s.id, date: { startsWith: m } },
       orderBy: { date: "desc" }, select: { date: true },
     });
-    staffRows.push([s.name, ROLE[s.role] || String(s.role), att.length, att[0]?.date || "—"]);
+    staffRows.push([s.name, "+91 " + s.phone, ROLE[s.role] || String(s.role), s.active ? "yes" : "removed", att.length, att[0]?.date || "—"]);
   }
   staffRows.push([], ["DAY CLOSE — cash counted vs expected"], ["Date", "Expected", "Counted", "Variance", "Note"]);
   const closes = await db.dayClose.findMany({ orderBy: { date: "desc" }, take: 30 });
@@ -244,4 +255,57 @@ export async function runSheetsSync() {
   await writeSheet("Config", cfgRows);
 
   return { ok: true as const, at: stamp, tabs: ["Live", "Daily", "Plans", "Staff", "Config"], applied };
+}
+
+/* ─── Roster tabs, refreshable on their own ────────────────────────────────
+
+   Registrations, imports and staff changes update the sheet WITHOUT waiting
+   for the nightly full sync — the owner reads this sheet as the register, and
+   a register that lags a day is one nobody trusts. Wholesale rewrite, not
+   append: the roster is small (hundreds of rows), and rewriting is immune to
+   the dedup drift that append-based tabs suffer. */
+export async function writeStudentsTab() {
+  const students = await db.student.findMany({
+    orderBy: { createdAt: "asc" },
+    include: {
+      college: { select: { name: true } },
+      subscription: { select: { active: true, plan: true, cyclesTotal: true, cyclesUsed: true } },
+      bags: { where: { status: "active" }, select: { code: true }, take: 1 },
+    },
+  });
+  const rows: (string | number)[][] = [["Customer ID", "Name", "Phone", "Type", "College", "Plan", "Cycles left", "Joined"]];
+  for (const st of students) {
+    rows.push([
+      st.bags[0]?.code || st.id,
+      st.name,
+      "+91 " + st.phone,
+      st.kind === "faculty" ? "Faculty" : "Student",
+      st.college?.name || "—",
+      st.subscription?.active ? st.subscription.plan : "—",
+      st.subscription?.active ? st.subscription.cyclesTotal - st.subscription.cyclesUsed : "—",
+      st.createdAt.toISOString().slice(0, 10),
+    ]);
+  }
+  rows.push([], ["Total", students.length, "Faculty", students.filter((x) => x.kind === "faculty").length]);
+  await writeSheet("Students", rows);
+}
+
+export async function runRosterSync() {
+  if (!sheetsConfigured()) return { ok: false as const, error: "sheets not configured" };
+  await writeStudentsTab();
+  return { ok: true as const };
+}
+
+/** Fire-and-forget roster refresh from a server action. Same after() shape as
+    flushSoon(): a bare void promise dies when the serverless instance
+    freezes, and a failed sheet write must never fail a registration. */
+export function rosterSoon() {
+  const run = async () => { try { await runRosterSync(); } catch (e) { console.error("roster sync failed", e); } };
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { after } = require("next/server");
+    after(run());
+  } catch {
+    void run();
+  }
 }

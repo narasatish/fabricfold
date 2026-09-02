@@ -15,14 +15,18 @@ export default function InstallButton() {
   const [state, setState] = useState<"waiting" | "ready" | "installed" | "unsupported">("waiting");
 
   useEffect(() => {
-    // Already running as the installed app? Nothing to sell.
-    if (window.matchMedia("(display-mode: standalone)").matches) { setState("installed"); return; }
+    // Already running as the installed app, or installed earlier from this
+    // browser? Nothing to sell — offer Open instead (owner: never re-ask).
+    let was = false;
+    try { was = localStorage.getItem("ff-installed") === "1"; } catch { /* private mode */ }
+    if (window.matchMedia("(display-mode: standalone)").matches || was) { setState("installed"); return; }
     const onPrompt = (e: Event) => {
       e.preventDefault();
+      try { localStorage.removeItem("ff-installed"); } catch { /* ignore */ }
       setDeferred(e as BIPEvent);
       setState("ready");
     };
-    const onInstalled = () => setState("installed");
+    const onInstalled = () => { try { localStorage.setItem("ff-installed", "1"); } catch { /* ignore */ } setState("installed"); };
     window.addEventListener("beforeinstallprompt", onPrompt);
     window.addEventListener("appinstalled", onInstalled);
     /* If Chrome hasn't offered within a few seconds it isn't going to —

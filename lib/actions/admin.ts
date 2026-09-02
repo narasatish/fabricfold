@@ -5,6 +5,7 @@ import { db } from "../db";
 import { FEATURE_DEFAULTS, featureOn, type FeatureKey } from "../features";
 import { requireStaff } from "../auth";
 import { PERM_DEFS } from "../perms";
+import { rosterSoon } from "../sheets-sync";
 import { audit } from "../notify";
 import { publish } from "../realtime";
 import { notifyOwner } from "../mail";
@@ -36,6 +37,7 @@ export async function registerStudent(input: { name: string; phone: string; coll
   // Wash day rota PARKED (owner, Sep 2026): students drop off any day, so no
   // day is assigned. assignWashDay and the data stay for when it returns.
   await audit(kind === "faculty" ? "Faculty registered" : "Student registered", `${name} · +91 ${phone} · ${college.name}`, st.id);
+  rosterSoon();
   void notifyOwner("New student registered", `${name} (+91 ${phone}) registered at the counter (${college.name}) by ${st.name} — ID ${stu.id}.`);
   return { ok: true as const, id: stu.id };
 }
@@ -54,6 +56,7 @@ export async function updateStudentPhone(studentId: string, newPhone: string) {
   if (!stu) return { ok: false as const, error: "Student not found" };
   await db.student.update({ where: { id: studentId }, data: { phone } });
   await audit("Student phone changed", `${stu.name} (${stu.id}) · +91 ${stu.phone} -> +91 ${phone}`, st.id);
+  rosterSoon();
   return { ok: true as const };
 }
 
@@ -137,6 +140,7 @@ export async function updateStudentDetails(
   // Rota parked: a moved student simply has no wash day until it returns.
 
   await audit("Student updated", `${stu.name} (${stu.id}) · ${changes.join("; ")}`, st.id);
+  rosterSoon();
   /* Both campuses on a move: the old one has to drop them from its wash-day
      list, and the new one has to show them. Publishing only the old channel
      would leave the receiving counter's screen wrong until a manual refresh. */
@@ -294,9 +298,11 @@ export async function saveStaff(input: { id?: string; name: string; phone: strin
     await db.staff.update({ where: { id: input.id }, data: { name: input.name.trim(), phone, role: input.role, collegeId: input.collegeId, ...(perms !== undefined ? { perms } : {}) } });
     const granted = perms ? Object.entries(perms).map(([k, v]) => `${v ? "+" : "-"}${k}`).join(" ") : "";
     await audit("Staff updated", `${input.name} (role ${input.role})${granted ? ` · tools ${granted}` : ""}`, st.id);
+  rosterSoon();
   } else {
     await db.staff.create({ data: { name: input.name.trim(), phone, role: input.role, collegeId: input.collegeId } });
     await audit("Staff added", `${input.name} (role ${input.role})`, st.id);
+  rosterSoon();
   }
   return { ok: true as const };
 }
@@ -337,6 +343,7 @@ export async function setStaffActive(staffId: string, active: boolean) {
     data: { active, sessionEpoch: { increment: 1 } },
   });
   await audit(active ? "Staff restored" : "Staff removed", `${target.name} · ${target.phone}`, st.id);
+  rosterSoon();
   return { ok: true as const, active };
 }
 

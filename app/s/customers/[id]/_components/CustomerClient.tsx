@@ -9,7 +9,7 @@ import { assignSubscription, upgradeSubscription, cancelSubscription } from "@/l
 import { issueBag, retireBag, releaseBagCode, setBagCode, reissueBagSameCode } from "@/lib/actions/bags";
 import { walkInOrder } from "@/lib/actions/orders";
 import { sellCyclePack } from "@/lib/actions/subscription";
-import { CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService } from "@/lib/money";
+import { CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService, expressFlatFee } from "@/lib/money";
 import { enqueueIntake, newIdemKey } from "@/lib/offline-queue";
 import { topUpCredits } from "@/lib/actions/ops";
 import { updateStudentPhone, updateStudentDetails } from "@/lib/actions/admin";
@@ -668,7 +668,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
             <div>
               <div className="h-sm">Urgent (same day)</div>
               <div className="muted" style={{ fontSize: "12px" }}>
-                {wiUseCycle ? "Cycle already covers the wash — only a 40% premium on its per-cycle value is charged, in cash" : "+40% of the order value"}
+                {wiUseCycle ? `Cycle already covers the wash — only the flat ₹${expressFlatFee(wiService)} same-day fee is charged, in cash` : `Flat ₹${expressFlatFee(wiService)} — same-day turnaround`}
               </div>
             </div>
             <Switch on={wiExpress} onToggle={() => setWiExpress(!wiExpress)} />
@@ -682,7 +682,11 @@ Currently ${current}. Type the code printed on the bag they are being given.
               <div className="kv total"><span>Est. total</span><span className="mono">{fmt(wiSubtotal + wiExpressSurcharge + wiGst)}</span></div>
             )}
           </div>
-          <button className="btn mt16" onClick={doWalkIn} disabled={wiLoading || wiPieces === 0}>
+          {/* wiPieces is ALWAYS 0 for a cycle service (washFold/washIron) —
+              gating on it left Place order permanently disabled for the two
+              main services at the counter. Same bug, same fix, as the
+              customer pre-book button. */}
+          <button className="btn mt16" onClick={doWalkIn} disabled={wiLoading || (!isCycleService(wiService) && wiPieces === 0)}>
             <Svg name="check" size={18} /> {wiLoading ? "Creating…" : "Create & receive order"}
           </button>
         </div>

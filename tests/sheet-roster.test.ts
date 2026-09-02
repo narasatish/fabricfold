@@ -59,21 +59,15 @@ describe("the roster refreshes when it changes, not at 2:30am", () => {
 });
 
 describe("install once, never nag again", () => {
-  it("appinstalled is remembered in both prompts", () => {
+  /* Superseded by tests/mobile-fixes.test.ts, which asserts the CORRECT
+     shape: one shared singleton (lib/pwa-install.ts) with ONE "ff-installed"
+     flag, rather than each component managing its own localStorage. Kept
+     here as a pointer so nobody re-adds the old per-component pattern. */
+  it("the install memory lives in the shared singleton, not per component", () => {
+    const singleton = read("lib/pwa-install.ts");
+    expect(singleton).toMatch(/const FLAG = "ff-installed"/);
     for (const f of ["components/install-hint.tsx", "app/get/_components/InstallButton.tsx"]) {
-      const src = read(f);
-      expect(src).toMatch(/localStorage\.setItem\("ff-installed", "1"\)/);
-      expect(src).toMatch(/localStorage\.getItem\("ff-installed"\)/);
-    }
-  });
-  it("a fresh install offer clears the memory — reinstalls get the button back", () => {
-    for (const f of ["components/install-hint.tsx", "app/get/_components/InstallButton.tsx"]) {
-      expect(read(f)).toMatch(/localStorage\.removeItem\("ff-installed"\)/);
-    }
-  });
-  it("private mode cannot crash it", () => {
-    for (const f of ["components/install-hint.tsx", "app/get/_components/InstallButton.tsx"]) {
-      expect(read(f)).toMatch(/catch \{ \/\* (private mode|ignore) \*\/ \}/);
+      expect(read(f), f).toMatch(/from "@\/lib\/pwa-install"/);
     }
   });
 });

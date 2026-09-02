@@ -116,21 +116,22 @@ describe("no-GST billing (staff choice at accept)", () => {
     expect(money.computeBill(150, 59, 18, { usedCycle: true, excessCharge: 0 })).toEqual({ gst: 0, total: 59 });
   });
 
-  it("urgentCycleCharge: 40% of the plan's average per-cycle value, rounded, charged in cash", () => {
-    // user's own example: ₹5000 plan / 34 cycles ≈ ₹147.06/cycle × 40% ≈ ₹58.8 → ₹59
-    expect(money.urgentCycleCharge(5000, 34)).toBe(59);
-    expect(money.urgentCycleCharge(0, 34)).toBe(0);
-    expect(money.urgentCycleCharge(5000, 0)).toBe(0);
-  });
-
-  it("express surcharge is 40% of order value (flat, all colleges)", () => {
-    expect(money.EXPRESS_PCT).toBe(0.4);
-    expect(money.expressSurcharge(500)).toBe(200);
-    expect(money.expressSurcharge(0)).toBe(0);
-    // rounds to the nearest rupee
-    expect(money.expressSurcharge(155)).toBe(62);
-    // flows through computeBill: 500 + 200 express, +18% GST = 826
-    expect(money.computeBill(500, money.expressSurcharge(500), 18)).toEqual({ gst: 126, total: 826 });
+  it("expressFlatFee: a flat same-day fee per service, no percentage anywhere (owner, Sep 2026 — second pass)", () => {
+    // owner's own numbers: 99 Wash & Iron; 79 Wash & Fold and Dry Cleaning
+    expect(money.expressFlatFee("washIron")).toBe(99);
+    expect(money.expressFlatFee("washFold")).toBe(79);
+    expect(money.expressFlatFee("dryClean")).toBe(79);
+    // Iron Only has no owner-given rate — it inherits the base tier rather
+    // than reviving a percentage the owner explicitly rejected
+    expect(money.expressFlatFee("ironOnly")).toBe(79);
+    // an unrecognised service still gets a real number, never zero or NaN
+    expect(money.expressFlatFee("somethingElse")).toBe(79);
+    // SAME fee whether the order is plan-paid or cash-paid — no plan-price
+    // dependence left (the old urgentCycleCharge derived from planPrice/cycles)
+    expect(money.computeBill(150, money.expressFlatFee("washFold"), 18, { usedCycle: true, excessCharge: 0 }))
+      .toEqual({ gst: 0, total: 79 });
+    expect(money.computeBill(200, money.expressFlatFee("washFold"), 18, { usedCycle: false, excessCharge: 0, noGst: true }))
+      .toEqual({ gst: 0, total: 279 });
   });
 
   it("a no-GST order is never invoiced — not even via UPI or staff override", () => {

@@ -53,12 +53,20 @@ a{color:inherit;text-decoration:none}
 .skeleton{background:linear-gradient(90deg,var(--line) 25%,var(--line-2) 50%,var(--line) 75%);background-size:200% 100%;animation:ff-shimmer 1.4s linear infinite;border-radius:10px;color:transparent}
 
 /* Phone frame */
-#app{max-width:440px;margin:0 auto;min-height:100vh;min-height:100dvh;background:radial-gradient(120% 60% at 50% -10%,#e4f4ed 0%,var(--bg) 55%);position:relative;display:flex;flex-direction:column;box-shadow:0 0 60px rgba(0,0,0,.14)}
-.screen{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:96px}
+#app{max-width:440px;margin:0 auto;min-height:100vh;min-height:100dvh;background:radial-gradient(120% 60% at 50% -10%,#e4f4ed 0%,var(--bg) 55%);position:relative;display:flex;flex-direction:column;box-shadow:0 0 60px rgba(0,0,0,.14);padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+/* 96px was a guess at the tab bar's height. On an iPhone with a home
+   indicator, the tab bar's real height is its content PLUS
+   env(safe-area-inset-bottom) (~34px on notched iPhones) — a fixed 96px
+   guess sits shorter than that, so the last inch of every screen was hidden
+   behind the bar. Computed from the same padding the bar itself uses. */
+.screen{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:calc(88px + env(safe-area-inset-bottom))}
 .screen.no-nav{padding-bottom:24px}
 
 /* Top bar */
-.topbar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.86);backdrop-filter:blur(16px) saturate(1.6);-webkit-backdrop-filter:blur(16px) saturate(1.6);border-bottom:1px solid var(--line);padding:14px 18px;display:flex;align-items:center;gap:12px;min-height:56px}
+/* viewportFit:cover draws content under the iPhone notch/status bar in
+   standalone mode; without safe-area padding the top bar's title sits
+   PARTLY BEHIND the status bar / camera cutout. */
+.topbar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.86);backdrop-filter:blur(16px) saturate(1.6);-webkit-backdrop-filter:blur(16px) saturate(1.6);border-bottom:1px solid var(--line);padding:calc(14px + env(safe-area-inset-top)) 18px 14px;display:flex;align-items:center;gap:12px;min-height:56px}
 .topbar h1{font-size:19px;font-weight:700;letter-spacing:-.015em}
 .topbar button,.topbar a{white-space:nowrap}
 .topbar .sub{font-size:12px;color:var(--muted);font-weight:500}

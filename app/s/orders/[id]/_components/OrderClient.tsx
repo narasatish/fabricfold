@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { Qr } from "@/components/qr";
 import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, upiLink } from "@/lib/format";
-import { CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, isCycleService, excessWeightCharge } from "@/lib/money";
+import { CYCLE_KG_LIMIT, CYCLE_RATES, expressFlatFee, isCycleService, excessWeightCharge } from "@/lib/money";
 import { isOverdue } from "@/lib/money";
 import { useToast, Sheet, Seg, Switch } from "@/components/chrome";
 import {
@@ -819,9 +819,7 @@ export default function StaffOrderClient({
           {acceptInput.useCycle && order.express && (
             <div className="card pad mt12" style={{ background: "var(--amber-soft)", borderColor: "#f2e2c4", marginBottom: "16px" }}>
               <span style={{ fontSize: "12.5px", color: "var(--amber)" }}>
-                {cycleBased
-                  ? `This order is marked urgent — collect the flat same-day fee of ₹${EXPRESS_FLAT[order.service]} before handing it over.`
-                  : "This order is marked urgent. The cycle covers the wash — collect a 40% premium on its per-cycle plan value in cash before handing it over."}
+                This order is marked urgent — collect the flat same-day fee of ₹{expressFlatFee(order.service)} in cash before handing it over.
               </span>
             </div>
           )}

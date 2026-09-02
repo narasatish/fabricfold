@@ -105,7 +105,7 @@ export default function Terms() {
           <p>
             Prices are set per campus and shown in the app before you confirm. GST is added at the applicable rate and
             shown separately — you always see the subtotal, tax and total before you pay. Express (same-day) service
-            costs an additional 40% of the order value, where your campus offers it.
+            costs a flat same-day fee (₹99 Wash & Iron, ₹79 Wash & Fold and Dry Cleaning), where your campus offers it.
           </p>
           <p>
             We may change prices from time to time. The price that applies to your order is the one shown when the order

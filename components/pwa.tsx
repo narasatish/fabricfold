@@ -1,10 +1,13 @@
 "use client";
 /* Registers the service worker + Web Push subscription (when VAPID key is set),
-   and shows a dismissible "install to home screen" prompt. */
+   and arms the site-wide install listener as early as any client code can
+   run — see lib/pwa-install.ts for why "as early as possible" is the fix. */
 import { useEffect, useState } from "react";
+import { armInstallListener, getDeferredPrompt, isInstalled, onInstallEvent, promptInstall, type BIPEvent } from "@/lib/pwa-install";
 
 export function PwaSetup({ vapidPublicKey }: { vapidPublicKey?: string }) {
   useEffect(() => {
+    armInstallListener();
     if (!("serviceWorker" in navigator)) return;
     navigator.serviceWorker.register("/sw.js").then(async (reg) => {
       if (!vapidPublicKey || !("PushManager" in window)) return;
@@ -31,14 +34,16 @@ export function PwaSetup({ vapidPublicKey }: { vapidPublicKey?: string }) {
   return null;
 }
 
-/* ---------- Install-to-home-screen prompt ----------
-   Android/Chrome fires `beforeinstallprompt` — we capture it and show our own
-   banner. iOS Safari never fires it, so we show a "Share → Add to Home Screen"
-   hint instead. Dismissal is remembered for 14 days. Hidden once installed. */
+/* ---------- Install-to-home-screen banner (shown post-login, on /c and /s) ----------
+   Reads the SHARED singleton — armed on every page from the root layout — so
+   it shows the offer even when Chrome fired it before this banner mounted
+   (e.g. the student was still on /login when the event arrived). iOS Safari
+   never fires the event, so it gets the manual Share hint instead. Dismissal
+   is remembered for 14 days; installing is remembered for good via the
+   shared "ff-installed" flag (lib/pwa-install.ts), same flag /get uses, so
+   installing from EITHER surface silences BOTH. */
 const DISMISS_KEY = "ff_install_dismissed";
 const DISMISS_DAYS = 14;
-
-type BIPEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
 
 export function InstallPrompt() {
   const [deferred, setDeferred] = useState<BIPEvent | null>(null);
@@ -46,25 +51,20 @@ export function InstallPrompt() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    // Already installed (standalone) — never prompt.
-    const standalone =
-      window.matchMedia?.("(display-mode: standalone)").matches ||
-      (navigator as unknown as { standalone?: boolean }).standalone === true;
-    if (standalone) return;
+    if (isInstalled()) return;
 
-    // Recently dismissed?
     try {
       const until = Number(localStorage.getItem(DISMISS_KEY) || 0);
       if (until && Date.now() < until) return;
     } catch { /* ignore */ }
 
-    const onBIP = (e: Event) => {
-      e.preventDefault();
-      setDeferred(e as BIPEvent);
-      setVisible(true);
-    };
-    window.addEventListener("beforeinstallprompt", onBIP);
-    window.addEventListener("appinstalled", () => setVisible(false));
+    const existing = getDeferredPrompt();
+    if (existing) { setDeferred(existing); setVisible(true); }
+    const off = onInstallEvent("available", () => {
+      const p = getDeferredPrompt();
+      if (p) { setDeferred(p); setVisible(true); }
+    });
+    const offInstalled = onInstallEvent("installed", () => setVisible(false));
 
     // iOS Safari: no beforeinstallprompt — detect and show the manual hint.
     const ua = navigator.userAgent;
@@ -75,7 +75,7 @@ export function InstallPrompt() {
       setVisible(true);
     }
 
-    return () => window.removeEventListener("beforeinstallprompt", onBIP);
+    return () => { off(); offInstalled(); };
   }, []);
 
   const dismiss = () => {
@@ -84,9 +84,7 @@ export function InstallPrompt() {
   };
 
   const install = async () => {
-    if (!deferred) return;
-    await deferred.prompt();
-    await deferred.userChoice.catch(() => {});
+    await promptInstall();
     setDeferred(null);
     dismiss();
   };

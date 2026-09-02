@@ -7,7 +7,7 @@ import { featureOn, serviceOn } from "../features";
 import { enqueueSheetEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import type { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff, requireStaffPerm } from "../auth";
-import { expressSurcharge, urgentCycleCharge, createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, isCycleService } from "../money";
+import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, expressFlatFee, isCycleService } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit } from "../notify";
@@ -84,8 +84,8 @@ export async function placeOrder(input: { service: string; items: { label: strin
      lacked the key would have the surcharge applied anyway — a money path
      turned on by an absent flag rather than a deliberate one. */
   const express = input.express && featureOn(stu.college.features, "express");
-  // Cycle services: flat same-day fee (79/99). Per-piece keeps the 40% rule.
-  const surcharge = express ? (isCycleService(input.service) ? EXPRESS_FLAT[input.service] : expressSurcharge(sub)) : 0;
+  // Flat same-day fee for every service (owner, Sep 2026) — no percentage anywhere.
+  const surcharge = express ? expressFlatFee(input.service) : 0;
   // Rs 200/250 per cycle is the FINAL price (owner): cycle orders never add GST.
   const gst = !isCycleService(input.service) && cfg.gstEnabled ? Math.round((sub + surcharge) * (cfg.gstPct / 100)) : 0;
   const total = sub + surcharge + gst;
@@ -166,24 +166,17 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       usedCycle = true;
       // One row per cycle burned, so cancelling restores exactly what was taken.
       await tx.cycleUse.createMany({ data: Array.from({ length: cyclesCount }, () => ({ subscriptionId: sub.id, orderId: o.id })) });
-      // Urgent (same-day) on a cycle order: the cycle is already prepaid, so
-      // only the 40% urgent premium on its average value is charged, in cash,
-      // right now — see urgentCycleCharge().
-      if (o.express) {
-        const planPrice = sub.planRef ? Number(sub.planRef.price) : Number((cfg.plan as { price: number }).price);
-        urgentCharge = urgentCycleCharge(planPrice, sub.cyclesTotal);
-      }
+      // Urgent (same-day) on a plan-paid order: the cycle is already prepaid,
+      // so only the flat same-day fee is charged, in cash, right now.
+      if (o.express) urgentCharge = expressFlatFee(o.service);
     }
 
     // recomputeOrder() — exact prototype math (+ optional no-GST billing).
     // GST is skipped when staff chose 'Bill without GST' OR GST billing is
     // switched off app-wide in Admin.
     const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
-    const surcharge = !o.express
-      ? 0
-      : isCycleService(o.service)
-        ? EXPRESS_FLAT[o.service]                       // flat 79/99, plan-paid or cash-paid
-        : usedCycle ? urgentCharge : expressSurcharge(sub);
+    // Flat fee for everyone, every service — plan-paid or cash-paid alike.
+    const surcharge = o.express ? expressFlatFee(o.service) : 0;
     // Cycle rates are FINAL (owner): Rs 200 means Rs 200, so GST never applies.
     const noGst = !usedCycle && (isCycleService(o.service) || !!input.noGst || !cfg.gstEnabled);
     const { gst, total } = computeBill(sub, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });
@@ -307,20 +300,12 @@ export async function walkInOrder(
           await tx.subscription.update({ where: { id: sub.id }, data: { cyclesUsed: { increment: cyclesCount } } });
         }
         usedCycle = true;
-        // Urgent (same-day) on a cycle order: the cycle is already prepaid, so
-        // only the 40% urgent premium on its average value is charged, in cash.
-        if (input.express) {
-          const planPrice = sub.planRef ? Number(sub.planRef.price) : Number((cfg.plan as { price: number }).price);
-          urgentCharge = urgentCycleCharge(planPrice, sub.cyclesTotal);
-        }
+        // Urgent (same-day) on a plan-paid order: flat same-day fee, in cash.
+        if (input.express) urgentCharge = expressFlatFee(input.service);
       }
 
       const sub2 = items.reduce((s, i) => s + i.rate * i.qty, 0);
-      const surcharge = !input.express
-        ? 0
-        : isCycleService(input.service)
-          ? EXPRESS_FLAT[input.service]
-          : usedCycle ? urgentCharge : expressSurcharge(sub2);
+      const surcharge = input.express ? expressFlatFee(input.service) : 0;
       // Cycle rates are FINAL (owner): Rs 200 means Rs 200, so GST never applies.
       const noGst = !usedCycle && (isCycleService(input.service) || !!input.noGst || !cfg.gstEnabled);
       const { gst, total } = computeBill(sub2, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });

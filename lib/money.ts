@@ -7,24 +7,10 @@
 import { db } from "./db";
 import type { Prisma } from "./generated/prisma/client";
 
-/* Same-day express surcharge = 40% of the order value (subtotal). Flat rule for
-   every college — not configurable per campus. */
-export const EXPRESS_PCT = 0.4;
-export function expressSurcharge(subtotal: number) {
-  return Math.round(subtotal * EXPRESS_PCT);
-}
-
-/* Urgent (same-day) surcharge for an order paid with a subscription cycle.
-   The cycle itself is already prepaid — one of the plan's total cycles — so
-   consuming it costs nothing extra. Urgent is an add-on service on top of
-   that, priced at the same 40% as a normal express order, but since a cycle
-   order has no per-item "order value" to take 40% of, the base is the plan's
-   own average value per cycle (planPrice ÷ totalCycles). Charged in cash. */
-export function urgentCycleCharge(planPrice: number, cyclesTotal: number) {
-  if (!cyclesTotal) return 0;
-  const perCycle = planPrice / cyclesTotal;
-  return Math.round(perCycle * EXPRESS_PCT);
-}
+/* The 40%-of-value express model is retired (owner, Sep 2026, second pass) —
+   see EXPRESS_FLAT below. Nothing in this file computes a percentage surcharge
+   any more; every service has one flat same-day fee, plan-paid or cash-paid,
+   same number either way. */
 
 export function financialYearTag(ts?: number | Date) {
   const dt = ts ? new Date(ts) : new Date();
@@ -109,7 +95,14 @@ export const CYCLE_RATES: Record<string, number> = { washFold: 200, washIron: 25
    formulas for these services. Flat because the owner quotes it flat; a
    percentage of a flat cycle rate was just a worse way to write a constant.
    Students and faculty alike; per-piece services keep the 40% rule. */
-export const EXPRESS_FLAT: Record<string, number> = { washFold: 79, washIron: 99 };
+/* Owner, Sep 2026 (second pass): the 40%-of-value model is gone entirely —
+   every service now has a flat urgent fee. Rs 99 Wash & Iron; Rs 79 Wash &
+   Fold AND Dry Cleaning. Iron Only has no owner-given rate; it inherits the
+   Rs 79 tier rather than leaving a percentage the owner explicitly rejected. */
+export const EXPRESS_FLAT: Record<string, number> = { washFold: 79, washIron: 99, dryClean: 79, ironOnly: 79 };
+export function expressFlatFee(service: string) {
+  return EXPRESS_FLAT[service] ?? EXPRESS_FLAT.washFold;
+}
 export function isCycleService(service: string) {
   return service in CYCLE_RATES;
 }

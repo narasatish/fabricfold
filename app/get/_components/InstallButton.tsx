@@ -1,53 +1,41 @@
 "use client";
-/* One-tap install.
+/* One-tap install — reads the SITE-WIDE singleton (lib/pwa-install.ts).
 
-   The browser will not install a PWA without a user gesture, and iOS Safari
-   has no install API at all — so "scan → app on the phone" is, at its best,
-   scan → ONE tap. This captures Chrome/Android's beforeinstallprompt and
-   turns it into that single tap; platforms that refuse the API fall back to
-   the written steps below, which stay on the page for exactly that reason. */
+   Chrome fires beforeinstallprompt once per page load; root layout arms the
+   listener the instant it mounts, so by the time this button renders, an
+   already-captured event is picked up immediately via getDeferredPrompt() —
+   no missed-event race, no separate local listener that could lose to
+   timing. This was a scan-and-see-nothing bug: this component used to attach
+   its OWN listener, and if Chrome fired the event a beat earlier, nobody was
+   listening yet. */
 import { useEffect, useState } from "react";
-
-type BIPEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
+import { getDeferredPrompt, isInstalled, onInstallEvent, promptInstall } from "@/lib/pwa-install";
 
 export default function InstallButton() {
-  const [deferred, setDeferred] = useState<BIPEvent | null>(null);
   const [state, setState] = useState<"waiting" | "ready" | "installed" | "unsupported">("waiting");
 
   useEffect(() => {
-    // Already running as the installed app, or installed earlier from this
-    // browser? Nothing to sell — offer Open instead (owner: never re-ask).
-    let was = false;
-    try { was = localStorage.getItem("ff-installed") === "1"; } catch { /* private mode */ }
-    if (window.matchMedia("(display-mode: standalone)").matches || was) { setState("installed"); return; }
-    const onPrompt = (e: Event) => {
-      e.preventDefault();
-      try { localStorage.removeItem("ff-installed"); } catch { /* ignore */ }
-      setDeferred(e as BIPEvent);
-      setState("ready");
-    };
-    const onInstalled = () => { try { localStorage.setItem("ff-installed", "1"); } catch { /* ignore */ } setState("installed"); };
-    window.addEventListener("beforeinstallprompt", onPrompt);
-    window.addEventListener("appinstalled", onInstalled);
-    /* If Chrome hasn't offered within a few seconds it isn't going to —
-       wrong browser, iOS, or already installed under another profile. Show
-       the manual path rather than a button that will never arm. */
-    const t = setTimeout(() => setState((s) => (s === "waiting" ? "unsupported" : s)), 3500);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onPrompt);
-      window.removeEventListener("appinstalled", onInstalled);
-      clearTimeout(t);
-    };
+    if (isInstalled()) { setState("installed"); return; }
+    if (getDeferredPrompt()) { setState("ready"); return; }
+
+    const offAvail = onInstallEvent("available", () => setState(getDeferredPrompt() ? "ready" : "waiting"));
+    const offInstalled = onInstallEvent("installed", () => setState("installed"));
+
+    /* If nothing arrives within a few seconds it isn't going to — wrong
+       browser, iOS, or the offer already fired and was consumed elsewhere in
+       this session. Show the manual path below rather than a dead button. */
+    const t = setTimeout(() => setState((s) => (s === "waiting" ? "unsupported" : s)), 4000);
+    return () => { offAvail(); offInstalled(); clearTimeout(t); };
   }, []);
 
   if (state === "installed") {
     return <a className="btn mt16" href="/login">Open FabricFold</a>;
   }
-  if (state === "ready" && deferred) {
+  if (state === "ready") {
     return (
       <button
         className="btn mt16"
-        onClick={async () => { await deferred.prompt(); }}
+        onClick={async () => { const r = await promptInstall(); if (r === "accepted") setState("installed"); }}
         style={{ fontSize: 17 }}
       >
         ⬇ Install FabricFold — one tap
@@ -57,6 +45,6 @@ export default function InstallButton() {
   if (state === "waiting") {
     return <button className="btn mt16" disabled>Checking your phone…</button>;
   }
-  // unsupported: the written iPhone/Android steps above are the path
+  // unsupported: the written iPhone/Android steps on this page are the path
   return null;
 }

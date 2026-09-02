@@ -2,12 +2,12 @@
 
    These walk the situations that actually happen at a counter and assert the
    money and cycle invariants that must never break. They test the SHARED pure
-   logic the server actions use (computeBill, urgentCycleCharge, bag codes),
+   logic the server actions use (computeBill, expressFlatFee, bag codes),
    which is where a wrong number would silently cost real money — the actions
    themselves need a staff session and are covered at the source level and by
    scripts/e2e-check.ts against a live database. */
 import { describe, expect, it } from "vitest";
-import { computeBill, urgentCycleCharge, expressSurcharge, EXPRESS_PCT, shouldInvoiceOrder } from "../lib/money";
+import { computeBill, expressFlatFee, shouldInvoiceOrder } from "../lib/money";
 import { formatBagCode, parseBagCode, bagKindFor, MAX_PER_KIND } from "../lib/bagcode";
 import { MIN_DAMAGE_PHOTOS, cleanPhotos } from "../lib/complaint-rules";
 
@@ -28,23 +28,23 @@ describe("scenario: subscribed student, ordinary wash on a plan cycle", () => {
   });
 });
 
-describe("scenario: subscribed student wants it same-day (the urgent rule)", () => {
-  it("charges 40% of the plan's per-cycle value, in cash", () => {
-    // Silver: 5000/34 = 147.06/cycle, 40% = 58.8 -> 59
-    expect(urgentCycleCharge(SILVER, CYCLES)).toBe(59);
-    expect(urgentCycleCharge(BRONZE, CYCLES)).toBe(47);
-    expect(urgentCycleCharge(GOLD, CYCLES)).toBe(71);
+describe("scenario: subscribed student wants it same-day (the flat urgent fee)", () => {
+  it("charges a FLAT fee, same number whatever the plan's price (owner, Sep 2026 — the 40% model is retired)", () => {
+    // Bronze, Silver, Gold all pay the SAME flat fee for the same service —
+    // that is the whole point of retiring the plan-price-dependent formula.
+    expect(expressFlatFee("washFold")).toBe(79);
+    expect(expressFlatFee("washIron")).toBe(99);
   });
 
-  it("does NOT re-charge the cycle itself — only the premium is owed", () => {
-    const urgent = urgentCycleCharge(SILVER, CYCLES);
+  it("does NOT re-charge the cycle itself — only the flat fee is owed", () => {
+    const urgent = expressFlatFee("washIron");
     const { total, gst } = computeBill(180, urgent, 18, { usedCycle: true });
-    expect(total).toBe(59); // not 147+59, and not the 180 of item value
+    expect(total).toBe(99); // not 180+99, and not scaled by any plan value
     expect(gst).toBe(0);
   });
 
   it("leaves a balance owing, so the order must NOT auto-mark paid", () => {
-    const urgent = urgentCycleCharge(SILVER, CYCLES);
+    const urgent = expressFlatFee("washIron");
     const { total } = computeBill(180, urgent, 18, { usedCycle: true });
     expect(total === 0).toBe(false);
     // collectOrder blocks while `!paid && total > 0`
@@ -54,7 +54,7 @@ describe("scenario: subscribed student wants it same-day (the urgent rule)", () 
   it("regression: a cycle order's surcharge is never silently dropped", () => {
     // This was a real bug — the usedCycle branch ignored `surcharge` entirely,
     // so marking a cycle order express collected nothing at all.
-    expect(computeBill(0, 59, 18, { usedCycle: true }).total).toBe(59);
+    expect(computeBill(0, 99, 18, { usedCycle: true }).total).toBe(99);
   });
 });
 
@@ -65,9 +65,9 @@ describe("scenario: subscribed student brings an overweight bag", () => {
     expect(gst).toBe(0);
   });
 
-  it("pays excess AND the urgent premium when both apply", () => {
-    const urgent = urgentCycleCharge(SILVER, CYCLES);
-    expect(computeBill(200, urgent, 18, { usedCycle: true, excessCharge: 45 }).total).toBe(45 + 59);
+  it("pays excess AND the flat urgent fee when both apply", () => {
+    const urgent = expressFlatFee("washIron");
+    expect(computeBill(200, urgent, 18, { usedCycle: true, excessCharge: 45 }).total).toBe(45 + 99);
   });
 });
 
@@ -76,10 +76,12 @@ describe("scenario: walk-in with no subscription", () => {
     expect(computeBill(500, 0, 18)).toEqual({ gst: 90, total: 590 });
   });
 
-  it("same-day adds 40% of the ORDER value, not a plan value", () => {
-    expect(expressSurcharge(500)).toBe(200);
-    const { total } = computeBill(500, expressSurcharge(500), 18);
-    expect(total).toBe(700 + 126);
+  it("same-day adds the flat fee for the service, not a percentage of anything", () => {
+    expect(expressFlatFee("washFold")).toBe(79);
+    const { total, gst } = computeBill(500, expressFlatFee("washFold"), 18);
+    // (500 + 79) taxable = 579; 18% GST rounds to 104; total = 683
+    expect(gst).toBe(104);
+    expect(total).toBe(683);
   });
 
   it("staff may bill without GST, and that order is never invoiced", () => {
@@ -148,18 +150,21 @@ describe("scenario: staff reports damage before washing", () => {
 });
 
 describe("money invariants that must hold for every plan", () => {
-  it("the urgent premium is always exactly 40% of a cycle, rounded", () => {
-    for (const price of [BRONZE, SILVER, GOLD, 7000, 12345]) {
-      expect(urgentCycleCharge(price, CYCLES)).toBe(Math.round((price / CYCLES) * EXPRESS_PCT));
+  it("the urgent fee never varies by plan price — that dependence is gone", () => {
+    // Bronze/Silver/Gold are all 5 kg allowance, one flat number per service
+    for (const _price of [BRONZE, SILVER, GOLD, 7000, 12345]) {
+      expect(expressFlatFee("washFold")).toBe(79);
+      expect(expressFlatFee("washIron")).toBe(99);
     }
   });
 
-  it("never divides by zero on a malformed plan", () => {
-    expect(urgentCycleCharge(SILVER, 0)).toBe(0);
+  it("an unrecognised service still returns a real number, never NaN or zero", () => {
+    expect(expressFlatFee("")).toBe(79);
+    expect(Number.isFinite(expressFlatFee("nonsense"))).toBe(true);
   });
 
-  it("a richer plan never makes urgent cheaper", () => {
-    expect(urgentCycleCharge(BRONZE, CYCLES)).toBeLessThan(urgentCycleCharge(GOLD, CYCLES));
+  it("Wash & Iron's flat fee is always the higher tier", () => {
+    expect(expressFlatFee("washIron")).toBeGreaterThan(expressFlatFee("washFold"));
   });
 
   it("no billing path can produce a negative total", () => {

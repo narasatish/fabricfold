@@ -33,14 +33,13 @@ let allocateBagCode: typeof import("../lib/bagcode").allocateBagCode;
 let bagKindFor: typeof import("../lib/bagcode").bagKindFor;
 let parseBagCode: typeof import("../lib/bagcode").parseBagCode;
 let computeBill: typeof import("../lib/money").computeBill;
-let urgentCycleCharge: typeof import("../lib/money").urgentCycleCharge;
-let expressSurcharge: typeof import("../lib/money").expressSurcharge;
+let expressFlatFee: typeof import("../lib/money").expressFlatFee;
 
 async function init() {
   ({ db } = await import("../lib/db"));
   ({ assignWashDay } = await import("../lib/washday-server"));
   ({ allocateBagCode, bagKindFor, parseBagCode } = await import("../lib/bagcode"));
-  ({ computeBill, urgentCycleCharge, expressSurcharge } = await import("../lib/money"));
+  ({ computeBill, expressFlatFee } = await import("../lib/money"));
 }
 
 const TAG = "qapipe";
@@ -201,11 +200,11 @@ async function main() {
   eq("washIron bucket untouched", (afterOne.buckets as unknown as Bucket[]).find((b) => b.service === "washIron")!.used, 0);
 
   // ─────────────────────────────────────────────────────────────────
-  section("Urgent on a cycle — the 40% rule");
-  const urgent = urgentCycleCharge(Number(silver.price), 34);
-  eq("Silver urgent premium is ₹59", urgent, 59);
+  section("Urgent on a cycle — flat fee, no percentage");
+  const urgent = expressFlatFee("washFold");
+  eq("Wash & Fold urgent fee is flat ₹79", urgent, 79);
   const bill2 = computeBill(120, urgent, 18, { usedCycle: true });
-  eq("only the premium is owed, cycle not re-charged", bill2, { gst: 0, total: 59 });
+  eq("only the flat fee is owed, cycle not re-charged", bill2, { gst: 0, total: 79 });
   const o2 = await db.order.create({
     data: {
       id: TAG + RUN + "o2", studentId: stu.id, collegeId: college.id, service: "washIron",
@@ -224,7 +223,7 @@ async function main() {
   // ─────────────────────────────────────────────────────────────────
   section("Excess weight, and excess + urgent together");
   eq("excess alone", computeBill(120, 0, 18, { usedCycle: true, excessCharge: 45 }).total, 45);
-  eq("excess stacks with urgent", computeBill(120, urgent, 18, { usedCycle: true, excessCharge: 45 }).total, 104);
+  eq("excess stacks with urgent", computeBill(120, urgent, 18, { usedCycle: true, excessCharge: 45 }).total, 45 + 79); // urgent = expressFlatFee("washFold")
 
   // ─────────────────────────────────────────────────────────────────
   section("Cancelling returns the cycle");
@@ -286,8 +285,8 @@ async function main() {
   // ─────────────────────────────────────────────────────────────────
   section("Walk-in pay-per-order (no plan)");
   eq("plain order pays GST", computeBill(500, 0, 18), { gst: 90, total: 590 });
-  eq("same-day is 40% of order value", expressSurcharge(500), 200);
-  eq("express + GST", computeBill(500, 200, 18), { gst: 126, total: 826 });
+  eq("Wash & Iron urgent fee is flat ₹99, no percentage anywhere", expressFlatFee("washIron"), 99);
+  eq("express + GST", computeBill(500, 99, 18), { gst: 108, total: 707 });
   eq("staff no-GST override", computeBill(500, 0, 18, { noGst: true }), { gst: 0, total: 500 });
 
   // ─────────────────────────────────────────────────────────────────
@@ -364,9 +363,10 @@ async function main() {
     if (computeBill(s, su, 18, { usedCycle: true, excessCharge: ex }).total < 0) negative = true;
   }
   check("no billing path can go negative", !negative);
-  check("richer plan never makes urgent cheaper",
-    urgentCycleCharge(4000, 34) < urgentCycleCharge(6000, 34), "B ₹47 < G ₹71");
-  eq("malformed plan can't divide by zero", urgentCycleCharge(5000, 0), 0);
+  check("the urgent fee is the SAME flat number whatever the plan value",
+    expressFlatFee("washFold") === 79 && expressFlatFee("washIron") === 99, "no plan-price dependence left");
+  eq("dry cleaning shares Wash & Fold's flat rate", expressFlatFee("dryClean"), 79);
+  eq("an unknown service falls back to the base flat rate, never zero", expressFlatFee("madeUpService"), 79);
 
   await cleanup();
   check("this run left nothing behind", (await db.student.count({ where: { id: { startsWith: TAG + RUN } } })) === 0);

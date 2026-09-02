@@ -23,7 +23,11 @@ describe("tab bar is pinned to the viewport", () => {
     expect(rule).toMatch(/translateX\(-50%\)/);
     expect(rule).toMatch(/max-width:440px/);
   });
-  it("content still reserves room underneath it", () => {
-    expect(css).toMatch(/\.screen\{[^}]*padding-bottom:96px/);
+  it("content still reserves room underneath it — the REAL bar height, not a flat guess", () => {
+    /* 96px was a fixed guess at the tab bar's height; on an iPhone with a
+       home indicator the bar's actual height is taller by
+       env(safe-area-inset-bottom) (~34px), so a flat 96px hid the last inch
+       of every screen behind it. See tests/mobile-fixes.test.ts. */
+    expect(css).toMatch(/\.screen\{[^}]*padding-bottom:calc\(88px \+ env\(safe-area-inset-bottom\)\)/);
   });
 });

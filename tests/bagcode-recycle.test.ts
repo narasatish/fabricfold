@@ -25,17 +25,23 @@ function fakeTx(bags: { code: string; status: string }[], seq: Record<string, nu
       },
     },
     fySequence: {
-      /* Mirrors the real allocator's contract: upsert CREATES at MINT_FROM
-         (1000) or increments, and update() jumps a legacy 3-digit-era
-         sequence forward. */
-      upsert: async ({ where, create }: any) => {
+      /* Mirrors the real allocator's contract: `value` always means "the
+         last number ISSUED". A fresh letter is created at MINT_FROM (1000);
+         a legacy sub-1000 sequence jumps up to MINT_FROM; either way, the
+         allocator then does ONE unconditional increment before formatting —
+         so the first real code is 1001, never 1000 itself. */
+      findUnique: async ({ where }: any) => {
         const k = where.kind_fyTag.fyTag;
-        seq[k] = seq[k] === undefined ? create.value : seq[k] + 1;
+        return seq[k] === undefined ? null : { value: seq[k] };
+      },
+      create: async ({ data }: any) => {
+        const k = data.fyTag;
+        seq[k] = data.value;
         return { value: seq[k] };
       },
       update: async ({ where, data }: any) => {
         const k = where.kind_fyTag.fyTag;
-        seq[k] = data.value;
+        seq[k] = data.value?.increment !== undefined ? seq[k] + data.value.increment : data.value;
         return { value: seq[k] };
       },
     },
@@ -43,15 +49,17 @@ function fakeTx(bags: { code: string; status: string }[], seq: Record<string, nu
 }
 
 describe("allocation prefers released codes", () => {
-  it("mints from 1000 — the printed stock's numbering — when nothing has been released", async () => {
-    expect(await allocateBagCode(fakeTx([]), "bronze")).toBe("B1000");
+  it("mints from 1001 — the printed stock's numbering — when nothing has been released", async () => {
+    // Bug fixed here (Sep 2026): this used to return "B1000" — MINT_FROM
+    // itself — one short of what's actually printed on the first bag.
+    expect(await allocateBagCode(fakeTx([]), "bronze")).toBe("B1001");
   });
 
   it("jumps a legacy sub-1000 sequence forward instead of colliding with print stock", async () => {
     // a campus that minted B001–B037 in the 3-digit era must not mint B038
     // once the owner's B1001-numbered bags exist
     const tx = fakeTx([], { B: 37 });
-    expect(await allocateBagCode(tx, "bronze")).toBe("B1000");
+    expect(await allocateBagCode(tx, "bronze")).toBe("B1001");
   });
 
   it("reuses a released code instead of minting a new one", async () => {
@@ -94,7 +102,7 @@ describe("allocation prefers released codes", () => {
   it("keeps tiers in separate pools", async () => {
     // a released Bronze code must not be handed out as a Gold one
     const tx = fakeTx([{ code: "B003", status: "released" }]);
-    expect(await allocateBagCode(tx, "gold")).toBe("G1000");
+    expect(await allocateBagCode(tx, "gold")).toBe("G1001");
   });
 
   it("recycles walk-in codes too", async () => {

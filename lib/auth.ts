@@ -52,6 +52,12 @@ export async function requireStudent() {
      have no epoch and are treated as epoch 0, so nobody is logged out by the
      upgrade itself. */
   if ((s.epoch ?? 0) !== stu.sessionEpoch) throw new AuthError("Session ended — please sign in again");
+  /* A deactivated college (setCollegeActive, Owner-only) must be a REAL,
+     instant kill switch — not just "no new registrations". Every student
+     action goes through this one checkpoint, so refusing here is enough to
+     stop an already-logged-in student's very next request the moment the
+     Owner turns a campus off, with nothing else to remember to check. */
+  if (!stu.college.active) throw new AuthError("This campus is temporarily unavailable — please check with the counter.");
   return stu;
 }
 

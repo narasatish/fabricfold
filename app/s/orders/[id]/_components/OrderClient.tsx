@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { Qr } from "@/components/qr";
 import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, upiLink } from "@/lib/format";
-import { CYCLE_KG_LIMIT, CYCLE_RATES, expressFlatFee, isCycleService, excessWeightCharge } from "@/lib/money";
+import { CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, collegeUsesCycleBasedPricing, excessWeightCharge } from "@/lib/money";
 import { isOverdue } from "@/lib/money";
 import { useToast, Sheet, Seg, Switch } from "@/components/chrome";
 import {
@@ -70,6 +70,8 @@ export default function StaffOrderClient({
   upi,
   expectedPickupCode,
   baseGarmentRate,
+  collegeHasRatesOverride,
+  collegeExpressOverride,
 }: {
   order: Order;
   serviceRates: { label: string; items: Array<[string, number]> };
@@ -77,6 +79,8 @@ export default function StaffOrderClient({
   upi: { upiId: string; payeeName: string };
   expectedPickupCode: string | null;
   baseGarmentRate: number;
+  collegeHasRatesOverride: boolean;
+  collegeExpressOverride: Record<string, number> | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -104,7 +108,10 @@ export default function StaffOrderClient({
   const canUseCycle = !!order.student.subscription?.active && subCyclesLeft > 0;
 
   // Sheet state
-  const cycleBased = isCycleService(order.service);
+  // College-aware, same as the customer order screen and staff walk-in sheet:
+  // a college with its own rates override (BVRIT) never bills washFold/washIron
+  // by the cycle — always itemized.
+  const cycleBased = collegeUsesCycleBasedPricing(order.service, collegeHasRatesOverride);
   const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, cycles: Math.max(1, order.cyclesCount || 1), useCycle: canUseCycle, noGst: false, waiveExcess: false, itemQtys: {} as Record<string, number> });
   /* The weight field holds a STRING while being typed — see the input below. */
   const [weightText, setWeightText] = useState(order.weightKg ? String(order.weightKg) : "");
@@ -807,7 +814,7 @@ export default function StaffOrderClient({
           {acceptInput.useCycle && order.express && (
             <div className="card pad mt12" style={{ background: "var(--amber-soft)", borderColor: "#f2e2c4", marginBottom: "16px" }}>
               <span style={{ fontSize: "12.5px", color: "var(--amber)" }}>
-                This order is marked urgent — collect the flat same-day fee of ₹{expressFlatFee(order.service)} in cash before handing it over.
+                This order is marked urgent — collect the flat same-day fee of ₹{collegeExpressFee(order.service, collegeExpressOverride)} in cash before handing it over.
               </span>
             </div>
           )}

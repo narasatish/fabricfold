@@ -20,6 +20,8 @@ model College {
   active        Boolean      @default(true)
   closedWeekday Int? // this college's fixed weekly holiday, 0=Sun..6=Sat; null = none
   features      Json // per-college flags: svc_wash, svc_iron, svc_dryclean, svc_washfold, subscriptions, credits, express, chat
+  rates         Json? // per-college item rates override; null = use global AppConfig.rates. {washIron:{label,items:[[name,price],...]}, washFold:..., ironOnly:..., dryClean:...}
+  expressRates  Json? // per-college express (same-day) flat-fee override; null = use global EXPRESS_FLAT. {washFold: 80, washIron: 120, ...} — per-key, missing services fall back to global
   students      Student[]
   staff         Staff[]
   orders        Order[]
@@ -626,14 +628,17 @@ model WaVerify {
 
   status    String  @default("pending") // pending | verified | failed | claimed
   /**
-   * Which door this attempt opens: "customer" or "staff" (Sep 2026 — the
-   * owner wants staff in through WhatsApp too). The webhook checks the
-   * matching table, and the claim mints the matching session; a student
-   * can never ride a staff attempt in, or vice versa.
+   * Which door this attempt opens: "customer", "staff", or "register" (Oct 2026).
+   * - "customer": sign in an existing student
+   * - "staff": sign in staff
+   * - "register": create a new student account (BVRIT self-registration)
+   * The webhook checks the matching table, and the claim mints the matching
+   * session; a student can never ride a staff attempt in, or vice versa.
    */
   mode      String  @default("customer")
   phone     String? // filled from Meta's payload — this is the VERIFIED number
   studentId String? // the matched account id — a Student id or a Staff id, per mode
+  collegeId String? // for "register" mode, which college this registration is for
   reason    String? // why it failed, in words the student can act on
 
   expiresAt DateTime

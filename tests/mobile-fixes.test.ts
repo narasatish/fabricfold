@@ -11,7 +11,11 @@ const read = (p: string) => fs.readFileSync(path.resolve(__dirname, "..", p), "u
 describe("staff Place order was dead on cycle services", () => {
   it("no longer gates on pieces, which are always zero for washFold/washIron", () => {
     const ui = read("app/s/customers/[id]/_components/CustomerClient.tsx");
-    expect(ui).toMatch(/disabled=\{wiLoading \|\| \(!isCycleService\(wiService\) && wiPieces === 0\)\}/);
+    // isCycleService(wiService) became wiCycleBased (college-aware — see
+    // collegeUsesCycleBasedPricing) when BVRIT's per-piece pricing landed,
+    // but the underlying fix this test guards — no longer gating on pieces
+    // for a cycle service — is unchanged.
+    expect(ui).toMatch(/disabled=\{wiLoading \|\| \(!wiCycleBased && wiPieces === 0\)\}/);
   });
 });
 
@@ -44,8 +48,11 @@ describe("the 40% commission model is gone, not just hidden", () => {
     expect(terms).toMatch(/₹99 Wash & Iron, ₹79 Wash & Fold and Dry Cleaning/);
   });
   it("every surcharge call site uses the flat fee unconditionally — cash or plan-paid, any service", () => {
+    // expressFlatFee became collegeExpressFee (college-aware) once BVRIT's
+    // per-college express pricing landed — still all 5 call sites, still
+    // unconditional.
     const orders = read("lib/actions/orders.ts");
-    expect(orders.match(/expressFlatFee\((input|o)\.service\)/g)?.length).toBe(5);
+    expect(orders.match(/collegeExpressFee\((input|o)\.service, cfg\.collegeExpressOverride\)/g)?.length).toBe(5);
   });
 });
 

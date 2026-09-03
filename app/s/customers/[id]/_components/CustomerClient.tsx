@@ -9,7 +9,7 @@ import { assignSubscription, upgradeSubscription, cancelSubscription } from "@/l
 import { issueBag, retireBag, releaseBagCode, setBagCode, reissueBagSameCode } from "@/lib/actions/bags";
 import { walkInOrder } from "@/lib/actions/orders";
 import { sellCyclePack } from "@/lib/actions/subscription";
-import { CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService, expressFlatFee } from "@/lib/money";
+import { CYCLE_RATES, CYCLE_KG_LIMIT, collegeUsesCycleBasedPricing, collegeExpressFee } from "@/lib/money";
 import { enqueueIntake, newIdemKey } from "@/lib/offline-queue";
 import { topUpCredits } from "@/lib/actions/ops";
 import { updateStudentPhone, updateStudentDetails } from "@/lib/actions/admin";
@@ -39,7 +39,7 @@ type CollegePlan = { id: string; name: string; tier: string | null; price: numbe
 
 type Rates = Record<string, { label: string; items: [string, number][] }>;
 
-export default function StaffCustomerClient({ student, staffRole, plans, rates, gstEnabled, colleges }: { student: Student; staffRole: number; plans: CollegePlan[]; rates: Rates; gstEnabled: boolean; colleges: { id: string; name: string; closedWeekday: number | null }[] }) {
+export default function StaffCustomerClient({ student, staffRole, plans, rates, collegeHasRatesOverride, collegeExpressOverride, gstEnabled, colleges }: { student: Student; staffRole: number; plans: CollegePlan[]; rates: Rates; collegeHasRatesOverride: boolean; collegeExpressOverride: Record<string, number> | null; gstEnabled: boolean; colleges: { id: string; name: string; closedWeekday: number | null }[] }) {
   const router = useRouter();
   const toast = useToast();
   const tier = loyaltyBadge(student.lifetimePieces);
@@ -91,10 +91,21 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
   const [wiExpress, setWiExpress] = useState(false);
   const [wiLoading, setWiLoading] = useState(false);
   const wiItems = rates[wiService]?.items || [];
+  // College-aware: a college with its own rates override (e.g. BVRIT) never
+  // sells washFold/washIron by the cycle — always itemized, like the
+  // customer order screen. Mirrors OrderNewClient.tsx's cycleBased logic.
+  const wiCycleBased = collegeUsesCycleBasedPricing(wiService, collegeHasRatesOverride);
   const wiSubtotal = wiItems.reduce((s, [label, price]) => s + price * (wiQty[label] || 0), 0);
   const wiPieces = wiItems.reduce((s, [label]) => s + (wiQty[label] || 0), 0);
-  const wiGst = wiUseCycle || wiNoGst || !gstEnabled ? 0 : Math.round((wiSubtotal + (wiExpress ? Math.round(wiSubtotal * 0.4) : 0)) * 0.18);
-  const wiExpressSurcharge = wiExpress && !wiUseCycle ? Math.round(wiSubtotal * 0.4) : 0;
+  /* Bug fixed here: this quoted 40% of subtotal — the OLD express model,
+     removed everywhere else in Sep 2026 in favor of a flat same-day fee. The
+     staff-facing preview never got updated, so it was quoting a wrong number
+     (and now, with per-college flat fees like BVRIT's ₹80/₹120, a very
+     wrong one) even though the actual charge submitted to the server was
+     always correct. Same function that bills it, per this codebase's own
+     rule for these previews. */
+  const wiExpressSurcharge = wiExpress && !wiUseCycle ? collegeExpressFee(wiService, collegeExpressOverride) : 0;
+  const wiGst = wiUseCycle || wiNoGst || !gstEnabled ? 0 : Math.round((wiSubtotal + wiExpressSurcharge) * 0.18);
   const subHasCycles = !!student.subscription?.active;
 
   // Bags — first is complimentary, replacements are sold at the counter
@@ -264,7 +275,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
       studentId: student.id,
       studentLabel: student.name,
       service: wiService,
-      cycles: isCycleService(wiService) ? wiCycles : undefined,
+      cycles: wiCycleBased ? wiCycles : undefined,
       items: wiItems.map(([label]) => ({ label, qty: wiQty[label] || 0 })).filter((i) => i.qty > 0),
       weightKg: wiWeight || null,
       useCycle: wiUseCycle,
@@ -630,7 +641,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
               {serviceKeys.map((k) => <option key={k} value={k}>{rates[k].label}</option>)}
             </select>
           </div>
-          {isCycleService(wiService) ? (
+          {wiCycleBased ? (
             <div className="between" style={{ padding: "7px 0" }}>
               <span style={{ fontSize: 14 }}>
                 Cycles <span className="muted" style={{ fontSize: 12 }}>₹{CYCLE_RATES[wiService]} each · {CYCLE_KG_LIMIT * wiCycles} kg allowance</span>
@@ -666,7 +677,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
               <Switch on={wiUseCycle} onToggle={() => setWiUseCycle(!wiUseCycle)} />
             </div>
           )}
-          {!wiUseCycle && gstEnabled && !isCycleService(wiService) && (
+          {!wiUseCycle && gstEnabled && !wiCycleBased && (
             <div className="chip-toggle" style={{ marginBottom: "12px" }}>
               <div>
                 <div className="h-sm">Bill without GST</div>
@@ -679,7 +690,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
             <div>
               <div className="h-sm">Urgent (same day)</div>
               <div className="muted" style={{ fontSize: "12px" }}>
-                {wiUseCycle ? `Cycle already covers the wash — only the flat ₹${expressFlatFee(wiService)} same-day fee is charged, in cash` : `Flat ₹${expressFlatFee(wiService)} — same-day turnaround`}
+                {wiUseCycle ? `Cycle already covers the wash — only the flat ₹${collegeExpressFee(wiService, collegeExpressOverride)} same-day fee is charged, in cash` : `Flat ₹${collegeExpressFee(wiService, collegeExpressOverride)} — same-day turnaround`}
               </div>
             </div>
             <Switch on={wiExpress} onToggle={() => setWiExpress(!wiExpress)} />
@@ -697,7 +708,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
               gating on it left Place order permanently disabled for the two
               main services at the counter. Same bug, same fix, as the
               customer pre-book button. */}
-          <button className="btn mt16" onClick={doWalkIn} disabled={wiLoading || (!isCycleService(wiService) && wiPieces === 0)}>
+          <button className="btn mt16" onClick={doWalkIn} disabled={wiLoading || (!wiCycleBased && wiPieces === 0)}>
             <Svg name="check" size={18} /> {wiLoading ? "Creating…" : "Create & receive order"}
           </button>
         </div>

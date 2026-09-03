@@ -103,7 +103,7 @@ export async function POST(req: Request) {
 }
 
 /**
- * Match an inbound message to a pending sign-in.
+ * Match an inbound message to a pending sign-in or registration.
  *
  * Never throws: an exception here becomes a non-2xx, which makes Meta retry
  * and eventually disable the webhook — losing every future sign-in over one
@@ -128,17 +128,37 @@ async function resolveSignIn(from: string, text: string) {
 
     /* The attempt's MODE decides which table answers. A staff attempt from a
        number that is only a student FAILS — same wording as OTP staff login,
-       and deliberately no hint about which numbers are staff. */
+       and deliberately no hint about which numbers are staff. For "register",
+       we check if an account ALREADY exists (for deduplication) and reject
+       it if so, directing them to sign in instead. */
     let accountId: string | null = null;
-    let failReason: string;
+    let failReason: string | null = null;
+
     if (row.mode === "staff") {
       const st = await db.staff.findUnique({ where: { phone } });
       accountId = st && st.active ? st.id : null;
-      failReason = "This number is not registered as staff.";
+      if (!accountId) {
+        failReason = "This number is not registered as staff.";
+      }
+    } else if (row.mode === "register") {
+      /* Registration: reject if the phone is ALREADY registered (prevents
+         duplicate accounts for the same number). */
+      const existing = await db.student.findUnique({ where: { phone } });
+      if (existing) {
+        failReason = "This number is already registered. Please sign in instead.";
+      } else {
+        /* Phone is not registered yet — approve the registration. The account
+           is not created here; that happens in checkWhatsAppRegister once we
+           have confirmed the browser claim cookie matches. */
+        accountId = "new";  // placeholder to mark "approved for registration"
+      }
     } else {
+      /* Normal customer sign-in */
       const stu = await db.student.findUnique({ where: { phone } });
       accountId = stu?.id ?? null;
-      failReason = "This WhatsApp number isn't registered yet — please visit the counter to be registered.";
+      if (!accountId) {
+        failReason = "This WhatsApp number isn't registered yet — please visit the counter to be registered.";
+      }
     }
 
     /* No account is a FAILURE, recorded with a reason, not silence — the
@@ -148,8 +168,8 @@ async function resolveSignIn(from: string, text: string) {
     await db.waVerify.updateMany({
       where: { id: row.id, status: "pending" },
       data: accountId
-        ? { status: "verified", phone, studentId: accountId }
-        : { status: "failed", phone, reason: failReason },
+        ? { status: "verified", phone, studentId: accountId === "new" ? null : accountId }
+        : { status: "failed", phone, reason: failReason || "Verification failed" },
     });
   } catch (e) {
     console.error("[wa-inbound] sign-in match failed", e);

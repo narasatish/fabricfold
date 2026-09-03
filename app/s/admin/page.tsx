@@ -51,7 +51,7 @@ export default async function StaffAdminPage() {
           payment: cfg.payment as { upiId: string; payeeName: string; bankName: string; accountName: string; accountNo: string; ifsc: string; gatewayKey: string },
           settings: cfg.settings as { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number; garmentTagsEnabled?: boolean },
         }}
-        colleges={colleges.map((c) => ({ id: c.id, name: c.name, address: c.address, closedWeekday: c.closedWeekday, active: c.active, features: c.features as Record<string, boolean> }))}
+        colleges={colleges.map((c) => ({ id: c.id, name: c.name, address: c.address, closedWeekday: c.closedWeekday, active: c.active, features: c.features as Record<string, boolean>, rates: (c.rates as Record<string, { label: string; items: [string, number][] }> | null) || undefined }))}
         staff={staffList.map((x) => ({ id: x.id, name: x.name, phone: x.phone, role: x.role, collegeId: x.collegeId, active: x.active, perms: (x.perms as Record<string, boolean> | null) ?? {} }))}
         plans={plans.map((p) => ({ id: p.id, collegeId: p.collegeId, name: p.name, price: N(p.price), gstFree: p.gstFree, tier: p.tier, active: p.active, buckets: p.buckets as { service: string; cycles: number; kgPerCycle: number }[] }))}
         attendance={staffList.map((x) => {

@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import StaffCustomerClient from "./_components/CustomerClient";
+import { resolveCollegeRates, type RateTable } from "@/lib/money";
 
 export default async function StaffCustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -33,6 +34,13 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
   });
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const gstOn = (cfg.settings as Record<string, unknown>)?.gstEnabled !== false;
+  /* Staff placing a walk-in order for THIS student must see THEIR college's
+     rates, not the global default — otherwise a BVRIT walk-in shows St
+     Mary's-style pricing on screen while the actual charge (computed
+     server-side in walkInOrder, already college-aware) differs, which reads
+     as the total being wrong even though it isn't. */
+  const collegeRatesRow = await db.college.findUnique({ where: { id: student.collegeId }, select: { rates: true, expressRates: true } });
+  const effectiveRates = resolveCollegeRates(cfg.rates as unknown as RateTable, collegeRatesRow?.rates as unknown as RateTable | null);
   const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFold: "Wash & Fold", ironOnly: "Iron Only", dryClean: "Dry Clean" };
   const collegePlans = (await db.plan.findMany({ where: { collegeId: student.collegeId, active: true }, orderBy: { price: "asc" } })).map((p) => {
     const price = Number(p.price);
@@ -80,7 +88,9 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
         student={plain}
         staffRole={staff.role}
         plans={collegePlans}
-        rates={cfg.rates as Record<string, { label: string; items: [string, number][] }>}
+        rates={effectiveRates}
+        collegeHasRatesOverride={!!collegeRatesRow?.rates}
+        collegeExpressOverride={collegeRatesRow?.expressRates as Record<string, number> | null}
         gstEnabled={gstOn}
       />
     </div>

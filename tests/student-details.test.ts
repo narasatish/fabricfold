@@ -1,6 +1,6 @@
 /* Editing a student's details.
 
-   Name, campus and wash day had no edit path at all — only phone did. Campus
+   Name and campus had no edit path at all — only phone did. Campus
    is the one that is not a plain field: a plan belongs to a campus, so moving
    a subscribed student would leave them holding something their new campus
    does not sell. */
@@ -43,21 +43,6 @@ describe("moving campus is guarded", () => {
        every per-campus statement already issued. */
     expect(fn).not.toMatch(/order\.updateMany/);
   });
-  it("clears the wash day and leaves it unassigned — rota is parked", () => {
-    /* A day balanced against the old campus means nothing at the new one.
-       With the rota parked (owner, Sep 2026) no new day is assigned either. */
-    expect(fn).toMatch(/data\.washDay = null/);
-    expect(fn).not.toMatch(/assignWashDay/);
-  });
-});
-
-describe("wash day", () => {
-  it("rejects a day outside the week", () => {
-    expect(fn).toMatch(/wd < 0 \|\| wd > 6/);
-  });
-  it("rejects the campus's closed day", () => {
-    expect(fn).toMatch(/That is the campus's closed day/);
-  });
 });
 
 describe("no-op safety", () => {
@@ -75,9 +60,6 @@ describe("the staff card exposes it", () => {
   it("warns about the plan BEFORE they press save", () => {
     // the refusal is a rule about plans, not a validation slip
     expect(ui).toMatch(/Their plan belongs to the current campus/);
-  });
-  it("no longer offers a wash-day picker — the rota is parked", () => {
-    expect(ui).not.toMatch(/<label>Wash day<\/label>/);
   });
 });
 

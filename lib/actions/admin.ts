@@ -9,7 +9,6 @@ import { rosterSoon } from "../sheets-sync";
 import { audit } from "../notify";
 import { publish } from "../realtime";
 import { notifyOwner } from "../mail";
-import { assignWashDay } from "../washday-server";
 import { isTier } from "../bagcode";
 
 /* ----- Register a student at the counter (any staff) -----
@@ -34,8 +33,6 @@ export async function registerStudent(input: { name: string; phone: string; coll
   }
   const kind = input.kind === "faculty" ? "faculty" : "student";
   const stu = await db.student.create({ data: { id, phone, name, collegeId: college.id, kind } });
-  // Wash day rota PARKED (owner, Sep 2026): students drop off any day, so no
-  // day is assigned. assignWashDay and the data stay for when it returns.
   await audit(kind === "faculty" ? "Faculty registered" : "Student registered", `${name} · +91 ${phone} · ${college.name}`, st.id);
   rosterSoon();
   void notifyOwner("New student registered", `${name} (+91 ${phone}) registered at the counter (${college.name}) by ${st.name} — ID ${stu.id}.`);
@@ -61,26 +58,26 @@ export async function updateStudentPhone(studentId: string, newPhone: string) {
 }
 
 /**
- * Edit a student's details: name, campus, wash day.
+ * Edit a student's details: name, campus.
  *
  * Phone is deliberately NOT here — it stays in updateStudentPhone, because
  * changing the number changes who can log into the account and deserves its
  * own deliberate action rather than riding along with a typo fix.
  *
  * Admin+ throughout. A counter member correcting a spelling is fine in
- * principle, but campus and wash day move a student between operational
- * groups, and splitting the permission per field would be a rule nobody
+ * principle, but campus moves a student between operational groups,
+ * and splitting the permission per field would be a rule nobody
  * remembers at a busy counter.
  */
 export async function updateStudentDetails(
   studentId: string,
-  input: { name?: string; collegeId?: string; washDay?: number | null },
+  input: { name?: string; collegeId?: string },
 ) {
   const st = await requireStaff(3);
   const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: { include: { planRef: true } } } });
   if (!stu) return { ok: false as const, error: "Student not found" };
 
-  const data: { name?: string; collegeId?: string; washDay?: number | null } = {};
+  const data: { name?: string; collegeId?: string } = {};
   const changes: string[] = [];
 
   if (input.name !== undefined) {
@@ -115,35 +112,14 @@ export async function updateStudentDetails(
     data.collegeId = college.id;
     const from = await db.college.findUnique({ where: { id: stu.collegeId }, select: { name: true } });
     changes.push(`campus ${from?.name ?? stu.collegeId} → ${college.name}`);
-    /* Wash days are balanced per campus, so a day that made sense at the old
-       one means nothing at the new. Cleared here and reassigned below. */
-    data.washDay = null;
-  }
-
-  if (input.washDay !== undefined && data.washDay === undefined) {
-    const wd = input.washDay;
-    if (wd !== null) {
-      if (!Number.isInteger(wd) || wd < 0 || wd > 6) return { ok: false as const, error: "Pick a weekday" };
-      const college = await db.college.findUnique({ where: { id: data.collegeId ?? stu.collegeId }, select: { closedWeekday: true } });
-      if (college?.closedWeekday === wd) return { ok: false as const, error: "That is the campus's closed day" };
-    }
-    if (wd !== stu.washDay) {
-      data.washDay = wd;
-      changes.push(`wash day ${stu.washDay ?? "none"} → ${wd ?? "none"}`);
-    }
   }
 
   if (!changes.length) return { ok: true as const, changed: false };
 
   await db.student.update({ where: { id: studentId }, data });
 
-  // Rota parked: a moved student simply has no wash day until it returns.
-
   await audit("Student updated", `${stu.name} (${stu.id}) · ${changes.join("; ")}`, st.id);
   rosterSoon();
-  /* Both campuses on a move: the old one has to drop them from its wash-day
-     list, and the new one has to show them. Publishing only the old channel
-     would leave the receiving counter's screen wrong until a manual refresh. */
   const channels = [`student:${studentId}`, `orders:${stu.collegeId}`];
   if (data.collegeId) channels.push(`orders:${data.collegeId}`);
   publish(channels, { type: "student", payload: { studentId } });

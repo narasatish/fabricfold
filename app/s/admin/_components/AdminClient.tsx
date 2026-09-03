@@ -16,7 +16,7 @@ import { markErrorsSeen, syncSheetsNow } from "@/lib/actions/ops";
 import { saveSlotWindow, toggleSlotWindow, deleteSlotWindow } from "@/lib/actions/slots";
 import { hhmm as slotTime } from "@/lib/slots"; // local `hhmm` below formats a timestamp — don't collide
 import { TestOtpPanel } from "@/components/test-otp-panel";
-import { WEEKDAY_NAMES, WEEKDAY_SHORT } from "@/lib/washday";
+import { WEEKDAY_NAMES } from "@/lib/washday";
 
 const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFold: "Wash & Fold", ironOnly: "Iron Only", dryClean: "Dry Clean" };
 type PlanBucket = { service: string; cycles: number; kgPerCycle: number };
@@ -32,7 +32,6 @@ type Props = {
     settings: { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number; gstEnabled?: boolean; garmentTagsEnabled?: boolean };
   };
   colleges: { id: string; name: string; address: string; closedWeekday: number | null; active: boolean; features: Record<string, boolean> }[];
-  washDayByCollege: Record<string, number[]>;
   staff: { id: string; name: string; phone: string; role: number; collegeId: string | null; active: boolean; perms: Record<string, boolean> }[];
   payslips: { id: string; number: string; month: string; net: number; staffName: string }[];
   plans: PlanRow[];
@@ -56,7 +55,7 @@ const FEATURES: [FeatureKey, string][] = [
   ["express", "Express (same-day)"], ["chat", "Chat & complaints"],
 ];
 
-export default function StaffAdminClient({ config, colleges, staff, payslips, plans, attendance, month, errors, slotWindows, washDayByCollege, currentRole }: Props) {
+export default function StaffAdminClient({ config, colleges, staff, payslips, plans, attendance, month, errors, slotWindows, currentRole }: Props) {
   const hhmm = (t: number) => new Date(t).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
   const unseenErrors = errors.filter((e) => !e.seen).length;
   const [syncingSheet, setSyncingSheet] = useState(false);

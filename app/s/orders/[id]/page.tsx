@@ -70,7 +70,6 @@ export default async function StaffOrderPage({ params }: { params: Promise<{ id:
       phone: order.student.phone,
       credits: N(order.student.credits),
       lifetimePieces: order.student.lifetimePieces,
-      washDay: order.student.washDay,
       subscription: order.student.subscription
         ? {
             active: order.student.subscription.active,

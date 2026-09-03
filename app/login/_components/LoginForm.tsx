@@ -1,22 +1,40 @@
 "use client";
-/* Login screen — phone + OTP entry, customer/staff mode toggle.
+/* Login screen (redesigned, Sep 2026, owner's call):
+
+   WhatsApp is the ONE path shown by default — no phone field on first
+   paint. Two reasons together, not one: OTP is fully broken for staff
+   (no SMS provider configured) and for any first-time customer (no
+   passcode exists yet to fall back to), so a bare phone+Continue button
+   was a coin flip between "works" and "silently leads to a dead OTP
+   screen". Offering it as the FIRST thing a visitor sees was the bug —
+   the fix is showing the door that actually opens.
+
+   The phone field still exists, for the one case it's genuinely needed:
+   a returning student who set a passcode. It's one tap away behind
+   "Have a passcode?", not the first thing on the page.
+
+   Staff moves from a big segmented control to a small corner link — the
+   owner's own estimate is that this door gets used "very less", and the
+   UI now matches that: Customer is the hero, Staff is a quiet exit for
+   the rare visitor who needs it.
+
    No self-registration: a student account can only be created by staff at
    the counter (see lib/actions/admin.ts registerStudent). An unrecognised
    customer number gets a clear message instead of a signup form. */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { useToast } from "@/components/chrome";
 import { requestOtp, verifyOtp, hasPasscode, loginWithPasscode } from "@/lib/actions/auth";
 import { startWhatsAppLogin, checkWhatsAppLogin } from "@/lib/actions/wa-login";
 import InstallHint from "@/components/install-hint";
-import { useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
 
 export default function LoginForm() {
   const router = useRouter();
   const toast = useToast();
-  const [step, setStep] = useState<"phone" | "otp" | "passcode" | "whatsapp">("phone");
+  const [step, setStep] = useState<"hero" | "otp" | "passcode" | "whatsapp">("hero");
   const [mode, setMode] = useState<"customer" | "staff">("customer");
+  const [showPhone, setShowPhone] = useState(false); // the passcode-entry door, collapsed by default
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [passcode, setPasscodeValue] = useState("");
@@ -41,7 +59,7 @@ export default function LoginForm() {
       stop();
       setWaCode(null);
       if (r.ok && r.status === "signed-in") { toast("Signed in"); router.push("staff" in r && r.staff ? "/s" : "/c"); return; }
-      if (!r.ok) { setStep("phone"); toast(r.error, true); }
+      if (!r.ok) { setStep("hero"); toast(r.error, true); }
     }, 2000);
     return stop;
   }, [waCode, router, toast]);
@@ -58,20 +76,21 @@ export default function LoginForm() {
     setStep("whatsapp");
   };
 
-  /* Students who have set a passcode go straight to it — no waiting for a text,
-     and it works where the signal doesn't. Staff stay OTP-only: a staff account
-     takes payments, so it should not be reachable by a guessable passcode. */
+  /* Students who have set a passcode go straight to it — no waiting for a
+     text, and it works where the signal doesn't. A number with NO passcode
+     is sent back to WhatsApp rather than into a guaranteed-dead OTP screen —
+     that redirect is the whole point of this redesign. */
   const handleContinue = async () => {
     if (!/^\d{10}$/.test(phone.replace(/\D/g, ""))) {
       toast("Enter a valid 10-digit number", true);
       return;
     }
-    if (mode === "staff") return handleRequestOtp();
     setLoading(true);
     const r = await hasPasscode(phone);
     setLoading(false);
     if (r.hasPasscode) { setStep("passcode"); return; }
-    return handleRequestOtp();
+    setShowPhone(false);
+    toast("No passcode set for this number yet — tap Continue with WhatsApp", true);
   };
 
   const handlePasscodeLogin = async () => {
@@ -83,14 +102,14 @@ export default function LoginForm() {
     router.push("/c");
   };
 
+  /* Reachable ONLY from "forgot passcode" now — every other OTP door was
+     removed from the UI because it depends on an SMS provider that isn't
+     configured. This one stays because a locked-out student needs SOME
+     path that isn't "message us on WhatsApp with your passcode problem". */
   const handleRequestOtp = async () => {
-    if (!/^\d{10}$/.test(phone.replace(/\D/g, ""))) {
-      toast("Enter a valid 10-digit number", true);
-      return;
-    }
     setLoading(true);
     setNotRegistered(false);
-    const r = await requestOtp(phone, mode);
+    const r = await requestOtp(phone, "customer");
     setLoading(false);
     if (!r.ok) {
       toast(r.error, true);
@@ -106,11 +125,11 @@ export default function LoginForm() {
       return;
     }
     setLoading(true);
-    const r = await verifyOtp(phone, otp, mode);
+    const r = await verifyOtp(phone, otp, "customer");
     setLoading(false);
 
     if (!r.ok) {
-      if (mode === "customer" && /isn't registered/i.test(r.error)) {
+      if (/isn't registered/i.test(r.error)) {
         setNotRegistered(true);
         return;
       }
@@ -118,27 +137,41 @@ export default function LoginForm() {
       return;
     }
     toast("Signed in");
-    router.push(mode === "customer" ? "/c" : "/s");
+    router.push("/c");
   };
 
   return (
     <div className="screen no-nav">
       <div className="topbar">
         <h1>FabricFold</h1>
+        {/* The corner exit the owner asked for: Staff is a small, quiet link,
+            not a big control competing with the Customer flow for attention. */}
+        {step === "hero" && (
+          <button
+            /* Deliberately no CSS class here: the topbar's own "spacer"
+               utility is flex:1, meant for an empty filler div — put on a
+               button with real text it would center that text in the
+               leftover space instead of pushing it flush right.
+               marginLeft:auto alone does the job. */
+            style={{ marginLeft: "auto", background: "none", border: "none", color: "var(--ink-2)", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: "6px 4px" }}
+            onClick={() => { setMode(mode === "staff" ? "customer" : "staff"); setShowPhone(false); }}
+          >
+            {mode === "staff" ? "← Customer" : "Staff sign-in"}
+          </button>
+        )}
       </div>
 
       <div className="pad" style={{ paddingTop: "24px" }}>
-        {step === "phone" && (
+        {step === "hero" && (
           <>
             {/* The logo carries its own wordmark, so it replaces the lettered
-                gradient card rather than sitting on top of one — the artwork's
-                pale sky would have fought the teal. Width and height are set on
-                the element so the box is reserved before the image arrives:
-                this is the first paint of the first screen, and a logo popping
-                in would push the sign-in field down under the user's thumb. */}
-            <div style={{ textAlign: "center", marginBottom: "20px" }}>
+                gradient card rather than sitting on top of one. Width/height
+                reserve the box before the image arrives — no layout jump —
+                and the source is a 264px, ~37KB asset (was a 512px, ~104KB
+                PNG) so this stays fast on a slow campus connection. */}
+            <div style={{ textAlign: "center", marginBottom: "24px" }}>
               <img
-                src="/logo-full.png"
+                src="/logo-full-264.png"
                 alt="FabricFold"
                 width={132}
                 height={132}
@@ -149,54 +182,63 @@ export default function LoginForm() {
               </div>
             </div>
 
-            <div style={{ marginBottom: "16px" }}>
-              <label className="label">Sign in as:</label>
-              <div className="seg" style={{ marginTop: "8px" }}>
-                <button className={mode === "customer" ? "active" : ""} onClick={() => setMode("customer")}>
-                  Customer
+            {mode === "customer" ? (
+              <>
+                {/* THE hero action — everything else is a footnote beneath it. */}
+                <button className="btn" onClick={handleWhatsApp} disabled={loading} style={{ fontSize: 17, height: 54 }}>
+                  {loading ? "Opening WhatsApp…" : "Continue with WhatsApp"}
                 </button>
-                <button className={mode === "staff" ? "active" : ""} onClick={() => setMode("staff")}>
-                  Staff
+                <div className="muted center mt8" style={{ fontSize: "12.5px" }}>
+                  No code to wait for — send one message and you&apos;re in.
+                </div>
+
+                {!showPhone ? (
+                  <button
+                    className="muted center mt20"
+                    style={{ display: "block", width: "100%", background: "none", border: "none", fontSize: 13, textDecoration: "underline", textUnderlineOffset: 3, cursor: "pointer" }}
+                    onClick={() => setShowPhone(true)}
+                  >
+                    Have a passcode? Sign in with your number
+                  </button>
+                ) : (
+                  <div className="mt20">
+                    <div className="field">
+                      <label>Mobile number</label>
+                      <input
+                        className="input"
+                        type="tel"
+                        placeholder="10-digit number"
+                        autoFocus
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                        onKeyDown={(e) => { if (e.key === "Enter" && phone.length === 10 && !loading) handleContinue(); }}
+                        inputMode="numeric"
+                      />
+                    </div>
+                    <button className="btn sec" onClick={handleContinue} disabled={loading || phone.length !== 10}>
+                      {loading ? "Checking…" : "Continue"}
+                    </button>
+                  </div>
+                )}
+
+                <div className="muted center mt20" style={{ fontSize: "12.5px", lineHeight: 1.5 }}>
+                  New here? Visit your campus counter to get registered.
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Staff: WhatsApp only. The number must already be on the
+                    admin-managed roster — checked server-side — so this is
+                    the ONLY door, not a shortcut past a real one; the OTP
+                    path it replaces cannot work without an SMS provider,
+                    and showing it anyway was the original bug. */}
+                <button className="btn" onClick={handleWhatsApp} disabled={loading} style={{ fontSize: 17, height: 54 }}>
+                  {loading ? "Opening WhatsApp…" : "Continue with WhatsApp"}
                 </button>
-              </div>
-            </div>
-
-            <div className="field">
-              <label>Mobile number</label>
-              <input
-                className="input"
-                type="tel"
-                placeholder="10-digit number"
-                autoFocus
-                value={phone}
-                onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                onKeyDown={(e) => { if (e.key === "Enter" && phone.length === 10 && !loading) handleContinue(); }}
-                inputMode="numeric"
-              />
-            </div>
-            <button className="btn" onClick={handleContinue} disabled={loading || phone.length !== 10}>
-              {loading ? "Checking…" : "Continue"}
-            </button>
-
-            {/* Both doors now (owner, Sep 2026): staff too. The server still
-                checks the number against the admin-managed roster, so
-                WhatsApp changes the handshake, not who gets in. (Wording
-                note: dual-identity.test.ts bans naming that roster here.) */}
-            <div className="row center mt16" style={{ gap: 10, color: "var(--ink-2)", fontSize: 12 }}>
-              <span style={{ flex: 1, height: 1, background: "var(--line)" }} />or<span style={{ flex: 1, height: 1, background: "var(--line)" }} />
-            </div>
-            <button className="btn sec mt12" onClick={handleWhatsApp} disabled={loading}
-              style={{ color: "#0f8a4d", borderColor: "#bfe6cf" }}>
-              Continue with WhatsApp
-            </button>
-            <div className="muted center mt8" style={{ fontSize: "12px" }}>
-              No code to wait for — send one message and you&apos;re in.
-            </div>
-
-            {mode === "customer" && (
-              <div className="muted center mt16" style={{ fontSize: "12.5px", lineHeight: 1.5 }}>
-                New here? Visit your campus counter to get registered. Staff sign in on the Staff tab above.
-              </div>
+                <div className="muted center mt8" style={{ fontSize: "12.5px" }}>
+                  Registered staff numbers only — ask the owner if yours isn&apos;t working.
+                </div>
+              </>
             )}
 
             {/* A QR scan can land here instead of /get — the download must
@@ -226,8 +268,8 @@ export default function LoginForm() {
               <span className="muted" style={{ fontSize: 13 }}>Waiting…</span>
             </div>
 
-            <button className="btn ghost mt16" onClick={() => { setWaCode(null); setStep("phone"); }}>
-              Use my number instead
+            <button className="btn ghost mt16" onClick={() => { setWaCode(null); setStep("hero"); }}>
+              Back
             </button>
           </>
         )}
@@ -237,7 +279,7 @@ export default function LoginForm() {
             <div className="h-md" style={{ marginBottom: "8px" }}>Enter your passcode</div>
             <div className="muted" style={{ fontSize: "13px", marginBottom: "16px" }}>
               +91 {phone.slice(-10)}{" "}
-              <span style={{ color: "var(--teal-dark)", fontWeight: 600, cursor: "pointer" }} onClick={() => { setStep("phone"); setPasscodeValue(""); }}>
+              <span style={{ color: "var(--teal-dark)", fontWeight: 600, cursor: "pointer" }} onClick={() => { setStep("hero"); setPasscodeValue(""); }}>
                 Change
               </span>
             </div>
@@ -275,7 +317,7 @@ export default function LoginForm() {
             </div>
             <div className="muted" style={{ fontSize: "13px", marginBottom: "16px" }}>
               Sent to +91 {phone.slice(-10)}{" "}
-              <span style={{ color: "var(--teal-dark)", fontWeight: 600, cursor: "pointer" }} onClick={() => setStep("phone")}>
+              <span style={{ color: "var(--teal-dark)", fontWeight: 600, cursor: "pointer" }} onClick={() => setStep("hero")}>
                 Change
               </span>
             </div>
@@ -331,7 +373,7 @@ export default function LoginForm() {
                 </div>
               </div>
             </div>
-            <button className="btn sec" onClick={() => { setStep("phone"); setNotRegistered(false); setOtp(""); }}>
+            <button className="btn sec" onClick={() => { setStep("hero"); setNotRegistered(false); setOtp(""); }}>
               Back
             </button>
           </>

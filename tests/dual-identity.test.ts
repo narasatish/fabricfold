@@ -36,16 +36,18 @@ describe("the seed reproduces the dual account", () => {
 });
 
 describe("signing in stays mode-correct — the part that could have gone wrong", () => {
-  it("the STAFF tab never takes the passcode path", () => {
+  it("the STAFF view never renders a passcode path at all (Sep 2026 redesign)", () => {
     /* hasPasscode/loginWithPasscode read the STUDENT table and mint a CUSTOMER
-       session. With a dual number, routing staff through them would sign the
-       owner in as a customer after they pressed Staff. The form must short-
-       circuit before that. */
-    expect(form).toMatch(/if \(mode === "staff"\) return handleRequestOtp\(\);/);
-    const guard = form.indexOf('if (mode === "staff") return handleRequestOtp();');
-    const call = form.indexOf("await hasPasscode(");
-    expect(guard).toBeGreaterThan(-1);
-    expect(guard).toBeLessThan(call);
+       session. The old guard was a runtime short-circuit before that call;
+       the redesign removes the possibility structurally — the phone field
+       and handleContinue (which calls hasPasscode) render ONLY inside the
+       `mode === "customer"` branch, so a dual-identity owner on the Staff
+       view has no phone field to type into and no path to hasPasscode. */
+    // isolate the staff branch by its own marker comment through to where
+    // the ternary closes, rather than fragile paren-counting past the
+    // customer branch's OWN nested ternary (showPhone ? ... : ...)
+    const staffBranch = form.slice(form.indexOf("Staff: WhatsApp only"), form.indexOf("{/* A QR scan"));
+    expect(staffBranch).not.toMatch(/hasPasscode|handleContinue/);
   });
   it("passcode login can only ever produce a CUSTOMER session", () => {
     const fn = auth.slice(auth.indexOf("export async function loginWithPasscode"));
@@ -59,12 +61,13 @@ describe("signing in stays mode-correct — the part that could have gone wrong"
   });
 });
 
-describe("the sign-in screen points a lost staff member at the right tab", () => {
-  it("says so unconditionally, so it leaks nothing", () => {
+describe("the sign-in screen points a lost staff member at the right door", () => {
+  it("the corner link is always there (Sep 2026: a link, not a tab), and never leaks who is staff", () => {
     /* Naming a number as staff only when it IS staff would turn the form into
-       a directory of staff numbers — the same leak the staff-tab wording
-       already avoids. Shown to everyone, it tells an attacker nothing. */
-    expect(form).toMatch(/Staff sign in on the Staff tab above\./);
+       a directory of staff numbers. The corner link is unconditional — shown
+       to every visitor regardless of their number — so it tells an attacker
+       nothing, same guarantee as the old tab wording. */
+    expect(form).toMatch(/Staff sign-in/);
     expect(form).not.toMatch(/registered as staff/i);
   });
 });

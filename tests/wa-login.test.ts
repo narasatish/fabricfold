@@ -114,8 +114,8 @@ describe("the login screen", () => {
   it("shows the code, in case WhatsApp never opened", () => {
     expect(ui).toMatch(/Your code/);
   });
-  it("always offers a way back to the number flow", () => {
-    expect(ui).toMatch(/Use my number instead/);
+  it("always offers a way back — to the hero screen now, WhatsApp-first (Sep 2026 redesign)", () => {
+    expect(ui).toMatch(/setWaCode\(null\); setStep\("hero"\)/);
   });
   it("stops polling when the component unmounts", () => {
     expect(ui).toMatch(/return stop;/);

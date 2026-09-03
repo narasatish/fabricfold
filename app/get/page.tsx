@@ -19,7 +19,7 @@ export default function GetAppPage() {
   return (
     <div className="screen no-nav" style={{ maxWidth: 480, margin: "0 auto" }}>
       <div className="pad" style={{ paddingTop: 28, textAlign: "center" }}>
-        <img src="/logo-full.png" alt="FabricFold" width={96} height={96} style={{ borderRadius: 18 }} />
+        <img src="/logo-full-192.png" alt="FabricFold" width={96} height={96} style={{ borderRadius: 18 }} />
         <h1 className="h-lg" style={{ marginTop: 14 }}>Get FabricFold</h1>
         <p className="muted" style={{ fontSize: 14, marginTop: 6 }}>
           Track your laundry, get a ping when it&apos;s ready, sign in with one WhatsApp message.

@@ -281,6 +281,13 @@ export default function OrderNewClient({
       <div className="center muted mt12" style={{ fontSize: "12px" }}>
         You'll get an Order ID to show at the counter
       </div>
+      {/* Terms §8 in one line, right where the promise is made — the full
+          policy is rarely read at order time, but the "not a guarantee"
+          caveat matters most exactly here. */}
+      <div className="center muted mt6" style={{ fontSize: "11.5px" }}>
+        {express ? "Express is same-day" : "Standard turnaround is about 48 hours"} — our target, occasionally delayed
+        by things outside our control. <a href="/terms">Terms</a>
+      </div>
     </>
   );
 }

@@ -98,10 +98,17 @@ export default function HelpClient({ orderId }: { orderId?: string }) {
           : photos.length >= MIN_DAMAGE_PHOTOS
             ? `Add another photo (${photos.length})`
             : `Add photo ${photos.length + 1} of ${MIN_DAMAGE_PHOTOS}`}
+        {/* No `capture` attribute (owner, Sep 2026): capture="environment"
+            forces the camera app open directly on most mobile browsers,
+            skipping the OS's own picker — so a student with an EXISTING
+            photo of the stain/damage had no way to attach it, only to take a
+            fresh one. Removing it restores the native chooser (Camera /
+            Photo Library / Files on iOS, Camera / Gallery on Android),
+            covering both "take a new photo" and "upload one I already have"
+            with a single, normal file input. */}
         <input
           type="file"
           accept="image/*"
-          capture="environment"
           hidden
           disabled={uploading}
           onChange={(e) => {

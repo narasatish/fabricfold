@@ -7,6 +7,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import InstallButton from "./_components/InstallButton";
+import PlatformInstructions from "./_components/PlatformInstructions";
 
 export const metadata: Metadata = {
   title: "Get the FabricFold app",
@@ -24,29 +25,12 @@ export default function GetAppPage() {
           Track your laundry, get a ping when it&apos;s ready, sign in with one WhatsApp message.
         </p>
 
-        {/* Scan → ONE tap. Chrome/Android arms the native install dialog here;
-            iOS has no install API, so the steps below stay for it. */}
+        {/* Scan → ONE tap on Android. iPhone skips straight to its own card
+            below (no wait, no fake "checking") — Apple's Safari has no
+            install event to wait for, ever. */}
         <InstallButton />
 
-        <div className="card pad mt16" style={{ textAlign: "left" }}>
-          <div className="h-sm">iPhone</div>
-          <ol className="muted" style={{ fontSize: 13.5, lineHeight: 1.7, paddingLeft: 18, marginTop: 6 }}>
-            <li>Open <b>fabricfold.in</b> in Safari</li>
-            <li>Tap the <b>Share</b> button</li>
-            <li>Choose <b>Add to Home Screen</b></li>
-          </ol>
-        </div>
-
-        <div className="card pad mt12" style={{ textAlign: "left" }}>
-          <div className="h-sm">Android</div>
-          <ol className="muted" style={{ fontSize: 13.5, lineHeight: 1.7, paddingLeft: 18, marginTop: 6 }}>
-            <li>Open <b>fabricfold.in</b> in Chrome</li>
-            <li>Tap <b>Install app</b> when Chrome offers it (menu ⋮ → &quot;Add to Home screen&quot; if it doesn&apos;t)</li>
-          </ol>
-          {/* No hosted APK link — the APK is built and sideloaded at the
-              counter (BUILD-APK.md). The installable PWA above IS the app,
-              and it auto-updates on every deploy, which the APK does not. */}
-        </div>
+        <PlatformInstructions />
 
         <Link className="btn mt16" href="/login">
           Sign in now

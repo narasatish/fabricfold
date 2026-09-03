@@ -51,6 +51,19 @@ export default async function StaffHomePage() {
   const att = await db.attendance.findUnique({ where: { staffId_date: { staffId: staff.id, date: istDate } } });
   const attendance = { clockedIn: !!att, clockedOut: !!att?.clockOut, since: att?.clockIn.getTime() ?? null };
 
+  /* Open complaints where the STUDENT has the last word — either no reply
+     yet, or the student wrote again after staff last answered. A complaint
+     staff already replied to (last message from "staff") is not waiting on
+     anyone here; it's waiting on the student or on resolution. */
+  const openComplaintsRaw = await db.complaint.findMany({
+    where: { status: "open" },
+    include: { student: { select: { name: true } }, messages: { orderBy: { at: "desc" }, take: 1 } },
+    orderBy: { at: "desc" },
+  });
+  const openComplaints = openComplaintsRaw
+    .filter((c) => !c.messages[0] || c.messages[0].from === "student")
+    .map((c) => ({ id: c.id, studentId: c.studentId, studentName: c.student.name, at: (c.messages[0]?.at ?? c.at).getTime() }));
+
   // At-a-glance dashboard metrics
   const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
   const [todayPays, activeSubs, newStudents] = await Promise.all([
@@ -93,6 +106,7 @@ export default async function StaffHomePage() {
         colleges={colleges}
         metrics={metrics}
         attendance={attendance}
+        openComplaints={openComplaints}
       />
     </div>
   );

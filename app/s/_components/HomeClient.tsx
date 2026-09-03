@@ -36,6 +36,7 @@ type PendingSub = {
 };
 
 type Metrics = { todayRevenue: number; pending: number; ready: number; activeSubs: number; newStudents: number };
+type OpenComplaint = { id: string; studentId: string; studentName: string; at: number };
 
 export default function StaffHomeClient({
   staff,
@@ -44,6 +45,7 @@ export default function StaffHomeClient({
   colleges,
   metrics,
   attendance,
+  openComplaints,
 }: {
   staff: { name: string; role: number };
   orders: Order[];
@@ -51,6 +53,7 @@ export default function StaffHomeClient({
   colleges: { id: string; name: string }[];
   metrics: Metrics;
   attendance: { clockedIn: boolean; clockedOut: boolean; since: number | null };
+  openComplaints: OpenComplaint[];
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -364,6 +367,31 @@ export default function StaffHomeClient({
                   {overdueOrders.length} order{overdueOrders.length > 1 ? "s" : ""} overdue — past turnaround
                 </span>
               </div>
+            </button>
+          )}
+
+          {/* Complaints awaiting a staff reply — the one "needs attention"
+              signal that used to live only on a separate tab nobody checked
+              from this screen. A complaint sitting unanswered is worse than a
+              late order: the student is already unhappy and now also
+              ignored. */}
+          {openComplaints.length > 0 && (
+            <button
+              className="card pad mt10"
+              onClick={() => router.push("/s/complaints")}
+              style={{ width: "100%", textAlign: "left", background: "var(--red-soft)", borderColor: "#f0c9c4" }}
+            >
+              <div className="row gap8">
+                <span style={{ color: "var(--red)" }}>
+                  <Svg name="alert" size={20} />
+                </span>
+                <span style={{ color: "var(--red)", fontSize: "13.5px", fontWeight: "600" }}>
+                  {openComplaints.length} complaint{openComplaints.length > 1 ? "s" : ""} waiting on a reply
+                </span>
+              </div>
+              {openComplaints.slice(0, 3).map((c) => (
+                <div key={c.id} className="muted mt6" style={{ fontSize: 12.5 }}>{c.studentName} — {timeAgo(c.at)}</div>
+              ))}
             </button>
           )}
 

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import MarketingShell from "../_components/marketing/Shell";
+import { SUPPORT_WA_LINK, SUPPORT_PHONE_DISPLAY } from "@/lib/contact";
 
 export const metadata: Metadata = {
   title: "Refunds, Compensation & Complaints — FabricFold",
@@ -103,7 +104,7 @@ export default function Refunds() {
             <li><strong>At the counter</strong> — talk to the staff on duty. They can order a free re-do or issue credit
               on the spot.</li>
             <li><strong>Email or WhatsApp</strong> — <a href="mailto:support@fabricfold.in">support@fabricfold.in</a> or{" "}
-              <a href="tel:+918019121966">+91 80191 21966</a>.</li>
+              <a href={SUPPORT_WA_LINK} target="_blank" rel="noreferrer">{SUPPORT_PHONE_DISPLAY}</a>.</li>
           </ol>
           <p>
             <strong>What happens next:</strong> we acknowledge within <strong>1 working day</strong> and aim to resolve
@@ -125,7 +126,7 @@ export default function Refunds() {
           <p>
             Email: <a href="mailto:support@fabricfold.in">support@fabricfold.in</a>
             <br />
-            WhatsApp / phone: <a href="tel:+918019121966">+91 80191 21966</a>
+            WhatsApp: <a href={SUPPORT_WA_LINK} target="_blank" rel="noreferrer">{SUPPORT_PHONE_DISPLAY}</a>
           </p>
         </div>
       </section>

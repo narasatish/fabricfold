@@ -4,6 +4,7 @@ import { TopBar } from "@/components/chrome";
 import { timeAgo, dateStr } from "@/lib/format";
 import { Svg } from "@/components/icons";
 import HelpClient from "./_components/HelpClient";
+import { SUPPORT_WA_LINK, SUPPORT_PHONE_DISPLAY } from "@/lib/contact";
 
 export default async function HelpPage() {
   const student = await requireStudent();
@@ -21,7 +22,7 @@ export default async function HelpPage() {
       <div className="pad">
         {/* WhatsApp card */}
         <a
-          href="https://wa.me/918019121966"
+          href={SUPPORT_WA_LINK}
           target="_blank"
           rel="noreferrer"
           className="card-btn"
@@ -35,7 +36,7 @@ export default async function HelpPage() {
               Chat with us on WhatsApp
             </div>
             <div style={{ fontSize: "12.5px", color: "rgba(255,255,255,.85)" }}>
-              Replies via our AI assistant + team
+              {SUPPORT_PHONE_DISPLAY} · usually replies within the hour
             </div>
           </div>
           <Svg name="chevR" size={18} />

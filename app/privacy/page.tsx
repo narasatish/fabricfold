@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import MarketingShell from "../_components/marketing/Shell";
+import { SUPPORT_WA_LINK, SUPPORT_PHONE_DISPLAY } from "@/lib/contact";
 
 export const metadata: Metadata = {
   title: "Privacy Policy — FabricFold",
@@ -171,7 +172,7 @@ export default function Privacy() {
             <br />
             Email: <a href="mailto:support@fabricfold.in">support@fabricfold.in</a>
             <br />
-            WhatsApp / phone: <a href="tel:+918019121966">+91 80191 21966</a>
+            WhatsApp: <a href={SUPPORT_WA_LINK} target="_blank" rel="noreferrer">{SUPPORT_PHONE_DISPLAY}</a>
           </p>
         </div>
       </section>

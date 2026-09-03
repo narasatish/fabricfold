@@ -9,7 +9,12 @@ const NAV = [
   { href: "/contact", label: "Contact" },
 ];
 
-const WHATSAPP = "https://wa.me/918019121966";
+/* The dedicated support number — same one registered for WhatsApp sign-in
+   (lib/contact.ts), so the marketing site, the app and the login flow all
+   point at ONE recognisable "FabricFold" WhatsApp instead of the owner's
+   personal number. */
+import { SUPPORT_WA_LINK, SUPPORT_PHONE_DISPLAY } from "@/lib/contact";
+const WHATSAPP = SUPPORT_WA_LINK;
 
 /* Shared marketing chrome: sticky nav + footer. `active` highlights the current page. */
 export default function MarketingShell({ active, children }: { active?: string; children: React.ReactNode }) {
@@ -53,7 +58,7 @@ export default function MarketingShell({ active, children }: { active?: string; 
             </div>
             <div>
               <h4>Get in touch</h4>
-              <a href={WHATSAPP} target="_blank" rel="noreferrer">WhatsApp +91 80191 21966</a>
+              <a href={WHATSAPP} target="_blank" rel="noreferrer">WhatsApp {SUPPORT_PHONE_DISPLAY}</a>
               <a href="mailto:support@fabricfold.in">support@fabricfold.in</a>
               <Link href="/login">Student &amp; staff login</Link>
             </div>

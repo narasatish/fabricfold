@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import MarketingShell, { WHATSAPP } from "../_components/marketing/Shell";
+import { SUPPORT_PHONE_DISPLAY } from "@/lib/contact";
 
 export const metadata: Metadata = {
   title: "Contact FabricFold — students & colleges",
@@ -11,7 +12,6 @@ export const metadata: Metadata = {
 const CI = {
   chat: "M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-4-1L3 21l1.9-5.5a8.5 8.5 0 0 1 3.6-11.5 8.38 8.38 0 0 1 9 1.5 8.38 8.38 0 0 1 2.5 6Z",
   mail: "M4 4h16v16H4zM4 6l8 6 8-6",
-  phone: "M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92Z",
 };
 function Ic({ d }: { d: string }) {
   return <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{d.split("M").filter(Boolean).map((seg, i) => <path key={i} d={"M" + seg} />)}</svg>;
@@ -29,9 +29,8 @@ export default function Contact() {
       <section className="m-sec" style={{ paddingTop: 0 }}>
         <div className="mx">
           <div className="m-contact">
-            <a href={WHATSAPP} target="_blank" rel="noreferrer"><div className="m-cc"><div className="ic"><Ic d={CI.chat} /></div><h3>WhatsApp</h3><p>Fastest for anything</p><b>+91 80191 21966</b></div></a>
+            <a href={WHATSAPP} target="_blank" rel="noreferrer"><div className="m-cc"><div className="ic"><Ic d={CI.chat} /></div><h3>WhatsApp</h3><p>Fastest for anything</p><b>{SUPPORT_PHONE_DISPLAY}</b></div></a>
             <a href="mailto:support@fabricfold.in"><div className="m-cc"><div className="ic"><Ic d={CI.mail} /></div><h3>Email</h3><p>For details &amp; enquiries</p><b>support@fabricfold.in</b></div></a>
-            <a href="tel:+918019121966"><div className="m-cc"><div className="ic"><Ic d={CI.phone} /></div><h3>Call</h3><p>Mon–Sat, 9am–7pm</p><b>+91 80191 21966</b></div></a>
           </div>
         </div>
       </section>

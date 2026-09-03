@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import MarketingShell from "../_components/marketing/Shell";
+import { SUPPORT_WA_LINK, SUPPORT_PHONE_DISPLAY } from "@/lib/contact";
 
 export const metadata: Metadata = {
   title: "Terms & Conditions — FabricFold",
@@ -114,11 +115,15 @@ export default function Terms() {
 
           <h2 className="m-h2">8. Turnaround</h2>
           <p>
-            Standard orders are normally ready in about 48 hours from when we receive them, and express orders the same
-            day. These are targets, not guarantees — weather, power cuts, water supply, equipment failure and campus
-            holidays can delay us. If your order will be late we will tell you in the app. A delay alone doesn&apos;t
+            We aim to have standard orders ready in about 48 hours from when we receive them, and express orders the
+            same day — this is what we work towards on every order, and what we hit the vast majority of the time.
+            It is a target we try our best for, though, not a guarantee we can promise in every case: things like
+            weather, power cuts, water supply issues, equipment problems or campus holidays are outside our control
+            and can occasionally push a turnaround back. If that happens on your order, we will tell you in the app
+            as soon as we know, rather than let you find out at pickup. A delay alone doesn&apos;t automatically
             entitle you to a refund, but see section 14 and our{" "}
-            <a href="/refunds">Refunds &amp; Compensation policy</a>.
+            <a href="/refunds">Refunds &amp; Compensation policy</a> — where a delay genuinely inconveniences you, we
+            look at fair compensation on a case-by-case basis.
           </p>
 
           <h2 className="m-h2">9. Garment care and our liability</h2>
@@ -281,7 +286,7 @@ export default function Terms() {
           <p>
             Email: <a href="mailto:support@fabricfold.in">support@fabricfold.in</a>
             <br />
-            WhatsApp / phone: <a href="tel:+918019121966">+91 80191 21966</a>
+            WhatsApp: <a href={SUPPORT_WA_LINK} target="_blank" rel="noreferrer">{SUPPORT_PHONE_DISPLAY}</a>
           </p>
         </div>
       </section>

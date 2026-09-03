@@ -1,6 +1,15 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
 
+/* React's dev-mode debugging (call-stack reconstruction) uses eval(), which a
+   strict script-src blocks outright — confirmed live in the browser: dev
+   mode throws "eval() is not supported" and React never rendered past that.
+   React's own docs say production never calls eval(), so this is scoped to
+   development only — production keeps the stricter policy with no eval. */
+const scriptSrc = process.env.NODE_ENV === "production"
+  ? "script-src 'self' 'unsafe-inline' https://checkout.razorpay.com"
+  : "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://checkout.razorpay.com";
+
 /* Security headers on every response — same baseline large companies ship. */
 const securityHeaders = [
   // Force HTTPS for 2 years, including subdomains (browsers remember)
@@ -15,6 +24,41 @@ const securityHeaders = [
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(self)" },
   // Cross-origin isolation for popups/embeds
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+  /* Content-Security-Policy — an explicit allowlist of where scripts, frames
+     and connections may come from, on top of the headers above.
+
+     'unsafe-inline' stays in script-src and style-src rather than a stricter
+     nonce-based policy: Next's App Router bootstrap emits inline scripts, and
+     this app uses React inline `style={{}}` throughout (not a CSS-in-JS
+     library with nonce support), so a strict policy would break the app on
+     day one without a separate nonce-per-request middleware. This CSP still
+     does real work — it blocks loading attacker JS/frames from any domain
+     that isn't explicitly named below, which is the common XSS payload this
+     app would actually see (a compromised dependency or injected <script src>
+     pointing off-site). It does not stop inline-script injection; that needs
+     the nonce work as a follow-up if it's ever wanted.
+
+     Razorpay is the one third-party script the app loads client-side
+     (checkout.razorpay.com, PayClient.tsx) — its checkout flow also opens an
+     iframe and calls out to api.razorpay.com and lumberjack.razorpay.com
+     (its own analytics beacon), so those are explicitly allowed too; nothing
+     else external is. */
+  {
+    key: "Content-Security-Policy",
+    value: [
+      "default-src 'self'",
+      scriptSrc,
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https://*.razorpay.com",
+      "font-src 'self' data:",
+      "connect-src 'self' https://api.razorpay.com https://lumberjack.razorpay.com",
+      "frame-src https://api.razorpay.com https://checkout.razorpay.com",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+    ].join("; "),
+  },
 ];
 
 const nextConfig: NextConfig = {

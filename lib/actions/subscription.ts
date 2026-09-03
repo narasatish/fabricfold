@@ -9,7 +9,6 @@ import { requireStudent, requireStaff } from "../auth";
 import { publish } from "../realtime";
 import { pushNotif, audit } from "../notify";
 import { notifyOwner } from "../mail";
-import { assignWashDay } from "../washday-server";
 import { syncBagToPlan } from "./bags";
 import { CYCLE_RATES } from "../money";
 import { enqueueSheetEvent, flushSoon, istStamp } from "../sheet-events";
@@ -51,11 +50,6 @@ export async function activateSubscription(studentId: string, method: "cash" | "
   const stu = await db.student.findUniqueOrThrow({ where: { id: studentId }, include: { subscription: { include: { planRef: true } } } });
   if (!stu.subscription) return { ok: false as const, error: "No pending subscription request" };
 
-  // Safety net for students registered before wash-day allocation existed:
-  // give them one now, based on current burden, WITHOUT touching anyone
-  // else's already-assigned day.
-  // wash-day rota parked — no day assigned on activation
-
   if (method === "cash") {
     const otp = await db.otp.findFirst({ where: { purpose: "subscription", refId: studentId, usedAt: null } });
     if (!otp || (otpCode || "").trim() !== otp.code) return { ok: false as const, error: "OTP does not match" };
@@ -91,16 +85,16 @@ export async function activateSubscription(studentId: string, method: "cash" | "
   return { ok: true as const, code: bag.ok ? bag.code : undefined, bagError: bag.ok ? undefined : bag.error };
 }
 
-/** Manager+ assigns a plan DIRECTLY (no request/OTP; payment taken at counter). */
-export async function assignSubscription(studentId: string, planId: string, method: "cash" | "upi") {
+/** Manager+ assigns a plan DIRECTLY (no request/OTP; payment taken at counter).
+    `applyCredits` lets a student's compensation credits cover part or all of
+    the price — same idea as an order's "Apply credits" toggle (payCore in
+    orders.ts), just without an Order to hang a CreditUse row off, so the
+    credit spend is recorded as its own Payment row (method "credit") instead. */
+export async function assignSubscription(studentId: string, planId: string, method: "cash" | "upi", applyCredits = false) {
   const st = await requireStaff(2); // Manager+ only
   const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: true } });
   if (!stu) return { ok: false as const, error: "Student not found" };
   if (stu.subscription?.active) return { ok: false as const, error: "This student already has an active plan" };
-
-  // Same safety net as activateSubscription — only fills a MISSING wash day,
-  // never reassigns an existing one.
-  // wash-day rota parked — no day assigned on activation
 
   const plan = await db.plan.findUnique({ where: { id: planId } });
   if (!plan || !plan.active) return { ok: false as const, error: "Pick a plan" };
@@ -109,6 +103,8 @@ export async function assignSubscription(studentId: string, planId: string, meth
   const buckets = usageBuckets(plan.buckets as unknown as PlanBucket[]);
   const cyclesTotal = buckets.reduce((s, b) => s + b.cycles, 0);
   const gross = await planGross(plan);
+  const creditApplied = applyCredits ? Math.min(Number(stu.credits), gross) : 0;
+  const cash = gross - creditApplied;
 
   await db.$transaction(async (tx) => {
     await tx.subscription.upsert({
@@ -116,7 +112,13 @@ export async function assignSubscription(studentId: string, planId: string, meth
       create: { studentId, active: true, plan: plan.name, planId: plan.id, buckets, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesTotal, kgPerCycle: buckets[0]?.kgPerCycle ?? 7 },
       update: { active: true, plan: plan.name, planId: plan.id, buckets, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesTotal, cyclesUsed: 0, kgPerCycle: buckets[0]?.kgPerCycle ?? 7 },
     });
-    await tx.payment.create({ data: { method, amount: gross, collegeId: stu.collegeId, studentId, note: `Subscription: ${plan.name} (assigned at counter)` } });
+    if (creditApplied > 0) {
+      await tx.student.update({ where: { id: studentId }, data: { credits: { decrement: creditApplied } } });
+      await tx.payment.create({ data: { method: "credit", amount: creditApplied, collegeId: stu.collegeId, studentId, note: `Subscription: ${plan.name} (credit applied)` } });
+    }
+    if (cash > 0) {
+      await tx.payment.create({ data: { method, amount: cash, collegeId: stu.collegeId, studentId, note: `Subscription: ${plan.name} (assigned at counter)` } });
+    }
   });
   await db.otp.deleteMany({ where: { purpose: "subscription", refId: studentId } });
 
@@ -130,10 +132,11 @@ export async function assignSubscription(studentId: string, planId: string, meth
      A failure is reported to the caller, not thrown. */
   const bag = await syncBagToPlan(studentId);
 
+  const paidNote = creditApplied > 0 ? (cash > 0 ? `₹${cash} ${method.toUpperCase()} + ₹${creditApplied} credit` : `₹${creditApplied} credit`) : `₹${gross} (${method.toUpperCase()})`;
   await pushNotif(studentId, `Your "${plan.name}" plan is active. Happy washing!`, "status");
-  await audit("Subscription assigned", `${stu.name} · ${plan.name} · ₹${gross} (${method})${bag.ok && bag.code ? ` · ${bag.code}` : ""}`, st.id);
+  await audit("Subscription assigned", `${stu.name} · ${plan.name} · ${paidNote}${bag.ok && bag.code ? ` · ${bag.code}` : ""}`, st.id);
   rosterSoon();
-  void notifyOwner("Subscription assigned", `${stu.name}: "${plan.name}" — ₹${gross} received by ${method.toUpperCase()} (assigned by ${st.name}).`);
+  void notifyOwner("Subscription assigned", `${stu.name}: "${plan.name}" — ${paidNote} (assigned by ${st.name}).`);
   publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "subscription", payload: { studentId } });
   return { ok: true as const, code: bag.ok ? bag.code : undefined, bagError: bag.ok ? undefined : bag.error };
 }
@@ -301,7 +304,7 @@ export async function cancelSubscriptionRequest() {
    them would be theft by bookkeeping. */
 export async function sellCyclePack(
   studentId: string,
-  input: { service: "washFold" | "washIron"; cycles: number; method: "cash" | "upi" },
+  input: { service: "washFold" | "washIron"; cycles: number; method: "cash" | "upi"; applyCredits?: boolean },
 ) {
   const st = await requireStaff(2); // Manager+ — this takes money
   const rate = CYCLE_RATES[input.service];
@@ -319,6 +322,8 @@ export async function sellCyclePack(
 
   const price = cycles * rate;
   const label = input.service === "washFold" ? "Wash & Fold" : "Wash & Iron";
+  const creditApplied = input.applyCredits ? Math.min(Number(stu.credits), price) : 0;
+  const cash = price - creditApplied;
 
   await db.$transaction(async (tx) => {
     type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
@@ -341,20 +346,27 @@ export async function sellCyclePack(
         cancelledAt: null, cancelledReason: null, cancelledBy: null,
       },
     });
-    await tx.payment.create({
-      data: {
-        method: input.method, amount: price, collegeId: stu.collegeId, studentId,
-        note: `Cycle pack: ${cycles}× ${label} @ ₹${rate}`,
-      },
-    });
+    if (creditApplied > 0) {
+      await tx.student.update({ where: { id: studentId }, data: { credits: { decrement: creditApplied } } });
+      await tx.payment.create({ data: { method: "credit", amount: creditApplied, collegeId: stu.collegeId, studentId, note: `Cycle pack: ${cycles}× ${label} (credit applied)` } });
+    }
+    if (cash > 0) {
+      await tx.payment.create({
+        data: {
+          method: input.method, amount: cash, collegeId: stu.collegeId, studentId,
+          note: `Cycle pack: ${cycles}× ${label} @ ₹${rate}`,
+        },
+      });
+    }
     await enqueueSheetEvent(tx, "payment", [
-      istStamp(), stu.name, `Cycle pack ${cycles}× ${label}`, price, input.method, "—",
+      istStamp(), stu.name, `Cycle pack ${cycles}× ${label}`, price, creditApplied > 0 ? (cash > 0 ? `${input.method}+credit` : "credit") : input.method, "—",
     ]);
   });
 
-  await audit("Cycle pack sold", `${stu.name} (${stu.id}) · ${cycles}× ${label} · ₹${price} ${input.method}`, st.id);
+  const paidNote = creditApplied > 0 ? (cash > 0 ? `₹${cash} ${input.method} + ₹${creditApplied} credit` : `₹${creditApplied} credit`) : `₹${price} ${input.method}`;
+  await audit("Cycle pack sold", `${stu.name} (${stu.id}) · ${cycles}× ${label} · ${paidNote}`, st.id);
   rosterSoon();
-  await pushNotif(studentId, `${cycles} ${label} cycles added to your account — ₹${price} received. Happy washing!`, "credit");
+  await pushNotif(studentId, `${cycles} ${label} cycles added to your account — ${paidNote}. Happy washing!`, "credit");
   flushSoon();
   return { ok: true as const, price, cycles };
 }

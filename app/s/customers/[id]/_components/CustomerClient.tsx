@@ -13,7 +13,6 @@ import { CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService, expressFlatFee } from "@/l
 import { enqueueIntake, newIdemKey } from "@/lib/offline-queue";
 import { topUpCredits } from "@/lib/actions/ops";
 import { updateStudentPhone, updateStudentDetails } from "@/lib/actions/admin";
-import { WEEKDAY_NAMES } from "@/lib/washday";
 
 type Student = {
   id: string;
@@ -49,7 +48,6 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
   const [details, setDetails] = useState({
     name: student.name,
     collegeId: student.college?.id ?? "",
-    washDay: null as number | null,
   });
   const [detailsBusy, setDetailsBusy] = useState(false);
 
@@ -58,7 +56,6 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
     const r = await updateStudentDetails(student.id, {
       name: details.name,
       collegeId: details.collegeId || undefined,
-      washDay: details.washDay,
     });
     setDetailsBusy(false);
     if (!r.ok) return toast(r.error || "Failed", true);
@@ -85,6 +82,8 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
   const [packSvc, setPackSvc] = useState<"washFold" | "washIron">("washFold");
   const [packCycles, setPackCycles] = useState(16);
   const [packMethod, setPackMethod] = useState<"cash" | "upi">("cash");
+  const [packApplyCredits, setPackApplyCredits] = useState(false);
+  const [assignApplyCredits, setAssignApplyCredits] = useState(false);
   const [packBusy, setPackBusy] = useState(false);
   const [wiWeight, setWiWeight] = useState(0);
   const [wiUseCycle, setWiUseCycle] = useState(false);
@@ -247,11 +246,13 @@ Currently ${current}. Type the code printed on the bag they are being given.
     router.refresh();
   };
 
+  const packCreditCover = Math.min(student.credits, packCycles * CYCLE_RATES[packSvc]);
   const doSellPack = async () => {
     const price = packCycles * CYCLE_RATES[packSvc];
-    if (!confirm(`Sell ${packCycles} ${packSvc === "washFold" ? "Wash & Fold" : "Wash & Iron"} cycles for ₹${price} (${packMethod})?`)) return;
+    const cash = price - (packApplyCredits ? packCreditCover : 0);
+    if (!confirm(`Sell ${packCycles} ${packSvc === "washFold" ? "Wash & Fold" : "Wash & Iron"} cycles for ₹${price}${packApplyCredits && packCreditCover > 0 ? ` (₹${packCreditCover} credit + ₹${cash} ${packMethod})` : ` (${packMethod})`}?`)) return;
     setPackBusy(true);
-    const r = await sellCyclePack(student.id, { service: packSvc, cycles: packCycles, method: packMethod });
+    const r = await sellCyclePack(student.id, { service: packSvc, cycles: packCycles, method: packMethod, applyCredits: packApplyCredits });
     setPackBusy(false);
     if (!r.ok) return toast(r.error || "Failed", true);
     toast(`${r.cycles} cycles added — ₹${r.price} recorded`);
@@ -310,10 +311,11 @@ Currently ${current}. Type the code printed on the bag they are being given.
     router.push(`/s/orders/${r.id}`);
   };
 
+  const assignCreditCover = Math.min(student.credits, assignPlan?.gross || 0);
   const doAssign = async () => {
     if (!assignPlan) return;
     setAssignLoading(true);
-    const r = await assignSubscription(student.id, assignPlan.id, assignMethod);
+    const r = await assignSubscription(student.id, assignPlan.id, assignMethod, assignApplyCredits);
     setAssignLoading(false);
     if (!r.ok) return toast(r.error || "Failed", true);
     toast("Plan activated");
@@ -379,9 +381,9 @@ Currently ${current}. Type the code printed on the bag they are being given.
               <button
                 className="action"
                 style={{ padding: "2px 6px", marginLeft: 6 }}
-                aria-label="Edit name, campus and wash day"
+                aria-label="Edit name and campus"
                 onClick={() => {
-                  setDetails({ name: student.name, collegeId: student.college?.id ?? "", washDay: null });
+                  setDetails({ name: student.name, collegeId: student.college?.id ?? "" });
                   setShowDetails(true);
                 }}
               >
@@ -480,8 +482,17 @@ Currently ${current}. Type the code printed on the bag they are being given.
                 <div className="muted mt8" style={{ fontSize: 12.5 }}>
                   e.g. 6 months × 4/month = 24 cycles. Steps of 4 — a month at a time. Top-ups ADD to unused cycles, never replace them.
                 </div>
+                {student.credits > 0 && (
+                  <div className="chip-toggle mt10">
+                    <div>
+                      <div className="h-sm">Apply credits</div>
+                      <div className="muted" style={{ fontSize: "12px" }}>{fmt(packCreditCover)}</div>
+                    </div>
+                    <Switch on={packApplyCredits} onToggle={() => setPackApplyCredits(!packApplyCredits)} />
+                  </div>
+                )}
                 <button className="btn mt10" disabled={packBusy} onClick={doSellPack}>
-                  {packBusy ? "Recording…" : `Sell ${packCycles} cycles — ₹${packCycles * CYCLE_RATES[packSvc]}`}
+                  {packBusy ? "Recording…" : `Sell ${packCycles} cycles — ₹${packCycles * CYCLE_RATES[packSvc] - (packApplyCredits ? packCreditCover : 0)}${packApplyCredits && packCreditCover > 0 ? " + credit" : ""}`}
                 </button>
               </div>
             </>
@@ -817,8 +828,20 @@ Currently ${current}. Type the code printed on the bag they are being given.
               onChange={setAssignMethod}
             />
           </div>
+          {student.credits > 0 && (
+            <div className="chip-toggle mt16">
+              <div>
+                <div className="h-sm">Apply credits</div>
+                <div className="muted" style={{ fontSize: "12px" }}>{fmt(assignCreditCover)}</div>
+              </div>
+              <Switch on={assignApplyCredits} onToggle={() => setAssignApplyCredits(!assignApplyCredits)} />
+            </div>
+          )}
           <button className="btn mt16" onClick={doAssign} disabled={assignLoading || !assignPlan}>
-            <Svg name="check" size={18} /> {assignLoading ? "Activating…" : `Confirm ${fmt(assignPlan?.gross || 0)} received & activate`}
+            <Svg name="check" size={18} />{" "}
+            {assignLoading
+              ? "Activating…"
+              : `Confirm ${fmt((assignPlan?.gross || 0) - (assignApplyCredits ? assignCreditCover : 0))}${assignApplyCredits && assignCreditCover > 0 ? " + credit" : ""} received & activate`}
           </button>
         </div>
       </Sheet>
@@ -831,7 +854,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
         </div>
         <div className="field">
           <label>Campus</label>
-          <select className="input" value={details.collegeId} onChange={(e) => setDetails({ ...details, collegeId: e.target.value, washDay: null })}>
+          <select className="input" value={details.collegeId} onChange={(e) => setDetails({ ...details, collegeId: e.target.value })}>
             {colleges.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           {/* Said up front rather than after they press Save, because the
@@ -842,7 +865,6 @@ Currently ${current}. Type the code printed on the bag they are being given.
             </div>
           )}
         </div>
-        {/* Wash-day picker removed — rota parked (Sep 2026); restore from git. */}
         <button className="btn" onClick={doSaveDetails} disabled={detailsBusy || details.name.trim().length < 2}>
           {detailsBusy ? "Saving…" : "Save details"}
         </button>

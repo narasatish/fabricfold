@@ -42,6 +42,21 @@ describe("a removed campus can be brought back", () => {
   });
 });
 
+describe("removal is a REAL instant kill switch, not just 'no new registrations'", () => {
+  /* Found while answering the owner directly: "when I want to remove BVRIT,
+     make sure I can do it instantly if this isn't working." Before this fix,
+     setCollegeActive(false) stopped new self-registrations (registerStudent,
+     /join/<college>) but did nothing for a student ALREADY logged in — every
+     order-placing action goes through requireStudent(), and it never checked
+     the student's own college.active. So an already-open session could keep
+     placing orders at a campus the owner had just turned off. */
+  it("requireStudent refuses the moment its student's college goes inactive", () => {
+    const auth = read("lib/auth.ts");
+    const fn = auth.slice(auth.indexOf("export async function requireStudent"));
+    expect(fn).toMatch(/if \(!stu\.college\.active\) throw new AuthError/);
+  });
+});
+
 describe("the admin screen can still see it", () => {
   it("lists ALL colleges, not just active ones", () => {
     // filtering here is what made removal irreversible

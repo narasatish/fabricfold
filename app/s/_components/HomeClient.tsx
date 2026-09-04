@@ -96,7 +96,7 @@ export default function StaffHomeClient({
      stay client-side. Debounced so a four-letter name is one query, not four,
      and guarded by a sequence number so a slow early response cannot land on
      top of a later one and show results for a query already replaced. */
-  const [foundStudents, setFoundStudents] = useState<{ id: string; name: string; phone: string }[]>([]);
+  const [foundStudents, setFoundStudents] = useState<{ id: string; displayId: string; name: string; phone: string }[]>([]);
   const searchSeq = useRef(0);
   useEffect(() => {
     if (!q) { setFoundStudents([]); return; }
@@ -299,7 +299,7 @@ export default function StaffHomeClient({
                   <div className="avatar">{initials(st.name)}</div>
                   <div className="grow">
                     <div className="h-sm">{st.name}</div>
-                    <div className="muted" style={{ fontSize: "12.5px" }}>ID {st.id} · {st.phone}</div>
+                    <div className="muted" style={{ fontSize: "12.5px" }}>ID {st.displayId} · {st.phone}</div>
                   </div>
                   <Svg name="chevR" size={18} />
                 </button>

@@ -35,11 +35,12 @@ export type Tier = (typeof TIERS)[number];
 /** Subscribed students get their tier's letter; non-subscribers "walkin";
     college FACULTY get their own F series (Sep 2026) — they buy cycle packs
     rather than tiered plans, so no tier letter fits them, and the counter
-    needs to see at a glance that a bag belongs to a teacher. */
-export type BagKind = Tier | "walkin" | "faculty";
+    needs to see at a glance that a bag belongs to a teacher. BVRIT self-register
+    via WhatsApp and get V series (Oct 2026). */
+export type BagKind = Tier | "walkin" | "faculty" | "bvrit";
 
-export const BAG_LETTER: Record<BagKind, string> = { bronze: "B", silver: "S", gold: "G", walkin: "W", faculty: "F" };
-export const BAG_LABEL: Record<BagKind, string> = { bronze: "Bronze", silver: "Silver", gold: "Gold", walkin: "Walk-in", faculty: "Faculty" };
+export const BAG_LETTER: Record<BagKind, string> = { bronze: "B", silver: "S", gold: "G", walkin: "W", faculty: "F", bvrit: "V" };
+export const BAG_LABEL: Record<BagKind, string> = { bronze: "Bronze", silver: "Silver", gold: "Gold", walkin: "Walk-in", faculty: "Faculty", bvrit: "BVRIT" };
 
 /** Highest sequence a single kind can issue before the scheme needs widening.
 
@@ -82,7 +83,7 @@ export function parseBagCode(code: string): { kind: BagKind; n: number } | null 
   /* A 4-digit code may not lead with 0: "B0001" is a mistyping of B001, and
      a parser that guesses which code a smudge meant will one day hand a bag
      to the wrong student. Canonical forms only. */
-  const m = /^([BSGWF])(\d{3}|[1-9]\d{3})$/.exec((code || "").trim().toUpperCase());
+  const m = /^([BSGWFV])(\d{3}|[1-9]\d{3})$/.exec((code || "").trim().toUpperCase());
   if (!m) return null;
   const kinds = Object.keys(BAG_LETTER) as BagKind[];
   const kind = kinds.find((k) => BAG_LETTER[k] === m[1]);
@@ -122,18 +123,30 @@ export async function allocateBagCode(tx: Prisma.TransactionClient, kind: BagKin
   /* Sequence starts at MINT_FROM: printed stock is numbered from 1000, and a
      freshly minted B037 would clash with nothing in the database while
      matching no bag anyone can hold. An existing sequence below that (from
-     the 3-digit era) jumps forward once and never looks back. */
-  let row = await tx.fySequence.upsert({
-    where: { kind_fyTag: { kind: "bagcode", fyTag: letter } },
-    create: { kind: "bagcode", fyTag: letter, value: MINT_FROM },
-    update: { value: { increment: 1 } },
-  });
-  if (row.value < MINT_FROM) {
+     the 3-digit era) jumps forward once and never looks back.
+
+     `value` always means "the last number ISSUED" (never "the next one to
+     issue") — every path below ends with one unconditional increment before
+     formatting the code, so MINT_FROM is a baseline to land ON, then step
+     PAST, giving 1001 as the true first code — matching the owner's own
+     printed stock (B1001, G1002…), not 1000 itself.
+
+     Bug fixed here (Sep 2026): a brand-new letter, or an existing sequence
+     jumping up from below MINT_FROM, used to return MINT_FROM (1000) itself
+     as the first code — one short of what's actually printed on the bag. */
+  let row = await tx.fySequence.findUnique({ where: { kind_fyTag: { kind: "bagcode", fyTag: letter } } });
+  if (!row) {
+    row = await tx.fySequence.create({ data: { kind: "bagcode", fyTag: letter, value: MINT_FROM } });
+  } else if (row.value < MINT_FROM) {
     row = await tx.fySequence.update({
       where: { kind_fyTag: { kind: "bagcode", fyTag: letter } },
       data: { value: MINT_FROM },
     });
   }
+  row = await tx.fySequence.update({
+    where: { kind_fyTag: { kind: "bagcode", fyTag: letter } },
+    data: { value: { increment: 1 } },
+  });
   const code = formatBagCode(kind, row.value);
   if (!code) {
     throw new Error(

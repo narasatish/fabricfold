@@ -103,8 +103,48 @@ export const EXPRESS_FLAT: Record<string, number> = { washFold: 79, washIron: 99
 export function expressFlatFee(service: string) {
   return EXPRESS_FLAT[service] ?? EXPRESS_FLAT.washFold;
 }
+
+/**
+ * College-aware express fee: a college's own override wins per-service (e.g.
+ * BVRIT: ₹80 Wash & Fold, ₹120 Wash & Iron urgent), any service it didn't
+ * name falls back to the global EXPRESS_FLAT — same per-key-merge rule as
+ * resolveCollegeRates, not a whole-object swap.
+ */
+export function collegeExpressFee(service: string, collegeExpressOverride: Record<string, number> | null | undefined): number {
+  if (collegeExpressOverride && service in collegeExpressOverride) return collegeExpressOverride[service];
+  return expressFlatFee(service);
+}
 export function isCycleService(service: string) {
   return service in CYCLE_RATES;
+}
+
+/**
+ * Determines if a college uses cycle-based pricing for a service.
+ * - Colleges WITH a rates override (college.rates not null): never cycle-based,
+ *   always per-piece like BVRIT (services are priced by the garment, not the cycle).
+ * - Colleges WITHOUT a rates override (college.rates null): use global default,
+ *   where washFold/washIron are cycle-based (St Mary's model).
+ */
+export function collegeUsesCycleBasedPricing(service: string, collegeHasRatesOverride: boolean): boolean {
+  // If college has its own rates override, it bills per-piece, never by cycle
+  if (collegeHasRatesOverride) return false;
+  // Otherwise, use the service-name based default (washFold/washIron are cycle-based)
+  return isCycleService(service);
+}
+
+export type RateTable = Record<string, { label: string; items: [string, number][] }>;
+
+/**
+ * Resolve the rate table a college actually charges: the college's own
+ * override merged PER-SERVICE over the global default — never a whole-object
+ * swap. A college that only sets its own price for washFold/washIron (BVRIT:
+ * no ironOnly or dryClean price has ever been agreed) must still fall back to
+ * the global default for the services it didn't touch, or that service goes
+ * undefined/empty the moment a student picks it. One implementation, used by
+ * every screen that reads rates, so this rule can't drift between them.
+ */
+export function resolveCollegeRates(globalRates: RateTable, collegeRates: RateTable | null | undefined): RateTable {
+  return { ...globalRates, ...(collegeRates ?? {}) };
 }
 
 /**

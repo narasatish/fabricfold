@@ -93,7 +93,7 @@ async function twilioWaSend(phone: string, body: string, mediaUrl?: string) {
   }
 }
 
-async function sendWhatsApp(phone: string, text: string) {
+export async function sendWhatsApp(phone: string, text: string) {
   // Twilio first when configured: on a trial account it is the only path that
   // works without Meta business verification.
   if (twilioWaCreds()) {

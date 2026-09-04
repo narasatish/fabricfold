@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { Qr } from "@/components/qr";
 import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, upiLink } from "@/lib/format";
-import { CYCLE_KG_LIMIT, CYCLE_RATES, expressFlatFee, isCycleService, excessWeightCharge } from "@/lib/money";
+import { CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, collegeUsesCycleBasedPricing, excessWeightCharge } from "@/lib/money";
 import { isOverdue } from "@/lib/money";
 import { useToast, Sheet, Seg, Switch } from "@/components/chrome";
 import {
@@ -56,7 +56,7 @@ type Order = {
   tags: Array<{ code: string; label: string; scanned: boolean }>;
   received: number;
   student: {
-    id: string; name: string; phone: string; credits: number; lifetimePieces: number;
+    id: string; displayId: string; name: string; phone: string; credits: number; lifetimePieces: number;
     subscription: { active: boolean; cyclesTotal: number; cyclesUsed: number; kgPerCycle: number } | null;
   };
   college: { id: string; name: string } | null;
@@ -70,6 +70,8 @@ export default function StaffOrderClient({
   upi,
   expectedPickupCode,
   baseGarmentRate,
+  collegeHasRatesOverride,
+  collegeExpressOverride,
 }: {
   order: Order;
   serviceRates: { label: string; items: Array<[string, number]> };
@@ -77,6 +79,8 @@ export default function StaffOrderClient({
   upi: { upiId: string; payeeName: string };
   expectedPickupCode: string | null;
   baseGarmentRate: number;
+  collegeHasRatesOverride: boolean;
+  collegeExpressOverride: Record<string, number> | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -104,7 +108,10 @@ export default function StaffOrderClient({
   const canUseCycle = !!order.student.subscription?.active && subCyclesLeft > 0;
 
   // Sheet state
-  const cycleBased = isCycleService(order.service);
+  // College-aware, same as the customer order screen and staff walk-in sheet:
+  // a college with its own rates override (BVRIT) never bills washFold/washIron
+  // by the cycle — always itemized.
+  const cycleBased = collegeUsesCycleBasedPricing(order.service, collegeHasRatesOverride);
   const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, cycles: Math.max(1, order.cyclesCount || 1), useCycle: canUseCycle, noGst: false, waiveExcess: false, itemQtys: {} as Record<string, number> });
   /* The weight field holds a STRING while being typed — see the input below. */
   const [weightText, setWeightText] = useState(order.weightKg ? String(order.weightKg) : "");
@@ -145,22 +152,26 @@ export default function StaffOrderClient({
     const adjusted = serviceRates.items
       .filter((it) => acceptInput.itemQtys[it[0]] > 0)
       .map((it) => ({ label: it[0], qty: acceptInput.itemQtys[it[0]] }));
-    const r = await acceptOrder(order.id, {
-      weightKg: acceptInput.weightKg || null,
-      cycles: cycleBased ? acceptInput.cycles : undefined,
-      useCycle: acceptInput.useCycle,
-      noGst: acceptInput.noGst,
-      waiveExcess: acceptInput.waiveExcess,
-      items: adjusted.length ? adjusted : undefined,
-      intakePhotos: intakePhotos.length ? intakePhotos : undefined,
-    });
-    if (!r.ok) {
-      toast(r.error || "Failed", true);
-      return;
+    try {
+      const r = await acceptOrder(order.id, {
+        weightKg: acceptInput.weightKg || null,
+        cycles: cycleBased ? acceptInput.cycles : undefined,
+        useCycle: acceptInput.useCycle,
+        noGst: acceptInput.noGst,
+        waiveExcess: acceptInput.waiveExcess,
+        items: adjusted.length ? adjusted : undefined,
+        intakePhotos: intakePhotos.length ? intakePhotos : undefined,
+      });
+      if (!r.ok) {
+        toast(r.error || "Failed", true);
+        return;
+      }
+      toast("Order accepted");
+      setShowAcceptSheet(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
     }
-    toast("Order accepted");
-    setShowAcceptSheet(false);
-    router.refresh();
   };
 
   // Handler: upload a damage/intake photo
@@ -215,139 +226,185 @@ export default function StaffOrderClient({
 
   const submitDamage = async () => {
     setDamageBusy(true);
-    const r = await reportOrderDamage(order.id, { comment: damageComment, photos: damagePhotos });
-    setDamageBusy(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast("Damage reported — the student has been notified");
-    setShowDamage(false);
-    setDamagePhotos([]);
-    setDamageComment("");
-    router.refresh();
+    try {
+      const r = await reportOrderDamage(order.id, { comment: damageComment, photos: damagePhotos });
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast("Damage reported — the student has been notified");
+      setShowDamage(false);
+      setDamagePhotos([]);
+      setDamageComment("");
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setDamageBusy(false);
+    }
   };
 
   // Handler: advance status
   const confirmReady = async () => {
     setReadyBusy(true);
-    const r = await advanceStatus(order.id, { countedPieces });
-    setReadyBusy(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(countedPieces < intakeCount ? `Marked ready — shortfall of ${intakeCount - countedPieces} flagged` : "Marked ready for collection");
-    setShowReady(false);
-    router.refresh();
+    try {
+      const r = await advanceStatus(order.id, { countedPieces });
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(countedPieces < intakeCount ? `Marked ready — shortfall of ${intakeCount - countedPieces} flagged` : "Marked ready for collection");
+      setShowReady(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setReadyBusy(false);
+    }
   };
 
   const handleAdvance = async () => {
     // Going to ready goes through the recount prompt instead.
     if (order.status === "processing") return setShowReady(true);
-    const r = await advanceStatus(order.id);
-    if (!r.ok) {
-      toast(r.error || "Failed", true);
-      return;
+    try {
+      const r = await advanceStatus(order.id);
+      if (!r.ok) {
+        toast(r.error || "Failed", true);
+        return;
+      }
+      toast("Status updated");
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
     }
-    toast("Status updated");
-    router.refresh();
   };
 
   // Handler: collect order
   const handleCollect = async () => {
-    const r = await collectOrder(order.id, collectCode);
-    if (!r.ok) {
-      toast(r.error || "Failed", true);
-      return;
+    try {
+      const r = await collectOrder(order.id, collectCode);
+      if (!r.ok) {
+        toast(r.error || "Failed", true);
+        return;
+      }
+      toast("Order collected");
+      setShowCollectSheet(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
     }
-    toast("Order collected");
-    setShowCollectSheet(false);
-    router.refresh();
   };
 
   // Handler: record payment (cash)
   const handlePayCash = async () => {
-    const r = await recordPay(order.id, "cash", applyCredits, staffInvoice);
-    if (!r.ok) {
-      toast(r.error || "Failed", true);
-      return;
+    try {
+      const r = await recordPay(order.id, "cash", applyCredits, staffInvoice);
+      if (!r.ok) {
+        toast(r.error || "Failed", true);
+        return;
+      }
+      toast("Payment recorded");
+      setShowPaymentSheet(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
     }
-    toast("Payment recorded");
-    setShowPaymentSheet(false);
-    router.refresh();
   };
 
   // Handler: record payment (UPI) — after QR display
   const handlePayUpi = async () => {
-    const r = await recordPay(order.id, "upi", applyCredits, staffInvoice);
-    if (!r.ok) {
-      toast(r.error || "Failed", true);
-      return;
+    try {
+      const r = await recordPay(order.id, "upi", applyCredits, staffInvoice);
+      if (!r.ok) {
+        toast(r.error || "Failed", true);
+        return;
+      }
+      toast("Payment marked received");
+      setShowUpiSheet(false);
+      setShowPaymentSheet(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
     }
-    toast("Payment marked received");
-    setShowUpiSheet(false);
-    setShowPaymentSheet(false);
-    router.refresh();
   };
 
   // Handler: refund
   const handleRefund = async () => {
-    const r = await refundOrder(order.id, refundInput.amount, refundInput.via, refundInput.reason, refundInput.restoreCycle);
-    if (!r.ok) {
-      toast(r.error || "Failed", true);
-      return;
+    try {
+      const r = await refundOrder(order.id, refundInput.amount, refundInput.via, refundInput.reason, refundInput.restoreCycle);
+      if (!r.ok) {
+        toast(r.error || "Failed", true);
+        return;
+      }
+      toast("Refund processed");
+      setShowRefundSheet(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
     }
-    toast("Refund processed");
-    setShowRefundSheet(false);
-    router.refresh();
   };
 
   // Handler: compensation
   const handleCompensation = async () => {
-    const r = await submitCompensation({
-      studentId: order.studentId,
-      orderId: order.id,
-      kind: compInput.kind,
-      amount: compInput.amount,
-      method: compInput.method,
-      comment: compInput.comment,
-    });
-    if (!r.ok) {
-      toast(r.error || "Failed", true);
-      return;
+    try {
+      const r = await submitCompensation({
+        studentId: order.studentId,
+        orderId: order.id,
+        kind: compInput.kind,
+        amount: compInput.amount,
+        method: compInput.method,
+        comment: compInput.comment,
+      });
+      if (!r.ok) {
+        toast(r.error || "Failed", true);
+        return;
+      }
+      toast("Compensation issued");
+      setShowCompensationSheet(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
     }
-    toast("Compensation issued");
-    setShowCompensationSheet(false);
-    router.refresh();
   };
 
   // Handler: redo
   const handleRedo = async () => {
     if (!confirm("Create a free re-do of this order?")) return;
-    const r = await redoOrder(order.id);
-    if (!r.ok) {
-      toast(r.error || "Failed", true);
-      return;
+    try {
+      const r = await redoOrder(order.id);
+      if (!r.ok) {
+        toast(r.error || "Failed", true);
+        return;
+      }
+      toast("Re-do order created");
+      router.push(`/s/orders/${r.id}`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
     }
-    toast("Re-do order created");
-    router.push(`/s/orders/${r.id}`);
   };
 
   // Handler: cancel
   const handleCancel = async () => {
     if (!confirm("Cancel this order? This cannot be undone.")) return;
-    const r = await cancelOrder(order.id);
-    if (!r.ok) {
-      toast(r.error || "Failed", true);
-      return;
+    try {
+      const r = await cancelOrder(order.id);
+      if (!r.ok) {
+        toast(r.error || "Failed", true);
+        return;
+      }
+      toast("Order cancelled");
+      router.push("/s");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
     }
-    toast("Order cancelled");
-    router.push("/s");
   };
 
   // Handler: scan tag
   const handleScanTag = async (code: string) => {
-    const r = await scanTag(order.id, code);
-    if (!r.ok) {
-      toast(r.error || "Failed", true);
-      return;
+    try {
+      const r = await scanTag(order.id, code);
+      if (!r.ok) {
+        toast(r.error || "Failed", true);
+        return;
+      }
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
     }
-    router.refresh();
   };
 
   return (
@@ -369,7 +426,7 @@ export default function StaffOrderClient({
         <div style={{ flex: 1 }}>
           <div className="h-sm">{order.student.name}</div>
           <div className="muted" style={{ fontSize: "12px" }}>
-            ID {order.studentId} · {order.student.lifetimePieces} pcs lifetime
+            ID {order.student.displayId} · {order.student.lifetimePieces} pcs lifetime
           </div>
         </div>
         <span className={`pill st-${order.status}`}>{STATUS_LABEL[order.status] || order.status}</span>
@@ -813,7 +870,7 @@ export default function StaffOrderClient({
           {acceptInput.useCycle && order.express && (
             <div className="card pad mt12" style={{ background: "var(--amber-soft)", borderColor: "#f2e2c4", marginBottom: "16px" }}>
               <span style={{ fontSize: "12.5px", color: "var(--amber)" }}>
-                This order is marked urgent — collect the flat same-day fee of ₹{expressFlatFee(order.service)} in cash before handing it over.
+                This order is marked urgent — collect the flat same-day fee of ₹{collegeExpressFee(order.service, collegeExpressOverride)} in cash before handing it over.
               </span>
             </div>
           )}

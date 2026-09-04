@@ -1,6 +1,7 @@
 import { requireStudent } from "@/lib/auth";
 import { featureOn, serviceOn, type FeatureKey } from "@/lib/features";
 import { db } from "@/lib/db";
+import { collegeUsesCycleBasedPricing, resolveCollegeRates, type RateTable } from "@/lib/money";
 import { TopBar } from "@/components/chrome";
 import { fmt, STATUS_LABEL } from "@/lib/format";
 import { Svg } from "@/components/icons";
@@ -12,10 +13,12 @@ import { redirect } from "next/navigation";
 export default async function OrderNewPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const student = await requireStudent();
   const appConfig = await db.appConfig.findUnique({ where: { id: "main" } });
+  const college = await db.college.findUnique({ where: { id: student.collegeId } });
 
-  if (!appConfig) redirect("/c");
+  if (!appConfig || !college) redirect("/c");
 
-  const rates = appConfig.rates as unknown as Record<string, { label: string; items: [string, number][] }>;
+  const rates = resolveCollegeRates(appConfig.rates as unknown as RateTable, college.rates as unknown as RateTable | null);
+  const collegeHasRatesOverride = !!college.rates;
   const gstEnabled = (appConfig.settings as Record<string, unknown>)?.gstEnabled !== false;
   const gstPct = gstEnabled ? Number(appConfig.gstPct) : 0;
   const plan = appConfig.plan as unknown as { price: number; cycles: number; kgPerCycle: number };
@@ -66,6 +69,8 @@ export default async function OrderNewPage({ searchParams }: { searchParams: Pro
           gstPct={gstPct}
           expressEnabled={featureOn(feat, "express")}
           hasActiveSubscription={!!student.subscription?.active}
+          collegeUsesCycles={collegeUsesCycleBasedPricing(serviceParam, collegeHasRatesOverride)}
+          collegeExpressOverride={college.expressRates as Record<string, number> | null}
           reorderItems={reorderItems}
           slots={slots}
           slotDayLabels={slotDayLabels}

@@ -41,10 +41,10 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const HEADERS = {
-  name: ["name", "student", "student name"],
+  name: ["name", "student", "student name", "customer name"],
   phone: ["phone", "mobile", "mobile number", "phone number", "number"],
-  code: ["code", "customer id", "customerid", "bag", "bag code", "id", "tag"],
-  amount: ["amount", "paid", "price", "fee"],
+  code: ["code", "customer id", "customerid", "bag", "bag code", "id", "tag", "unique code"],
+  amount: ["amount", "paid", "price", "fee", "plan price (₹)"],
 };
 
 function headerIndex(row: ExcelJS.Row) {

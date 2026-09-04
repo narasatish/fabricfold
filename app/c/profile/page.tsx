@@ -1,4 +1,5 @@
 import { requireStudent } from "@/lib/auth";
+import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { fmt, initials, loyaltyBadge } from "@/lib/format";
 import { Svg } from "@/components/icons";
@@ -9,6 +10,10 @@ export default async function ProfilePage() {
   const student = await requireStudent();
   const college = student.college;
   const tier = loyaltyBadge(student.lifetimePieces);
+  // The printed customer ID is the bag code (e.g. G1424), not the internal
+  // database id — same fix as the staff-facing customer/order screens.
+  const activeBag = await db.bag.findFirst({ where: { studentId: student.id, status: "active" } });
+  const displayId = activeBag?.code ?? student.id;
 
   return (
     <div className="screen">
@@ -25,7 +30,7 @@ export default async function ProfilePage() {
               +91 {student.phone}
             </div>
             <div className="row gap8 mt8" style={{ flexWrap: "wrap" }}>
-              <span className="pill">ID {student.id}</span>
+              <span className="pill">ID {displayId}</span>
               <span className="pill" style={{ background: tier.bg, color: tier.fg }}>
                 {tier.name} member
               </span>

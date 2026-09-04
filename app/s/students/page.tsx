@@ -16,6 +16,7 @@ export default async function StaffStudentsPage() {
       select: {
         id: true, name: true, phone: true, credits: true, lifetimePieces: true, collegeId: true,
         subscription: { select: { active: true } },
+        bags: { where: { status: "active" }, select: { code: true }, take: 1 },
       },
     }),
     /* Every college, including removed ones. A student still belongs to a
@@ -25,7 +26,7 @@ export default async function StaffStudentsPage() {
   ]);
 
   const students = rows.map((r) => ({
-    id: r.id, name: r.name, phone: r.phone,
+    id: r.id, displayId: r.bags[0]?.code ?? r.id, name: r.name, phone: r.phone,
     credits: Number(r.credits), lifetimePieces: r.lifetimePieces,
     collegeId: r.collegeId, subActive: !!r.subscription?.active,
   }));

@@ -41,24 +41,32 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
 
   const doResolve = async () => {
     if (!resolveFor) return;
-    const r = await resolveComplaint(resolveFor.id, resText);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast("Complaint resolved");
-    setResolveFor(null);
-    setResText("");
-    router.refresh();
+    try {
+      const r = await resolveComplaint(resolveFor.id, resText);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast("Complaint resolved");
+      setResolveFor(null);
+      setResText("");
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    }
   };
 
   const doComp = async () => {
     if (!compFor) return;
-    // Pass the complaint through so the payout is traceable to the grievance
-    // that justified it, not just to the student.
-    const r = await submitCompensation({ studentId: compFor.studentId, orderId: compFor.orderId, complaintId: compFor.id, kind: comp.kind, amount: comp.amount, method: comp.method, comment: comp.comment });
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast("Compensation issued");
-    setCompFor(null);
-    setComp({ kind: "goodwill", amount: 0, method: "credit", comment: "" });
-    router.refresh();
+    try {
+      // Pass the complaint through so the payout is traceable to the grievance
+      // that justified it, not just to the student.
+      const r = await submitCompensation({ studentId: compFor.studentId, orderId: compFor.orderId, complaintId: compFor.id, kind: comp.kind, amount: comp.amount, method: comp.method, comment: comp.comment });
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast("Compensation issued");
+      setCompFor(null);
+      setComp({ kind: "goodwill", amount: 0, method: "credit", comment: "" });
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    }
   };
 
   return (

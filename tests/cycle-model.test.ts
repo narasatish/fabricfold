@@ -86,10 +86,10 @@ describe("as counter staff", () => {
     expect(orders).toMatch(/Math\.max\(0, buckets\[idx\]\.used - n\)/);
   });
   it("GST is forced OFF for cycle services at every entry point", () => {
-    // acceptOrder + walkInOrder both carry the same clause
-    expect(orders.match(/isCycleService\((o|input)\.service\) \|\| !!input\.noGst/g)?.length).toBe(2);
-    // and the pre-booked draft is stamped noGst at creation
-    expect(orders).toMatch(/noGst: isCycleService\(input\.service\)/);
+    // acceptOrder + walkInOrder both use usesCycles variable to determine GST
+    expect(orders.match(/const usesCycles = collegeUsesCycleBasedPricing/g)?.length).toBeGreaterThanOrEqual(2);
+    // and the noGst clause checks usesCycles (college-aware pricing)
+    expect(orders).toMatch(/const noGst = !usedCycle && \(usesCycles \|\|/);
   });
   it("the synthetic cycle line keeps qty = cycles, as the owner asked pieces to become", () => {
     expect(orders).toMatch(/rate: CYCLE_RATES\[service\], qty: n/);
@@ -149,13 +149,16 @@ describe("the screens quote what the server bills", () => {
     expect(ui).toMatch(/cycles: cycleBased \? acceptInput\.cycles : 1/);
   });
   it("walk-in: cycle stepper for cycle services, item grid for the rest", () => {
+    // isCycleService(wiService) became wiCycleBased (college-aware) once
+    // BVRIT's per-piece pricing landed — a college with its own rates
+    // override never shows the cycle stepper, even for washFold/washIron.
     const ui = read("app/s/customers/[id]/_components/CustomerClient.tsx");
-    expect(ui).toMatch(/isCycleService\(wiService\) \? \(/);
-    expect(ui).toMatch(/cycles: isCycleService\(wiService\) \? wiCycles : undefined/);
+    expect(ui).toMatch(/\{wiCycleBased \? \(/);
+    expect(ui).toMatch(/cycles: wiCycleBased \? wiCycles : undefined/);
   });
   it("the GST toggle disappears where GST can never apply", () => {
     expect(read("app/s/orders/[id]/_components/OrderClient.tsx")).toMatch(/\{!acceptInput\.useCycle && !cycleBased && \(/);
-    expect(read("app/s/customers/[id]/_components/CustomerClient.tsx")).toMatch(/!wiUseCycle && gstEnabled && !isCycleService\(wiService\) && \(/);
+    expect(read("app/s/customers/[id]/_components/CustomerClient.tsx")).toMatch(/!wiUseCycle && gstEnabled && !wiCycleBased && \(/);
   });
   it("the pack card exists for any student, Manager+, with the 6-months example", () => {
     const ui = read("app/s/customers/[id]/_components/CustomerClient.tsx");
@@ -225,14 +228,14 @@ describe("urgent (same-day) is a flat fee, EVERY service, no percentage anywhere
   it("all three entry points use the flat fee for EVERY service, not just cycle ones", () => {
     /* place (1) + accept (urgent-cash branch + general surcharge = 2) +
        walkIn (same shape = 2) = 5 call sites, none gated on isCycleService. */
-    expect(orders.match(/expressFlatFee\((input|o)\.service\)/g)?.length).toBe(5);
+    expect(orders.match(/collegeExpressFee\((input|o)\.service, cfg\.collegeExpressOverride\)/g)?.length).toBe(5);
   });
   it("both apps SAY the flat fee, and the customer form applies it to every service", () => {
-    expect(read("app/c/order/new/_components/OrderNewClient.tsx")).toMatch(/const surcharge = express \? expressFlatFee\(service\) : 0;/);
-    expect(read("app/s/orders/[id]/_components/OrderClient.tsx")).toMatch(/flat same-day fee of ₹\{expressFlatFee\(order\.service\)\}/);
+    expect(read("app/c/order/new/_components/OrderNewClient.tsx")).toMatch(/const surcharge = express \? collegeExpressFee\(service, collegeExpressOverride\) : 0;/);
+    expect(read("app/s/orders/[id]/_components/OrderClient.tsx")).toMatch(/flat same-day fee of ₹\{collegeExpressFee\(order\.service, collegeExpressOverride\)\}/);
   });
   it("the walk-in counter form quotes the same flat fee", () => {
-    expect(read("app/s/customers/[id]/_components/CustomerClient.tsx")).toMatch(/expressFlatFee\(wiService\)/);
+    expect(read("app/s/customers/[id]/_components/CustomerClient.tsx")).toMatch(/collegeExpressFee\(wiService, collegeExpressOverride\)/);
   });
   it("terms page no longer promises 40%", () => {
     expect(read("app/terms/page.tsx")).not.toMatch(/40%/);

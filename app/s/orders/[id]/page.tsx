@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import StaffOrderClient from "./_components/OrderClient";
+import { resolveCollegeRates, type RateTable } from "@/lib/money";
 
 export default async function StaffOrderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -14,7 +15,7 @@ export default async function StaffOrderPage({ params }: { params: Promise<{ id:
   const order = await db.order.findUnique({
     where: { id },
     include: {
-      student: { include: { subscription: true } },
+      student: { include: { subscription: true, bags: { where: { status: "active" }, take: 1 } } },
       college: true,
       payments: true,
       invoice: true,
@@ -25,7 +26,7 @@ export default async function StaffOrderPage({ params }: { params: Promise<{ id:
   if (!order) notFound();
 
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
-  const rates = cfg.rates as Record<string, { label: string; items: [string, number][] }>;
+  const rates = resolveCollegeRates(cfg.rates as unknown as RateTable, order.college?.rates as unknown as RateTable | null);
   const serviceRates = rates[order.service] || { label: order.service, items: [] };
   const payment = cfg.payment as { upiId?: string; payeeName?: string };
   const pickupOtp = await db.otp.findFirst({ where: { purpose: "pickup", refId: order.id, usedAt: null } });
@@ -66,6 +67,7 @@ export default async function StaffOrderPage({ params }: { params: Promise<{ id:
     received: order.payments.filter((p) => N(p.amount) > 0 && p.method !== "refund").reduce((s2, p) => s2 + N(p.amount), 0),
     student: {
       id: order.student.id,
+      displayId: order.student.bags[0]?.code ?? order.student.id,
       name: order.student.name,
       phone: order.student.phone,
       credits: N(order.student.credits),
@@ -96,6 +98,8 @@ export default async function StaffOrderPage({ params }: { params: Promise<{ id:
            excessWeightCharge). Passed in so the accept sheet can quote the
            charge before staff commit, using the same function that bills it. */
         baseGarmentRate={Number(rates.washIron?.items?.[0]?.[1]) || 0}
+        collegeHasRatesOverride={!!order.college?.rates}
+        collegeExpressOverride={order.college?.expressRates as Record<string, number> | null}
       />
     </div>
   );

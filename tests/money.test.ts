@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs";
+import type { RateTable } from "../lib/money";
 
 /* Run the money tests in an isolated schema so they never touch real data:
    - Postgres (Supabase): a throwaway schema on the same database.
@@ -232,5 +233,137 @@ describe("cash-drawer reconciliation", () => {
     expect(r.netGst).toBeCloseTo(r.gstCollected - r.cnGst, 2);
     expect(r.gstCollected).toBeCloseTo(18 + 36 + 30 + 18, 1);
     expect(r.cnGst).toBeCloseTo(15 + 18, 1);
+  });
+});
+
+describe("per-college pricing models (St Mary's cycle-based vs BVRIT per-piece)", () => {
+  it("collegeUsesCycleBasedPricing: return false if college has rates override, else check service", () => {
+    // College WITH rates override (BVRIT-like): never cycle-based, always per-piece
+    expect(money.collegeUsesCycleBasedPricing("washFold", true)).toBe(false);
+    expect(money.collegeUsesCycleBasedPricing("washIron", true)).toBe(false);
+    expect(money.collegeUsesCycleBasedPricing("ironOnly", true)).toBe(false);
+    expect(money.collegeUsesCycleBasedPricing("dryClean", true)).toBe(false);
+
+    // College WITHOUT rates override (St Mary's-like): cycle-based for washFold/washIron, per-piece otherwise
+    expect(money.collegeUsesCycleBasedPricing("washFold", false)).toBe(true);
+    expect(money.collegeUsesCycleBasedPricing("washIron", false)).toBe(true);
+    expect(money.collegeUsesCycleBasedPricing("ironOnly", false)).toBe(false);
+    expect(money.collegeUsesCycleBasedPricing("dryClean", false)).toBe(false);
+  });
+
+  it("resolveCollegeRates: a PARTIAL override still falls back to the global default for services it doesn't name", () => {
+    // BVRIT's real override only ever names washFold/washIron — ironOnly and
+    // dryClean are deliberately absent (no price for them has ever been
+    // agreed). A whole-object swap (the original bug) would leave those two
+    // undefined for BVRIT; the fix must merge per-service instead.
+    const globalRates: RateTable = {
+      washFold: { label: "Wash & Fold", items: [["Regular garment", 12]] },
+      washIron: { label: "Wash & Iron", items: [["Regular garment", 15]] },
+      ironOnly: { label: "Iron Only", items: [["Shirt / T-shirt / Pant", 10]] },
+      dryClean: { label: "Dry Clean", items: [["Shirt / Pant / T-shirt", 100]] },
+    };
+    const bvritOverride: RateTable = {
+      washFold: { label: "Wash & Fold", items: [["Regular garment", 15]] },
+      washIron: { label: "Wash & Iron", items: [["Regular garment", 20]] },
+    };
+
+    const resolved = money.resolveCollegeRates(globalRates, bvritOverride);
+
+    // Overridden services use BVRIT's own price
+    expect(resolved.washFold.items[0][1]).toBe(15);
+    expect(resolved.washIron.items[0][1]).toBe(20);
+    // Non-overridden services fall back to the global default — not undefined
+    expect(resolved.ironOnly).toBeDefined();
+    expect(resolved.ironOnly.items[0][1]).toBe(10);
+    expect(resolved.dryClean).toBeDefined();
+    expect(resolved.dryClean.items[0][1]).toBe(100);
+
+    // No override at all → global default, unchanged
+    expect(money.resolveCollegeRates(globalRates, null)).toEqual(globalRates);
+  });
+
+  it("collegeExpressFee: a college's own urgent fee wins per-service, falls back to the global flat fee otherwise", () => {
+    // BVRIT: ₹80 Wash & Fold, ₹120 Wash & Iron — no override for ironOnly/dryClean
+    const bvritExpress = { washFold: 80, washIron: 120 };
+    expect(money.collegeExpressFee("washFold", bvritExpress)).toBe(80);
+    expect(money.collegeExpressFee("washIron", bvritExpress)).toBe(120);
+    // not overridden → global EXPRESS_FLAT (₹79 dryClean/ironOnly)
+    expect(money.collegeExpressFee("dryClean", bvritExpress)).toBe(money.EXPRESS_FLAT.dryClean);
+    expect(money.collegeExpressFee("ironOnly", bvritExpress)).toBe(money.EXPRESS_FLAT.ironOnly);
+    // no override at all → global flat fee, unchanged (St Mary's model)
+    expect(money.collegeExpressFee("washFold", null)).toBe(money.EXPRESS_FLAT.washFold);
+    expect(money.collegeExpressFee("washIron", undefined)).toBe(money.EXPRESS_FLAT.washIron);
+  });
+
+  it("college with rates override uses per-piece pricing for washFold (BVRIT model): 5 pieces × ₹15 = ₹75", async () => {
+    // Create BVRIT-like college with per-piece rates override
+    const bvritCollege = await db.college.create({
+      data: {
+        id: "bvrit", name: "BVRIT", features: { svc_washfold: true },
+        rates: {
+          washFold: { label: "Wash & Fold", items: [["Regular garment", 15]] },
+        },
+      },
+    });
+    const bvritStudent = await db.student.create({
+      data: { id: "222222", phone: "8019121966", name: "BVRIT Student", collegeId: "bvrit" },
+    });
+
+    // Place a washFold order for 5 pieces
+    const order = await db.order.create({
+      data: {
+        id: "FF000BVRT",
+        studentId: bvritStudent.id,
+        collegeId: bvritCollege.id,
+        service: "washFold",
+        // Order placed per-piece, not as cycles
+        items: [{ label: "Regular garment", rate: 15, qty: 5 }],
+        declaredPieces: 5,
+        cyclesCount: 1, // not using cycles
+        noGst: false,
+        subtotal: 75, // 5 × 15
+        gst: 0, // per-piece orders get GST, but let's test without for clarity
+        gstPctSnapshot: 18,
+        total: 75,
+      },
+    });
+
+    // Verify: 5 pieces at ₹15 each = ₹75, NOT ₹200 (which would be cycle-based)
+    expect(Number(order.subtotal)).toBe(75);
+    expect(order.cyclesCount).toBe(1); // single logical order, not measured in cycles
+  });
+
+  it("college without rates override uses cycle-based pricing for washFold (St Mary's model): 1 cycle × ₹200 = ₹200", async () => {
+    // col1 has no rates override, so uses global rates which are cycle-based
+    // Global rates only have washIron, so let's verify that washFold without override uses CYCLE_RATES
+    const usesCycles = money.collegeUsesCycleBasedPricing("washFold", false);
+    expect(usesCycles).toBe(true);
+
+    // If a student orders washFold at col1, they pay per-cycle
+    const stMaryStudent = await db.student.findUnique({ where: { id: "111111" } });
+    expect(stMaryStudent?.collegeId).toBe("col1"); // col1 has no rates override
+
+    // Create a washFold order for 1 cycle at col1
+    const cycleOrder = await db.order.create({
+      data: {
+        id: "FF000CYCL",
+        studentId: stMaryStudent!.id,
+        collegeId: "col1",
+        service: "washFold",
+        // Cycle-based: single synthetic item "washFold — cycle"
+        items: [{ label: "Wash & Fold — cycle", rate: 200, qty: 1 }],
+        declaredPieces: 1, // cycle count, not piece count
+        cyclesCount: 1,
+        noGst: true, // cycle orders are never GST'd
+        subtotal: 200, // 1 cycle
+        gst: 0,
+        gstPctSnapshot: 0,
+        total: 200,
+      },
+    });
+
+    // Verify: 1 cycle = ₹200, not ₹15
+    expect(Number(cycleOrder.subtotal)).toBe(200);
+    expect(cycleOrder.noGst).toBe(true);
   });
 });

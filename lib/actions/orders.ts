@@ -7,7 +7,7 @@ import { featureOn, serviceOn } from "../features";
 import { enqueueSheetEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import type { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff, requireStaffPerm } from "../auth";
-import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, expressFlatFee, isCycleService } from "../money";
+import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, expressFlatFee, collegeExpressFee, isCycleService, collegeUsesCycleBasedPricing, resolveCollegeRates } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit } from "../notify";
@@ -17,7 +17,7 @@ const rid = (n: number) => { let s = ""; for (let i = 0; i < n; i++) s += Math.f
 const orderCode = () => "FF" + rid(6);
 
 type Rates = Record<string, { label: string; items: [string, number][] }>;
-async function getConfig() {
+async function getConfig(collegeId?: string) {
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   // gstEnabled: owner can turn GST billing off entirely (not mandatory for
   // unregistered businesses). Default ON for backwards compatibility.
@@ -27,7 +27,21 @@ async function getConfig() {
   // scanning UI on the staff order screen only renders when tags exist, so
   // turning this back on is the only step needed.
   const garmentTagsEnabled = (cfg.settings as Record<string, unknown>)?.garmentTagsEnabled === true;
-  return { ...cfg, rates: cfg.rates as unknown as Rates, gstPct: Number(cfg.gstPct), gstEnabled, garmentTagsEnabled };
+
+  // Resolve rates: college override merged per-service over the global default.
+  let rates = cfg.rates as unknown as Rates;
+  let collegeHasRatesOverride = false;
+  let collegeExpressOverride: Record<string, number> | null = null;
+  if (collegeId) {
+    const college = await db.college.findUnique({ where: { id: collegeId }, select: { rates: true, expressRates: true } });
+    if (college?.rates) {
+      rates = resolveCollegeRates(cfg.rates as unknown as Rates, college.rates as unknown as Rates);
+      collegeHasRatesOverride = true;
+    }
+    if (college?.expressRates) collegeExpressOverride = college.expressRates as unknown as Record<string, number>;
+  }
+
+  return { ...cfg, rates, gstPct: Number(cfg.gstPct), gstEnabled, garmentTagsEnabled, collegeHasRatesOverride, collegeExpressOverride };
 }
 
 function bcast(o: { id: string; collegeId: string; studentId: string }, type = "order.updated") {
@@ -48,15 +62,16 @@ function cycleItems(service: string, label: string, cycles: number) {
 
 export async function placeOrder(input: { service: string; items: { label: string; qty: number }[]; cycles?: number; express: boolean; dropSlotAt?: string }) {
   const stu = await requireStudent();
-  const cfg = await getConfig();
+  const cfg = await getConfig(stu.collegeId);
   const rate = cfg.rates[input.service];
   if (!rate) return { ok: false as const, error: "Unknown service" };
   if (!serviceOn(stu.college.features, input.service)) {
     return { ok: false as const, error: "This service is not available at your campus" };
   }
 
-  const cyclesCount = isCycleService(input.service) ? Math.min(10, Math.max(1, Math.floor(input.cycles ?? 1))) : 1;
-  const items = isCycleService(input.service)
+  const usesCycles = collegeUsesCycleBasedPricing(input.service, cfg.collegeHasRatesOverride);
+  const cyclesCount = usesCycles ? Math.min(10, Math.max(1, Math.floor(input.cycles ?? 1))) : 1;
+  const items = usesCycles
     ? cycleItems(input.service, rate.label, cyclesCount)
     : input.items
         .filter((i) => i.qty > 0)
@@ -65,7 +80,7 @@ export async function placeOrder(input: { service: string; items: { label: strin
           if (!found) throw new Error("Unknown item " + i.label);
           return { label: found[0], rate: found[1], qty: Math.min(99, Math.floor(i.qty)) };
         });
-  if (!items.length) return { ok: false as const, error: isCycleService(input.service) ? "Pick at least one cycle" : "Add at least one piece" };
+  if (!items.length) return { ok: false as const, error: usesCycles ? "Pick at least one cycle" : "Add at least one piece" };
 
   // Drop-off slot is optional; when given, re-validate server-side (existence,
   // still in the future, and capacity) — never trust the client's pick.
@@ -85,16 +100,16 @@ export async function placeOrder(input: { service: string; items: { label: strin
      turned on by an absent flag rather than a deliberate one. */
   const express = input.express && featureOn(stu.college.features, "express");
   // Flat same-day fee for every service (owner, Sep 2026) — no percentage anywhere.
-  const surcharge = express ? expressFlatFee(input.service) : 0;
-  // Rs 200/250 per cycle is the FINAL price (owner): cycle orders never add GST.
-  const gst = !isCycleService(input.service) && cfg.gstEnabled ? Math.round((sub + surcharge) * (cfg.gstPct / 100)) : 0;
+  const surcharge = express ? collegeExpressFee(input.service, cfg.collegeExpressOverride) : 0;
+  // Cycle-based orders never add GST; per-piece orders add GST if enabled.
+  const gst = !usesCycles && cfg.gstEnabled ? Math.round((sub + surcharge) * (cfg.gstPct / 100)) : 0;
   const total = sub + surcharge + gst;
 
   const o = await db.order.create({
     data: {
       id: orderCode(), studentId: stu.id, collegeId: stu.collegeId, service: input.service,
       items, declaredPieces: items.reduce((s, i) => s + i.qty, 0),
-      cyclesCount, noGst: isCycleService(input.service),
+      cyclesCount, noGst: usesCycles,
       express, surcharge, status: "draft",
       dropSlotAt, dropSlotEndAt,
       subtotal: sub, gst, gstPctSnapshot: cfg.gstEnabled ? cfg.gstPct : 0, total,
@@ -112,7 +127,10 @@ export async function placeOrder(input: { service: string; items: { label: strin
 /* ---------- Staff: verify & accept (receive) ---------- */
 export async function acceptOrder(orderId: string, input: { weightKg: number | null; useCycle: boolean; noGst?: boolean; waiveExcess?: boolean; cycles?: number; items?: { label: string; qty: number }[]; intakePhotos?: string[] }) {
   const st = await requireStaff(1);
-  const cfg = await getConfig();
+
+  // Fetch the order first to get collegeId so we can get the right config
+  const draftOrder = await db.order.findUniqueOrThrow({ where: { id: orderId }, select: { collegeId: true } });
+  const cfg = await getConfig(draftOrder.collegeId);
 
   let result;
   try {
@@ -120,13 +138,15 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
     const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { student: { include: { subscription: { include: { planRef: true } } } } } });
     if (o.status !== "draft") throw new Error("Order already received");
 
-    // staff may adjust quantities at the counter — for a cycle service the
-    // only adjustable quantity IS the cycle count (a 9 kg bag becomes two)
+    // staff may adjust quantities at the counter — for a per-piece service the
+    // quantities are per-item; for cycle-based services the only adjustable quantity
+    // IS the cycle count (a 9 kg bag becomes two)
     let items = o.items as unknown as { label: string; rate: number; qty: number }[];
-    const cyclesCount = isCycleService(o.service)
+    const usesCycles = collegeUsesCycleBasedPricing(o.service, cfg.collegeHasRatesOverride);
+    const cyclesCount = usesCycles
       ? Math.min(10, Math.max(1, Math.floor(input.cycles ?? o.cyclesCount ?? 1)))
       : 1;
-    if (isCycleService(o.service)) {
+    if (usesCycles) {
       items = cycleItems(o.service, cfg.rates[o.service].label, cyclesCount);
     } else if (input.items) {
       const rate = cfg.rates[o.service];
@@ -137,13 +157,13 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       });
     }
     const declaredPieces = items.reduce((s, i) => s + i.qty, 0);
-    if (!declaredPieces) throw new Error(isCycleService(o.service) ? "Pick at least one cycle" : "Add at least one piece");
+    if (!declaredPieces) throw new Error(usesCycles ? "Pick at least one cycle" : "Add at least one piece");
 
     let usedCycle = false, excessCharge = 0, urgentCharge = 0;
     /* Weight excess applies to EVERY cycle-service order — plan-paid or
        cash-paid, 5 kg x cycles is the allowance either way. Zero for
        per-piece services, whose weight is informational. */
-    if (isCycleService(o.service)) {
+    if (usesCycles) {
       excessCharge = excessWeightCharge(input.weightKg, undefined, { waived: !!input.waiveExcess, cycles: cyclesCount });
     }
     if (input.useCycle) {
@@ -168,17 +188,17 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       await tx.cycleUse.createMany({ data: Array.from({ length: cyclesCount }, () => ({ subscriptionId: sub.id, orderId: o.id })) });
       // Urgent (same-day) on a plan-paid order: the cycle is already prepaid,
       // so only the flat same-day fee is charged, in cash, right now.
-      if (o.express) urgentCharge = expressFlatFee(o.service);
+      if (o.express) urgentCharge = collegeExpressFee(o.service, cfg.collegeExpressOverride);
     }
 
     // recomputeOrder() — exact prototype math (+ optional no-GST billing).
     // GST is skipped when staff chose 'Bill without GST' OR GST billing is
-    // switched off app-wide in Admin.
+    // switched off app-wide in Admin, or the service is cycle-based.
     const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
     // Flat fee for everyone, every service — plan-paid or cash-paid alike.
-    const surcharge = o.express ? expressFlatFee(o.service) : 0;
-    // Cycle rates are FINAL (owner): Rs 200 means Rs 200, so GST never applies.
-    const noGst = !usedCycle && (isCycleService(o.service) || !!input.noGst || !cfg.gstEnabled);
+    const surcharge = o.express ? collegeExpressFee(o.service, cfg.collegeExpressOverride) : 0;
+    // Cycle-based orders are FINAL (owner): Rs 200 means Rs 200, so GST never applies.
+    const noGst = !usedCycle && (usesCycles || !!input.noGst || !cfg.gstEnabled);
     const { gst, total } = computeBill(sub, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });
 
     // per-garment QR tags — one per piece. Parked feature, off by default.
@@ -246,7 +266,6 @@ export async function walkInOrder(
   input: { service: string; items: { label: string; qty: number }[]; cycles?: number; weightKg: number | null; useCycle: boolean; noGst?: boolean; waiveExcess?: boolean; express?: boolean; idemKey?: string | null },
 ) {
   const st = await requireStaff(1);
-  const cfg = await getConfig();
 
   /* An offline intake carries a key from the device that captured it. If that
      key is already on an order, this is a REPLAY — the previous attempt
@@ -260,11 +279,16 @@ export async function walkInOrder(
 
   const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: { include: { planRef: true } }, college: true } });
   if (!stu) return { ok: false as const, error: "Student not found" };
+
+  // Fetch config with college context to get correct rates and pricing model
+  const cfg = await getConfig(stu.collegeId);
+
   const rate = cfg.rates[input.service];
   if (!rate) return { ok: false as const, error: "Unknown service" };
 
-  const cyclesCount = isCycleService(input.service) ? Math.min(10, Math.max(1, Math.floor(input.cycles ?? 1))) : 1;
-  const items = isCycleService(input.service)
+  const usesCycles = collegeUsesCycleBasedPricing(input.service, cfg.collegeHasRatesOverride);
+  const cyclesCount = usesCycles ? Math.min(10, Math.max(1, Math.floor(input.cycles ?? 1))) : 1;
+  const items = usesCycles
     ? cycleItems(input.service, rate.label, cyclesCount)
     : input.items
         .filter((i) => i.qty > 0)
@@ -273,14 +297,14 @@ export async function walkInOrder(
           if (!found) throw new Error("Unknown item " + i.label);
           return { label: found[0], rate: found[1], qty: Math.min(99, Math.floor(i.qty)) };
         });
-  if (!items.length) return { ok: false as const, error: isCycleService(input.service) ? "Pick at least one cycle" : "Add at least one piece" };
+  if (!items.length) return { ok: false as const, error: usesCycles ? "Pick at least one cycle" : "Add at least one piece" };
 
   let result;
   try {
     result = await db.$transaction(async (tx) => {
       // optional plan-cycle burn (same rules as acceptOrder)
       let usedCycle = false, excessCharge = 0, urgentCharge = 0;
-      if (isCycleService(input.service)) {
+      if (usesCycles) {
         // 5 kg x cycles allowance, plan-paid or cash-paid alike
         excessCharge = excessWeightCharge(input.weightKg, undefined, { waived: !!input.waiveExcess, cycles: cyclesCount });
       }
@@ -301,13 +325,13 @@ export async function walkInOrder(
         }
         usedCycle = true;
         // Urgent (same-day) on a plan-paid order: flat same-day fee, in cash.
-        if (input.express) urgentCharge = expressFlatFee(input.service);
+        if (input.express) urgentCharge = collegeExpressFee(input.service, cfg.collegeExpressOverride);
       }
 
       const sub2 = items.reduce((s, i) => s + i.rate * i.qty, 0);
-      const surcharge = input.express ? expressFlatFee(input.service) : 0;
-      // Cycle rates are FINAL (owner): Rs 200 means Rs 200, so GST never applies.
-      const noGst = !usedCycle && (isCycleService(input.service) || !!input.noGst || !cfg.gstEnabled);
+      const surcharge = input.express ? collegeExpressFee(input.service, cfg.collegeExpressOverride) : 0;
+      // Cycle-based orders are FINAL (owner): Rs 200 means Rs 200, so GST never applies.
+      const noGst = !usedCycle && (usesCycles || !!input.noGst || !cfg.gstEnabled);
       const { gst, total } = computeBill(sub2, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });
       const declaredPieces = items.reduce((s, i) => s + i.qty, 0);
       const id = orderCode();

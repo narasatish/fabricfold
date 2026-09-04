@@ -31,16 +31,23 @@ export async function searchStudents(query: string) {
   const or: Array<Record<string, unknown>> = [
     { id: { contains: q } },
     { name: { contains: q, mode: "insensitive" } },
+    // The customer ID staff actually see and type is the BAG CODE (e.g.
+    // G1424), not the internal cuid — searching only `id` meant typing the
+    // printed code found nothing.
+    { bags: { some: { code: { contains: q, mode: "insensitive" } } } },
   ];
   if (digits.length >= 2) or.push({ phone: { contains: digits } });
 
   const students = await db.student.findMany({
     where: { OR: or },
-    select: { id: true, name: true, phone: true },
+    select: { id: true, name: true, phone: true, bags: { where: { status: "active" }, select: { code: true }, take: 1 } },
     orderBy: { name: "asc" },
     take: 20,
   });
-  return { ok: true as const, students };
+  return {
+    ok: true as const,
+    students: students.map((s) => ({ id: s.id, displayId: s.bags[0]?.code ?? s.id, name: s.name, phone: s.phone })),
+  };
 }
 
 const rid = () => String(Math.floor(100000 + Math.random() * 900000));

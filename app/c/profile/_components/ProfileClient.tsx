@@ -31,12 +31,17 @@ export default function ProfileClient({ studentName, hasPasscode }: { studentNam
   const savePasscode = async () => {
     if (pcNew !== pcConfirm) return toast("The two passcodes don't match", true);
     setPcBusy(true);
-    const r = hasPasscode ? await changePasscode(pcCurrent, pcNew) : await setPasscode(pcNew);
-    setPcBusy(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(hasPasscode ? "Passcode changed" : "Passcode created — you can now sign in with it");
-    closePasscode();
-    router.refresh();
+    try {
+      const r = hasPasscode ? await changePasscode(pcCurrent, pcNew) : await setPasscode(pcNew);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(hasPasscode ? "Passcode changed" : "Passcode created — you can now sign in with it");
+      closePasscode();
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setPcBusy(false);
+    }
   };
   const [dark, setDark] = useState(false);
   useEffect(() => {
@@ -45,15 +50,20 @@ export default function ProfileClient({ studentName, hasPasscode }: { studentNam
 
   const handleSaveName = async () => {
     setLoading(true);
-    const r = await updateName(editName);
-    setLoading(false);
-    if (!r.ok) {
-      toast(r.error || "Failed", true);
-      return;
+    try {
+      const r = await updateName(editName);
+      if (!r.ok) {
+        toast(r.error || "Failed", true);
+        return;
+      }
+      setShowEditName(false);
+      toast("Name updated");
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setLoading(false);
     }
-    setShowEditName(false);
-    toast("Name updated");
-    router.refresh();
   };
 
   const handleDark = () => {
@@ -63,8 +73,15 @@ export default function ProfileClient({ studentName, hasPasscode }: { studentNam
 
   const handleLogout = async () => {
     setLoading(true);
-    await logout();
-    router.push("/login");
+    try {
+      await logout();
+    } catch {
+      // The cookie may already be half-cleared server-side even if this
+      // throws — leaving the user stuck on a "logged in" screen that no
+      // longer has a valid session is worse than sending them to /login.
+    } finally {
+      router.push("/login");
+    }
   };
 
   return (

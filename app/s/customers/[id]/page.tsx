@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import StaffCustomerClient from "./_components/CustomerClient";
+import { resolveCollegeRates, type RateTable } from "@/lib/money";
 
 export default async function StaffCustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -24,6 +25,13 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
   });
   if (!student) notFound();
 
+  /* The bag code (B1001/S1055/G1002...) is the CUSTOMER-FACING ID — printed
+     on the physical bag, quoted at the counter. student.id is an internal
+     random 6-digit row key nobody outside the database should ever see; the
+     header was showing that instead, which is exactly what looked wrong. */
+  const activeBag = student.bags.find((b) => b.status === "active");
+  const displayId = activeBag?.code ?? student.id;
+
   /* Campuses a student may be moved to, plus each one's closed day so the
      edit sheet can grey out a wash day the campus does not operate. */
   const colleges = await db.college.findMany({
@@ -33,6 +41,13 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
   });
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const gstOn = (cfg.settings as Record<string, unknown>)?.gstEnabled !== false;
+  /* Staff placing a walk-in order for THIS student must see THEIR college's
+     rates, not the global default — otherwise a BVRIT walk-in shows St
+     Mary's-style pricing on screen while the actual charge (computed
+     server-side in walkInOrder, already college-aware) differs, which reads
+     as the total being wrong even though it isn't. */
+  const collegeRatesRow = await db.college.findUnique({ where: { id: student.collegeId }, select: { rates: true, expressRates: true } });
+  const effectiveRates = resolveCollegeRates(cfg.rates as unknown as RateTable, collegeRatesRow?.rates as unknown as RateTable | null);
   const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFold: "Wash & Fold", ironOnly: "Iron Only", dryClean: "Dry Clean" };
   const collegePlans = (await db.plan.findMany({ where: { collegeId: student.collegeId, active: true }, orderBy: { price: "asc" } })).map((p) => {
     const price = Number(p.price);
@@ -64,6 +79,7 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
           kgPerCycle: N(student.subscription.kgPerCycle),
           expiresAt: student.subscription.expiresAt ? student.subscription.expiresAt.getTime() : null,
           cycleLog: student.subscription.cycleLog.map((c) => ({ at: c.at.getTime(), orderId: c.orderId })),
+          buckets: ((student.subscription.buckets as unknown as { service: string; cycles: number; used: number; kgPerCycle: number }[] | null) ?? []).map((b) => ({ ...b, label: SERVICE_LABEL[b.service] || b.service })),
         }
       : null,
     orders: student.orders.map((o) => ({ id: o.id, status: o.status, service: o.service, total: N(o.total), createdAt: o.createdAt.getTime() })),
@@ -74,13 +90,15 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
 
   return (
     <div className="screen">
-      <TopBar title={student.name} sub={`ID ${student.id}`} back="/s" />
+      <TopBar title={student.name} sub={`ID ${displayId}`} back="/s" />
       <StaffCustomerClient
         colleges={colleges}
         student={plain}
         staffRole={staff.role}
         plans={collegePlans}
-        rates={cfg.rates as Record<string, { label: string; items: [string, number][] }>}
+        rates={effectiveRates}
+        collegeHasRatesOverride={!!collegeRatesRow?.rates}
+        collegeExpressOverride={collegeRatesRow?.expressRates as Record<string, number> | null}
         gstEnabled={gstOn}
       />
     </div>

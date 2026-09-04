@@ -1,6 +1,7 @@
 "use server";
 /* Admin: rates & GST, plan, payment details, colleges + feature flags, staff,
    expenses (Manager+), payroll (Admin+). All sensitive edits audit-logged. */
+import { Prisma } from "../generated/prisma/client";
 import { db } from "../db";
 import { FEATURE_DEFAULTS, featureOn, type FeatureKey } from "../features";
 import { requireStaff } from "../auth";
@@ -167,6 +168,21 @@ export async function saveRates(rates: Record<string, { label: string; items: [s
   const settings = { ...(cfg.settings as Record<string, unknown>), ...(gstEnabled === undefined ? {} : { gstEnabled }) };
   await db.appConfig.update({ where: { id: "main" }, data: { rates: rates as object, gstPct, settings } });
   await audit("Rates updated", `GST ${gstPct}%${gstEnabled === false ? " (GST billing OFF)" : ""}`, st.id);
+  return { ok: true as const };
+}
+
+/** Save per-college rate override (Admin+). Pass null rates to clear the override. */
+export async function saveCollegeRates(collegeId: string, rates: Record<string, { label: string; items: [string, number][] }> | null) {
+  const st = await requireStaff(3);
+  const college = await db.college.findUniqueOrThrow({ where: { id: collegeId } });
+  // For nullable Json fields, Prisma.JsonNull is used to clear; undefined to skip
+  await db.college.update({
+    where: { id: collegeId },
+    data: {
+      rates: rates !== null ? (rates as object) : Prisma.JsonNull,
+    },
+  });
+  await audit("College rates override", `${college.name}${rates ? " · set per-college rates" : " · cleared override"}`, st.id);
   return { ok: true as const };
 }
 

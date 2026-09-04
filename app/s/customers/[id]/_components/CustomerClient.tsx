@@ -5,11 +5,11 @@ import { Svg } from "@/components/icons";
 import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, loyaltyBadge } from "@/lib/format";
 import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
-import { assignSubscription, upgradeSubscription, cancelSubscription } from "@/lib/actions/subscription";
+import { assignSubscription, upgradeSubscription, cancelSubscription, adjustCycleUsage } from "@/lib/actions/subscription";
 import { issueBag, retireBag, releaseBagCode, setBagCode, reissueBagSameCode } from "@/lib/actions/bags";
 import { walkInOrder } from "@/lib/actions/orders";
 import { sellCyclePack } from "@/lib/actions/subscription";
-import { CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService, expressFlatFee } from "@/lib/money";
+import { CYCLE_RATES, CYCLE_KG_LIMIT, collegeUsesCycleBasedPricing, collegeExpressFee } from "@/lib/money";
 import { enqueueIntake, newIdemKey } from "@/lib/offline-queue";
 import { topUpCredits } from "@/lib/actions/ops";
 import { updateStudentPhone, updateStudentDetails } from "@/lib/actions/admin";
@@ -26,6 +26,7 @@ type Student = {
   subscription: {
     active: boolean; plan: string; cyclesTotal: number; cyclesUsed: number; kgPerCycle: number;
     expiresAt: number | null; cycleLog: { at: number; orderId: string }[];
+    buckets: { service: string; label: string; cycles: number; used: number; kgPerCycle: number }[];
   } | null;
   bags: { id: string; code: string; tier: string | null; complimentary: boolean; price: number; status: string; issuedAt: number }[];
   orders: { id: string; status: string; service: string; total: number; createdAt: number }[];
@@ -39,7 +40,7 @@ type CollegePlan = { id: string; name: string; tier: string | null; price: numbe
 
 type Rates = Record<string, { label: string; items: [string, number][] }>;
 
-export default function StaffCustomerClient({ student, staffRole, plans, rates, gstEnabled, colleges }: { student: Student; staffRole: number; plans: CollegePlan[]; rates: Rates; gstEnabled: boolean; colleges: { id: string; name: string; closedWeekday: number | null }[] }) {
+export default function StaffCustomerClient({ student, staffRole, plans, rates, collegeHasRatesOverride, collegeExpressOverride, gstEnabled, colleges }: { student: Student; staffRole: number; plans: CollegePlan[]; rates: Rates; collegeHasRatesOverride: boolean; collegeExpressOverride: Record<string, number> | null; gstEnabled: boolean; colleges: { id: string; name: string; closedWeekday: number | null }[] }) {
   const router = useRouter();
   const toast = useToast();
   const tier = loyaltyBadge(student.lifetimePieces);
@@ -53,15 +54,20 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
 
   const doSaveDetails = async () => {
     setDetailsBusy(true);
-    const r = await updateStudentDetails(student.id, {
-      name: details.name,
-      collegeId: details.collegeId || undefined,
-    });
-    setDetailsBusy(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(r.changed ? "Details updated" : "Nothing changed");
-    setShowDetails(false);
-    router.refresh();
+    try {
+      const r = await updateStudentDetails(student.id, {
+        name: details.name,
+        collegeId: details.collegeId || undefined,
+      });
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(r.changed ? "Details updated" : "Nothing changed");
+      setShowDetails(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setDetailsBusy(false);
+    }
   };
   const [newPhone, setNewPhone] = useState(student.phone);
   const [phoneLoading, setPhoneLoading] = useState(false);
@@ -91,10 +97,21 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
   const [wiExpress, setWiExpress] = useState(false);
   const [wiLoading, setWiLoading] = useState(false);
   const wiItems = rates[wiService]?.items || [];
+  // College-aware: a college with its own rates override (e.g. BVRIT) never
+  // sells washFold/washIron by the cycle — always itemized, like the
+  // customer order screen. Mirrors OrderNewClient.tsx's cycleBased logic.
+  const wiCycleBased = collegeUsesCycleBasedPricing(wiService, collegeHasRatesOverride);
   const wiSubtotal = wiItems.reduce((s, [label, price]) => s + price * (wiQty[label] || 0), 0);
   const wiPieces = wiItems.reduce((s, [label]) => s + (wiQty[label] || 0), 0);
-  const wiGst = wiUseCycle || wiNoGst || !gstEnabled ? 0 : Math.round((wiSubtotal + (wiExpress ? Math.round(wiSubtotal * 0.4) : 0)) * 0.18);
-  const wiExpressSurcharge = wiExpress && !wiUseCycle ? Math.round(wiSubtotal * 0.4) : 0;
+  /* Bug fixed here: this quoted 40% of subtotal — the OLD express model,
+     removed everywhere else in Sep 2026 in favor of a flat same-day fee. The
+     staff-facing preview never got updated, so it was quoting a wrong number
+     (and now, with per-college flat fees like BVRIT's ₹80/₹120, a very
+     wrong one) even though the actual charge submitted to the server was
+     always correct. Same function that bills it, per this codebase's own
+     rule for these previews. */
+  const wiExpressSurcharge = wiExpress && !wiUseCycle ? collegeExpressFee(wiService, collegeExpressOverride) : 0;
+  const wiGst = wiUseCycle || wiNoGst || !gstEnabled ? 0 : Math.round((wiSubtotal + wiExpressSurcharge) * 0.18);
   const subHasCycles = !!student.subscription?.active;
 
   // Bags — first is complimentary, replacements are sold at the counter
@@ -118,13 +135,18 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
 
   const doIssueBag = async () => {
     setBagBusy(true);
-    const r = await issueBag(student.id, { price: bagIsFree ? 0 : bagPrice, method: bagMethod });
-    setBagBusy(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(`Bag ${r.code} issued${r.complimentary ? " — complimentary" : ` · ₹${r.price}`}`);
-    setShowBag(false);
-    setBagPrice(0);
-    router.refresh();
+    try {
+      const r = await issueBag(student.id, { price: bagIsFree ? 0 : bagPrice, method: bagMethod });
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(`Bag ${r.code} issued${r.complimentary ? " — complimentary" : ` · ₹${r.price}`}`);
+      setShowBag(false);
+      setBagPrice(0);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setBagBusy(false);
+    }
   };
 
   /* A lost bag does not change who the student is. They get a fresh bag with
@@ -140,17 +162,25 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
 ` +
       `If the old bag turns up later it will also say ${code}. Destroy it; do not put it back into stock.`,
     )) return;
-    const r = await reissueBagSameCode(bagId, "lost");
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(`${r.code} reissued — same ID, new bag`);
-    router.refresh();
+    try {
+      const r = await reissueBagSameCode(bagId, "lost");
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(`${r.code} reissued — same ID, new bag`);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    }
   };
 
   const doRetireBag = async (bagId: string, status: "lost" | "replaced") => {
-    const r = await retireBag(bagId, status);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(`Bag marked ${status}`);
-    router.refresh();
+    try {
+      const r = await retireBag(bagId, status);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(`Bag marked ${status}`);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    }
   };
 
   /* Change the printed number a student carries.
@@ -168,10 +198,14 @@ Currently ${current}. Type the code printed on the bag they are being given.
       current,
     );
     if (!next || next.trim().toUpperCase() === current) return;
-    const r = await setBagCode(bagId, next);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(r.changed ? `Customer ID is now ${r.code}` : "Unchanged");
-    router.refresh();
+    try {
+      const r = await setBagCode(bagId, next);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(r.changed ? `Customer ID is now ${r.code}` : "Unchanged");
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    }
   };
 
   /* Release the customer ID back to the pool — the student has left the campus.
@@ -185,10 +219,14 @@ Currently ${current}. Type the code printed on the bag they are being given.
       `Their past orders keep this code — only future issuing is affected.\n\n` +
       `For a bag that was lost or swapped on a plan change, use Lost or Replaced instead: those keep the code reserved.`,
     )) return;
-    const r = await releaseBagCode(bagId);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(`${r.code} released — free for a new student`);
-    router.refresh();
+    try {
+      const r = await releaseBagCode(bagId);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(`${r.code} released — free for a new student`);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    }
   };
 
   // Change plan mid-term — pay only the difference, keep cycles already used
@@ -203,12 +241,17 @@ Currently ${current}. Type the code printed on the bag they are being given.
   const doUpgrade = async () => {
     if (!upgradePlan) return;
     setUpgradeBusy(true);
-    const r = await upgradeSubscription(student.id, upgradePlan.id, upgradeMethod);
-    setUpgradeBusy(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(`Moved to ${upgradePlan.name} — collected ${fmt(r.difference)}${r.tierChanged ? ". Issue a new bag for the new tier." : ""}`);
-    setShowUpgrade(false);
-    router.refresh();
+    try {
+      const r = await upgradeSubscription(student.id, upgradePlan.id, upgradeMethod);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(`Moved to ${upgradePlan.name} — collected ${fmt(r.difference)}${r.tierChanged ? ". Issue a new bag for the new tier." : ""}`);
+      setShowUpgrade(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setUpgradeBusy(false);
+    }
   };
 
   // Cancel a plan (Admin+). The reason is mandatory and shown to the student.
@@ -219,15 +262,48 @@ Currently ${current}. Type the code printed on the bag they are being given.
     ? Math.max(0, student.subscription.cyclesTotal - student.subscription.cyclesUsed)
     : 0;
 
+  // Correct cycle usage per bucket (Admin+) — e.g. fixing a bulk-import count.
+  const [showCycleEdit, setShowCycleEdit] = useState(false);
+  const [cycleEdits, setCycleEdits] = useState<Record<string, number>>({});
+  const [cycleEditBusy, setCycleEditBusy] = useState(false);
+  const openCycleEdit = () => {
+    const init: Record<string, number> = {};
+    (student.subscription?.buckets ?? []).forEach((b) => { init[b.service] = b.used; });
+    setCycleEdits(init);
+    setShowCycleEdit(true);
+  };
+  const doAdjustCycles = async () => {
+    setCycleEditBusy(true);
+    try {
+      const updates = Object.entries(cycleEdits).map(([service, used]) => ({ service, used }));
+      const r = await adjustCycleUsage(student.id, updates);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(r.changed ? "Cycle usage corrected" : "Nothing changed");
+      setShowCycleEdit(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setCycleEditBusy(false);
+    }
+  };
+
+  // Forfeits any unused cycles — irreversible, same guard as reissue/release above.
   const doCancel = async () => {
+    if (!confirm(`Cancel ${student.name}'s plan?\n\n${cyclesLeft > 0 ? `${cyclesLeft} unused cycle(s) will be forfeited. ` : ""}This cannot be undone from here — they'd need a fresh plan assigned.`)) return;
     setCancelBusy(true);
-    const r = await cancelSubscription(student.id, cancelReason);
-    setCancelBusy(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(`Plan cancelled${r.cyclesForfeited ? ` — ${r.cyclesForfeited} cycle(s) forfeited` : ""}`);
-    setShowCancel(false);
-    setCancelReason("");
-    router.refresh();
+    try {
+      const r = await cancelSubscription(student.id, cancelReason);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(`Plan cancelled${r.cyclesForfeited ? ` — ${r.cyclesForfeited} cycle(s) forfeited` : ""}`);
+      setShowCancel(false);
+      setCancelReason("");
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setCancelBusy(false);
+    }
   };
 
   // Wallet top-up (money physically received first)
@@ -237,13 +313,18 @@ Currently ${current}. Type the code printed on the bag they are being given.
   const [tuLoading, setTuLoading] = useState(false);
   const doTopUp = async () => {
     setTuLoading(true);
-    const r = await topUpCredits(student.id, tuAmount, tuMethod);
-    setTuLoading(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(`₹${tuAmount} added to wallet`);
-    setShowTopUp(false);
-    setTuAmount(0);
-    router.refresh();
+    try {
+      const r = await topUpCredits(student.id, tuAmount, tuMethod);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(`₹${tuAmount} added to wallet`);
+      setShowTopUp(false);
+      setTuAmount(0);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setTuLoading(false);
+    }
   };
 
   const packCreditCover = Math.min(student.credits, packCycles * CYCLE_RATES[packSvc]);
@@ -252,11 +333,16 @@ Currently ${current}. Type the code printed on the bag they are being given.
     const cash = price - (packApplyCredits ? packCreditCover : 0);
     if (!confirm(`Sell ${packCycles} ${packSvc === "washFold" ? "Wash & Fold" : "Wash & Iron"} cycles for ₹${price}${packApplyCredits && packCreditCover > 0 ? ` (₹${packCreditCover} credit + ₹${cash} ${packMethod})` : ` (${packMethod})`}?`)) return;
     setPackBusy(true);
-    const r = await sellCyclePack(student.id, { service: packSvc, cycles: packCycles, method: packMethod, applyCredits: packApplyCredits });
-    setPackBusy(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(`${r.cycles} cycles added — ₹${r.price} recorded`);
-    router.refresh();
+    try {
+      const r = await sellCyclePack(student.id, { service: packSvc, cycles: packCycles, method: packMethod, applyCredits: packApplyCredits });
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(`${r.cycles} cycles added — ₹${r.price} recorded`);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setPackBusy(false);
+    }
   };
 
   const doWalkIn = async () => {
@@ -264,7 +350,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
       studentId: student.id,
       studentLabel: student.name,
       service: wiService,
-      cycles: isCycleService(wiService) ? wiCycles : undefined,
+      cycles: wiCycleBased ? wiCycles : undefined,
       items: wiItems.map(([label]) => ({ label, qty: wiQty[label] || 0 })).filter((i) => i.qty > 0),
       weightKg: wiWeight || null,
       useCycle: wiUseCycle,
@@ -315,32 +401,46 @@ Currently ${current}. Type the code printed on the bag they are being given.
   const doAssign = async () => {
     if (!assignPlan) return;
     setAssignLoading(true);
-    const r = await assignSubscription(student.id, assignPlan.id, assignMethod, assignApplyCredits);
-    setAssignLoading(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast("Plan activated");
-    setShowAssign(false);
-    router.refresh();
+    try {
+      const r = await assignSubscription(student.id, assignPlan.id, assignMethod, assignApplyCredits);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast("Plan activated");
+      setShowAssign(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setAssignLoading(false);
+    }
   };
 
   const doComp = async () => {
-    const r = await submitCompensation({ studentId: student.id, orderId: null, kind: comp.kind, amount: comp.amount, method: comp.method, comment: comp.comment });
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast("Compensation issued");
-    setShowComp(false);
-    router.refresh();
+    try {
+      const r = await submitCompensation({ studentId: student.id, orderId: null, kind: comp.kind, amount: comp.amount, method: comp.method, comment: comp.comment });
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast("Compensation issued");
+      setShowComp(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    }
   };
 
   // Students have no self-service way to change their number — they come to
   // the counter and an Admin makes the change here.
   const doPhoneChange = async () => {
     setPhoneLoading(true);
-    const r = await updateStudentPhone(student.id, newPhone);
-    setPhoneLoading(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast("Phone number updated");
-    setShowPhoneEdit(false);
-    router.refresh();
+    try {
+      const r = await updateStudentPhone(student.id, newPhone);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast("Phone number updated");
+      setShowPhoneEdit(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setPhoneLoading(false);
+    }
   };
 
   return (
@@ -424,10 +524,21 @@ Currently ${current}. Type the code printed on the bag they are being given.
           </div>
           <div className="kv mt8"><span className="k">Plan</span><span>{student.subscription.plan}</span></div>
           <div className="kv"><span className="k">Cycles used</span><span className="mono">{student.subscription.cyclesUsed} / {student.subscription.cyclesTotal}</span></div>
+          {student.subscription.buckets.map((b) => (
+            <div key={b.service} className="kv" style={{ paddingLeft: 12 }}>
+              <span className="k muted" style={{ fontSize: 12.5 }}>{b.label}</span>
+              <span className="mono muted" style={{ fontSize: 12.5 }}>{b.used} / {b.cycles}</span>
+            </div>
+          ))}
           <div className="row wrap gap8 mt12">
             {staffRole >= 2 && upgradeOptions.length > 0 && (
               <button className="btn xs sec" onClick={() => { setUpgradePlanId(upgradeOptions[0].id); setShowUpgrade(true); }}>
                 <Svg name="layers" size={13} /> Change plan
+              </button>
+            )}
+            {staffRole >= 3 && (
+              <button className="btn xs sec" onClick={openCycleEdit}>
+                <Svg name="edit" size={13} /> Correct cycles used
               </button>
             )}
             {staffRole >= 3 && student.subscription.active && (
@@ -631,7 +742,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
               {serviceKeys.map((k) => <option key={k} value={k}>{rates[k].label}</option>)}
             </select>
           </div>
-          {isCycleService(wiService) ? (
+          {wiCycleBased ? (
             <div className="between" style={{ padding: "7px 0" }}>
               <span style={{ fontSize: 14 }}>
                 Cycles <span className="muted" style={{ fontSize: 12 }}>₹{CYCLE_RATES[wiService]} each · {CYCLE_KG_LIMIT * wiCycles} kg allowance</span>
@@ -654,7 +765,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
               </div>
             ))
           )}
-          {isCycleService(wiService) && (
+          {wiCycleBased && (
             <div className="field mt8">
               <label>Weight (kg)</label>
               <input className="input" type="number" step="0.1" value={wiWeight || ""} onChange={(e) => setWiWeight(Number(e.target.value))} />
@@ -669,7 +780,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
               <Switch on={wiUseCycle} onToggle={() => setWiUseCycle(!wiUseCycle)} />
             </div>
           )}
-          {!wiUseCycle && gstEnabled && !isCycleService(wiService) && (
+          {!wiUseCycle && gstEnabled && !wiCycleBased && (
             <div className="chip-toggle" style={{ marginBottom: "12px" }}>
               <div>
                 <div className="h-sm">Bill without GST</div>
@@ -682,7 +793,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
             <div>
               <div className="h-sm">Urgent (same day)</div>
               <div className="muted" style={{ fontSize: "12px" }}>
-                {wiUseCycle ? `Cycle already covers the wash — only the flat ₹${expressFlatFee(wiService)} same-day fee is charged, in cash` : `Flat ₹${expressFlatFee(wiService)} — same-day turnaround`}
+                {wiUseCycle ? `Cycle already covers the wash — only the flat ₹${collegeExpressFee(wiService, collegeExpressOverride)} same-day fee is charged, in cash` : `Flat ₹${collegeExpressFee(wiService, collegeExpressOverride)} — same-day turnaround`}
               </div>
             </div>
             <Switch on={wiExpress} onToggle={() => setWiExpress(!wiExpress)} />
@@ -700,13 +811,40 @@ Currently ${current}. Type the code printed on the bag they are being given.
               gating on it left Place order permanently disabled for the two
               main services at the counter. Same bug, same fix, as the
               customer pre-book button. */}
-          <button className="btn mt16" onClick={doWalkIn} disabled={wiLoading || (!isCycleService(wiService) && wiPieces === 0)}>
+          <button className="btn mt16" onClick={doWalkIn} disabled={wiLoading || (!wiCycleBased && wiPieces === 0)}>
             <Svg name="check" size={18} /> {wiLoading ? "Creating…" : "Create & receive order"}
           </button>
         </div>
       </Sheet>
 
       {/* Cancel a plan (Admin+) */}
+      {/* Correct cycles used, per service bucket (Admin+) */}
+      <Sheet open={showCycleEdit} onClose={() => setShowCycleEdit(false)}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "6px" }}>Correct cycles used</h2>
+          <div className="muted" style={{ fontSize: "12.5px", marginBottom: "14px" }}>
+            Sets exactly how many cycles have been used, per service — for fixing an import or a
+            counter mistake, not for normal use (orders burn cycles automatically).
+          </div>
+          {(student.subscription?.buckets ?? []).map((b) => {
+            const val = cycleEdits[b.service] ?? b.used;
+            return (
+              <div key={b.service} className="field">
+                <label>{b.label} <span className="muted">(max {b.cycles})</span></label>
+                <div className="qty">
+                  <button onClick={() => setCycleEdits({ ...cycleEdits, [b.service]: Math.max(0, val - 1) })}>−</button>
+                  <span className="mono">{val}</span>
+                  <button onClick={() => setCycleEdits({ ...cycleEdits, [b.service]: Math.min(b.cycles, val + 1) })}>+</button>
+                </div>
+              </div>
+            );
+          })}
+          <button className="btn mt16" onClick={doAdjustCycles} disabled={cycleEditBusy}>
+            {cycleEditBusy ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </Sheet>
+
       <Sheet open={showCancel} onClose={() => setShowCancel(false)}>
         <div className="pad">
           <h2 style={{ marginBottom: "6px" }}>Cancel plan</h2>

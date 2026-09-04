@@ -18,6 +18,46 @@ const rid = (n: number) => { let s = ""; for (let i = 0; i < n; i++) s += Math.f
 
 type PlanBucket = { service: string; cycles: number; kgPerCycle: number };
 
+/**
+ * Manually correct how many cycles a student has used, per service bucket —
+ * e.g. fixing a wrong count after a bulk import, or a counter mistake never
+ * caught at the time. Admin+ only: this directly changes what a student is
+ * entitled to use next, the same trust level as changing their campus.
+ *
+ * `used` per service is clamped to that bucket's own `cycles` ceiling — never
+ * negative, never more than the bucket actually holds. cyclesUsed (the
+ * aggregate used elsewhere for "cycles left") is recomputed as the sum, so it
+ * can never drift from the buckets it's supposed to summarize.
+ */
+export async function adjustCycleUsage(studentId: string, updates: { service: string; used: number }[]) {
+  const st = await requireStaff(3);
+  const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: true } });
+  if (!stu) return { ok: false as const, error: "Student not found" };
+  const sub = stu.subscription;
+  if (!sub) return { ok: false as const, error: "This student has no plan" };
+
+  type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
+  const buckets = (sub.buckets as unknown as Bucket[] | null) ?? [];
+  const byService = new Map(updates.map((u) => [u.service, u.used]));
+  const changes: string[] = [];
+
+  const newBuckets = buckets.map((b) => {
+    if (!byService.has(b.service)) return b;
+    const requested = byService.get(b.service)!;
+    const clamped = Math.max(0, Math.min(b.cycles, Math.floor(requested)));
+    if (clamped !== b.used) changes.push(`${b.service} ${b.used} → ${clamped}`);
+    return { ...b, used: clamped };
+  });
+  if (!changes.length) return { ok: true as const, changed: false };
+
+  const cyclesUsed = newBuckets.reduce((s, b) => s + b.used, 0);
+  await db.subscription.update({ where: { studentId }, data: { buckets: newBuckets, cyclesUsed } });
+  await audit("Cycle usage corrected", `${stu.name} (${stu.id}) · ${changes.join("; ")}`, st.id);
+  rosterSoon();
+  publish([`student:${studentId}`], { type: "subscription", payload: { studentId } });
+  return { ok: true as const, changed: true, changes };
+}
+
 async function planGross(plan: { price: unknown; gstFree: boolean }) {
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const gstOn = (cfg.settings as Record<string, unknown>)?.gstEnabled !== false && !plan.gstFree;

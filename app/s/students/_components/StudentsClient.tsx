@@ -6,7 +6,7 @@ import { Seg, Sheet, useToast } from "@/components/chrome";
 import { fmt, initials } from "@/lib/format";
 import { bulkRegisterStudents, broadcastNotice } from "@/lib/actions/students";
 
-type Student = { id: string; name: string; phone: string; credits: number; lifetimePieces: number; collegeId: string; subActive: boolean };
+type Student = { id: string; displayId: string; name: string; phone: string; credits: number; lifetimePieces: number; collegeId: string; subActive: boolean };
 type College = { id: string; name: string; active?: boolean };
 
 export default function StudentsClient({ students, colleges, staffRole }: { students: Student[]; colleges: College[]; staffRole: number }) {
@@ -41,30 +41,40 @@ export default function StudentsClient({ students, colleges, staffRole }: { stud
       if (campus !== "all" && st.collegeId !== campus) return false;
       if (sub === "active" && !st.subActive) return false;
       if (sub === "none" && st.subActive) return false;
-      if (s && !(st.id.includes(s) || st.phone.includes(s) || st.name.toLowerCase().includes(s))) return false;
+      if (s && !(st.id.includes(s) || st.displayId.toLowerCase().includes(s) || st.phone.includes(s) || st.name.toLowerCase().includes(s))) return false;
       return true;
     });
   }, [students, q, campus, sub]);
 
   const doImport = async () => {
     setBusy(true);
-    const r = await bulkRegisterStudents(importText, importCollege);
-    setBusy(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    setImportResult({ created: r.created, skipped: r.skipped });
-    toast(`${r.created} student${r.created === 1 ? "" : "s"} added`);
-    router.refresh();
+    try {
+      const r = await bulkRegisterStudents(importText, importCollege);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      setImportResult({ created: r.created, skipped: r.skipped });
+      toast(`${r.created} student${r.created === 1 ? "" : "s"} added`);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const doCast = async () => {
     if (castText.trim().length < 3) return toast("Enter a message", true);
     setBusy(true);
-    const r = await broadcastNotice(castScope, castText);
-    setBusy(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(`Sent to ${r.sent} student${r.sent === 1 ? "" : "s"}`);
-    setShowCast(false);
-    setCastText("");
+    try {
+      const r = await broadcastNotice(castScope, castText);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(`Sent to ${r.sent} student${r.sent === 1 ? "" : "s"}`);
+      setShowCast(false);
+      setCastText("");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -117,7 +127,7 @@ export default function StudentsClient({ students, colleges, staffRole }: { stud
                 <div className="h-sm">{st.name}</div>
                 {st.subActive && <span className="pill" style={{ fontSize: "10.5px" }}>Plan</span>}
               </div>
-              <div className="muted" style={{ fontSize: "12.5px" }}>ID {st.id} · +91 {st.phone} · {colName(st.collegeId)}</div>
+              <div className="muted" style={{ fontSize: "12.5px" }}>ID {st.displayId} · +91 {st.phone} · {colName(st.collegeId)}</div>
               <div className="muted" style={{ fontSize: "12px" }}>{st.lifetimePieces} pcs · {fmt(st.credits)} credit</div>
             </div>
             <Svg name="chevR" size={18} />

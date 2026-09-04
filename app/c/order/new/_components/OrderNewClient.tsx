@@ -6,7 +6,7 @@ import { Seg, Switch } from "@/components/chrome";
 import { Svg } from "@/components/icons";
 import { fmt } from "@/lib/format";
 import { placeOrder } from "@/lib/actions/orders";
-import { expressFlatFee, CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService } from "@/lib/money";
+import { collegeExpressFee, CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService, collegeUsesCycleBasedPricing } from "@/lib/money";
 
 type EnabledService = { key: string; flag: string; label: string };
 type Slot = { startAt: string; endAt: string; dateStr: string; timeLabel: string; left: number; full: boolean };
@@ -18,6 +18,8 @@ export default function OrderNewClient({
   gstPct,
   expressEnabled,
   hasActiveSubscription,
+  collegeUsesCycles,
+  collegeExpressOverride,
   reorderItems,
   slots,
   slotDayLabels,
@@ -28,6 +30,8 @@ export default function OrderNewClient({
   gstPct: number;
   expressEnabled: boolean;
   hasActiveSubscription: boolean;
+  collegeUsesCycles: boolean;
+  collegeExpressOverride: Record<string, number> | null;
   reorderItems: { label: string; qty: number }[];
   slots: Slot[];
   slotDayLabels: Record<string, string>;
@@ -56,11 +60,13 @@ export default function OrderNewClient({
     .filter(([label]) => quantities[label] > 0)
     .map(([label, rate]) => ({ label, rate, qty: quantities[label] }));
 
-  const cycleBased = isCycleService(service);
+  // Determine if this service uses cycle-based pricing: only for services that
+  // are defined in CYCLE_RATES AND the college doesn't have per-piece override
+  const cycleBased = isCycleService(service) && collegeUsesCycles;
   const subtotal = cycleBased ? cycles * CYCLE_RATES[service] : items.reduce((s, i) => s + i.rate * i.qty, 0);
   // Flat same-day fee for every service (owner, Sep 2026) — no percentage.
-  const surcharge = express ? expressFlatFee(service) : 0;
-  // Cycle rates are FINAL — Rs 200 means Rs 200, no GST line on cycle orders.
+  const surcharge = express ? collegeExpressFee(service, collegeExpressOverride) : 0;
+  // Cycle-based orders are FINAL — Rs 200 means Rs 200, no GST line on cycle orders.
   const gst = cycleBased ? 0 : Math.round((subtotal + surcharge) * (gstPct / 100));
   const total = subtotal + surcharge + gst;
   const pieces = items.reduce((s, i) => s + i.qty, 0);
@@ -181,7 +187,7 @@ export default function OrderNewClient({
               <div>
                 <div className="h-sm">Express (same-day)</div>
                 <div className="muted" style={{ fontSize: "12px" }}>
-                  Flat {fmt(expressFlatFee(service))} — same-day turnaround
+                  Flat {fmt(collegeExpressFee(service, collegeExpressOverride))} — same-day turnaround
                 </div>
               </div>
             </div>
@@ -189,7 +195,7 @@ export default function OrderNewClient({
           </div>
           {express && hasActiveSubscription && (
             <div className="muted mt8" style={{ fontSize: "12px", padding: "0 4px" }}>
-              Using a plan cycle for this order? The cycle already covers the wash — you'd pay just the flat {fmt(expressFlatFee(service))} same-day fee in cash at pickup, not the surcharge above.
+              Using a plan cycle for this order? The cycle already covers the wash — you'd pay just the flat {fmt(collegeExpressFee(service, collegeExpressOverride))} same-day fee in cash at pickup, not the surcharge above.
             </div>
           )}
         </>

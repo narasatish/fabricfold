@@ -49,16 +49,21 @@ export default function HelpClient({ orderId }: { orderId?: string }) {
       return;
     }
     setLoading(true);
-    const r = await submitComplaint(complaintText, orderId || null, photos);
-    setLoading(false);
-    if (!r.ok) {
-      toast(r.error || "Could not submit", true);
-      return;
+    try {
+      const r = await submitComplaint(complaintText, orderId || null, photos);
+      if (!r.ok) {
+        toast(r.error || "Could not submit", true);
+        return;
+      }
+      toast("Complaint submitted");
+      setComplaintText("");
+      setPhotos([]);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Could not submit", true);
+    } finally {
+      setLoading(false);
     }
-    toast("Complaint submitted");
-    setComplaintText("");
-    setPhotos([]);
-    router.refresh();
   };
 
   return (

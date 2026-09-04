@@ -61,12 +61,17 @@ export function CloseDayButton({ expected, closed, variance }: { expected: numbe
 
   const doClose = async () => {
     setBusy(true);
-    const r = await closeDay(counted, note);
-    setBusy(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(r.variance === 0 ? "Day closed — drawer matches ✓" : `Day closed — variance ₹${r.variance}`, r.variance !== 0);
-    setOpen(false);
-    router.refresh();
+    try {
+      const r = await closeDay(counted, note);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(r.variance === 0 ? "Day closed — drawer matches ✓" : `Day closed — variance ₹${r.variance}`, r.variance !== 0);
+      setOpen(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const diff = Math.round((counted - expected) * 100) / 100;
@@ -132,6 +137,8 @@ export function ExpenseButton() {
       setEx({ category: "Supplies", amount: 0, note: "", method: "cash" });
       setFile(null);
       router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
     } finally {
       setBusy(false);
     }

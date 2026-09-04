@@ -165,6 +165,34 @@ describe("money-moving buttons can't be double-tapped, and refund/compensation c
   });
 });
 
+describe("three more unguarded server-action calls now recover from a thrown error", () => {
+  it("ReportsClient's day-close doesn't get stuck busy on failure", () => {
+    const src = read("app/s/reports/_components/ReportsClient.tsx");
+    const fn = src.slice(src.indexOf("const doClose = async"), src.indexOf("const diff = Math.round"));
+    expect(fn).toMatch(/try \{[\s\S]*catch \(e\) \{[\s\S]*finally \{\s*setBusy\(false\);/);
+  });
+  it("ReportsClient's expense logger catches, not just finally", () => {
+    const src = read("app/s/reports/_components/ReportsClient.tsx");
+    const start = src.indexOf("const save = async");
+    const fn = src.slice(start, start + 1200);
+    expect(fn).toMatch(/catch \(e\) \{\s*\n\s*toast\(e instanceof Error \? e\.message : "Failed", true\);/);
+  });
+  it("HelpClient's complaint submit doesn't get stuck busy on failure", () => {
+    const src = read("app/c/help/_components/HelpClient.tsx");
+    const fn = src.slice(src.indexOf("const handleSubmitComplaint = async"));
+    expect(fn).toMatch(/try \{[\s\S]*catch \(e\) \{[\s\S]*finally \{\s*setLoading\(false\);/);
+  });
+});
+
+describe("a staff role change forces re-login, same as deactivation does", () => {
+  it("saveStaff bumps sessionEpoch when role actually changes", () => {
+    const src = read("lib/actions/admin.ts");
+    const fn = src.slice(src.indexOf("export async function saveStaff"), src.indexOf("export async function setStaffActive"));
+    expect(fn).toMatch(/const roleChanged = priorRole !== undefined && priorRole !== input\.role/);
+    expect(fn).toMatch(/roleChanged \? \{ sessionEpoch: \{ increment: 1 \} \}/);
+  });
+});
+
 describe("adjustCycleUsage locks the subscription row before writing buckets", () => {
   it("uses SELECT ... FOR UPDATE inside a transaction, re-reading fresh", () => {
     const src = read("lib/actions/subscription.ts");

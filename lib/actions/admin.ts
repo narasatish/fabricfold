@@ -311,9 +311,10 @@ export async function saveStaff(input: { id?: string; name: string; phone: strin
   // A campus-scoped Admin can only create/edit staff ON their own campus —
   // never a global (collegeId null) account, never another campus's.
   assertSameCollege(st, input.collegeId);
+  let priorRole: number | undefined;
   if (input.id) {
-    const existing = await db.staff.findUnique({ where: { id: input.id }, select: { collegeId: true } });
-    if (existing) assertSameCollege(st, existing.collegeId);
+    const existing = await db.staff.findUnique({ where: { id: input.id }, select: { collegeId: true, role: true } });
+    if (existing) { assertSameCollege(st, existing.collegeId); priorRole = existing.role; }
   }
   /* Only known tool keys survive, and only real booleans — the override map
      reaches every permission check, so a stray key must die at the door. */
@@ -321,7 +322,19 @@ export async function saveStaff(input: { id?: string; name: string; phone: strin
     ? Object.fromEntries(Object.entries(input.perms).filter(([k, v]) => k in PERM_DEFS && typeof v === "boolean"))
     : undefined;
   if (input.id) {
-    await db.staff.update({ where: { id: input.id }, data: { name: input.name.trim(), phone, role: input.role, collegeId: input.collegeId, ...(perms !== undefined ? { perms } : {}) } });
+    // A role change should force re-login, same as deactivation does (setStaffActive)
+    // — otherwise a demoted staffer's existing session cookie still decodes with
+    // their old (higher) role baked in, even though every permission check
+    // re-derives the role from the DB and would already block them either way.
+    const roleChanged = priorRole !== undefined && priorRole !== input.role;
+    await db.staff.update({
+      where: { id: input.id },
+      data: {
+        name: input.name.trim(), phone, role: input.role, collegeId: input.collegeId,
+        ...(perms !== undefined ? { perms } : {}),
+        ...(roleChanged ? { sessionEpoch: { increment: 1 } } : {}),
+      },
+    });
     const granted = perms ? Object.entries(perms).map(([k, v]) => `${v ? "+" : "-"}${k}`).join(" ") : "";
     await audit("Staff updated", `${input.name} (role ${input.role})${granted ? ` · tools ${granted}` : ""}`, st.id);
   rosterSoon();

@@ -351,7 +351,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
           <div className="avatar" style={{ width: "56px", height: "56px", fontSize: "20px" }}>{initials(student.name)}</div>
           <div style={{ flex: 1 }}>
             <div className="h-md">{student.name}</div>
-            <div className="muted mono">ID {student.id}</div>
+            <div className="muted mono">ID {activeBag?.code ?? student.id}</div>
             <div className="row gap8" style={{ alignItems: "center" }}>
               <div className="muted" style={{ fontSize: "12px" }}>+91 {student.phone}</div>
               {staffRole >= 3 && (

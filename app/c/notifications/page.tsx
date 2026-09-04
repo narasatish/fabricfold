@@ -10,6 +10,7 @@ export default async function NotificationsPage() {
   const notifications = await db.notification.findMany({
     where: { studentId: student.id },
     orderBy: { at: "desc" },
+    take: 50, // a long-tenured student's full notification history has no reason to all render at once
   });
 
   // Mark all as read (server-side)

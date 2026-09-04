@@ -10,9 +10,21 @@ export default async function StaffComplaintsPage() {
   const staff = await db.staff.findUnique({ where: { id: s.staffId } });
   if (!staff) redirect("/login");
 
+  // Uncapped + full-relation includes here would slow down with every year of
+  // history; 300 most recent is comfortably more than a day's review needs,
+  // and selecting only the rendered fields avoids pulling entire
+  // Student/College rows (credits, passwordHash, etc.) just for a name.
+  // Scoped to the staff member's own campus — complaint text names people and
+  // incidents, exactly the kind of content that must never cross campuses.
   const complaints = await db.complaint.findMany({
-    include: { student: { include: { college: true } }, messages: { orderBy: { at: "asc" } } },
+    where: staff.collegeId ? { collegeId: staff.collegeId } : undefined,
+    select: {
+      id: true, studentId: true, orderId: true, text: true, status: true, at: true,
+      student: { select: { id: true, name: true, college: { select: { name: true } } } },
+      messages: { orderBy: { at: "asc" }, select: { id: true, from: true, text: true, at: true } },
+    },
     orderBy: { at: "desc" },
+    take: 300,
   });
 
   const plain = complaints.map((c) => ({

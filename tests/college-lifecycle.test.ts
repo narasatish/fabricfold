@@ -58,11 +58,14 @@ describe("removal is a REAL instant kill switch, not just 'no new registrations'
 });
 
 describe("the admin screen can still see it", () => {
-  it("lists ALL colleges, not just active ones", () => {
-    // filtering here is what made removal irreversible
+  it("lists ALL colleges for an Owner, not just active ones — but still scopes a campus-limited Admin to their own", () => {
+    // filtering to active-only is what made removal irreversible for an
+    // Owner; a campus-scoped Admin gets `{ id: staff.collegeId }` instead
+    // (never `{ active: true }`), which still includes their own campus
+    // even if it's the one that was deactivated.
     const page = read("app/s/admin/page.tsx");
     expect(page).not.toMatch(/db\.college\.findMany\(\{ where: \{ active: true \}/);
-    expect(page).toMatch(/db\.college\.findMany\(\{ orderBy/);
+    expect(page).toMatch(/where: staff\.collegeId \? \{ id: staff\.collegeId \} : \{\},/);
   });
 
   it("marks a removed campus and offers Restore", () => {

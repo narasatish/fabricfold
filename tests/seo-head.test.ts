@@ -23,7 +23,8 @@ const INDEXED = [
   "app/partners/page.tsx",
   "app/about/page.tsx",
   "app/contact/page.tsx",
-  "app/login/page.tsx",
+  // app/login/page.tsx deliberately excluded — noindexed, no canonical (see
+  // the dedicated test below).
   "app/privacy/page.tsx",
   "app/terms/page.tsx",
   "app/refunds/page.tsx",
@@ -81,9 +82,16 @@ describe("sitemap and canonicals agree", () => {
     // a page canonicalised but unlisted, or listed but uncanonicalised, is the
     // commonest way these two drift apart
     const sitemap = read("app/sitemap.ts");
-    const routes = ["", "how-it-works", "hostel-laundry", "partners", "about", "contact", "login", "privacy", "terms", "refunds"];
+    const routes = ["", "how-it-works", "hostel-laundry", "partners", "about", "contact", "privacy", "terms", "refunds"];
     for (const r of routes) {
       expect(sitemap, `sitemap is missing /${r}`).toMatch(new RegExp(`["'\`/]${r}["'\`]|url:.*${r}`));
     }
+  });
+  it("/login is deliberately noindexed and excluded from BOTH the sitemap and its own canonical — never one without the other", () => {
+    const sitemap = read("app/sitemap.ts");
+    expect(sitemap).not.toMatch(/["'`/]login["'`]/);
+    const login = read("app/login/page.tsx");
+    expect(login).toMatch(/robots: \{ index: false \}/);
+    expect(login).not.toMatch(/alternates:\s*\{\s*canonical/);
   });
 });

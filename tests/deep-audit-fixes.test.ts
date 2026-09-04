@@ -193,6 +193,128 @@ describe("a staff role change forces re-login, same as deactivation does", () =>
   });
 });
 
+describe("campus-boundary sweep: server-component pages that build their own queries now scope them too", () => {
+  it("customer and order detail pages redirect if the viewing staff's campus doesn't match the record's", () => {
+    const cust = read("app/s/customers/[id]/page.tsx");
+    expect(cust).toMatch(/if \(staff\.collegeId && staff\.collegeId !== student\.collegeId\) redirect\("\/s\/students"\)/);
+    const ord = read("app/s/orders/[id]/page.tsx");
+    expect(ord).toMatch(/if \(staff\.collegeId && staff\.collegeId !== order\.collegeId\) redirect\("\/s"\)/);
+  });
+
+  it("staff home dashboard scopes every one of its 6 queries to the viewing staff's own campus", () => {
+    const src = read("app/s/page.tsx");
+    expect(src).toMatch(/const scope = staff\.collegeId \? \{ collegeId: staff\.collegeId \} : \{\};/);
+    expect((src.match(/\.\.\.scope/g) || []).length).toBeGreaterThanOrEqual(3);
+    expect(src).toMatch(/active: false, \.\.\.\(staff\.collegeId \? \{ student: \{ collegeId: staff\.collegeId \} \} : \{\}\)/);
+    expect(src).toMatch(/active: true, \.\.\.\(staff\.collegeId \? \{ student: \{ collegeId: staff\.collegeId \} \} : \{\}\)/);
+  });
+
+  it("students roster page scopes the student list and the college picker", () => {
+    const src = read("app/s/students/page.tsx");
+    expect(src).toMatch(/const scope = staff\.collegeId \? \{ collegeId: staff\.collegeId \} : \{\};/);
+    expect(src).toMatch(/db\.student\.findMany\(\{\s*\n\s*where: scope,/);
+  });
+
+  it("complaints list scopes to the staff member's own campus", () => {
+    const src = read("app/s/complaints/page.tsx");
+    expect(src).toMatch(/where: staff\.collegeId \? \{ collegeId: staff\.collegeId \} : undefined,/);
+  });
+
+  it("admin page scopes staff roster, payslips, plans, attendance and slot windows for a non-Owner", () => {
+    const src = read("app/s/admin/page.tsx");
+    expect(src).toMatch(/const staffScope = staff\.collegeId \? \{ collegeId: staff\.collegeId \} : \{\};/);
+    expect(src).toMatch(/db\.staff\.findMany\(\{ where: staffScope/);
+    expect(src).toMatch(/db\.payslip\.findMany\(\{ where: staff\.collegeId \? \{ staff: staffScope \} : \{\}/);
+    expect(src).toMatch(/db\.plan\.findMany\(\{ where: staffScope/);
+    expect(src).toMatch(/db\.slotWindow\.findMany\(\{\s*\n\s*where: staffScope,/);
+  });
+
+  it("the SSE realtime stream only subscribes staff to their own campus's channel", () => {
+    const src = read("app/api/rt/route.ts");
+    expect(src).toMatch(/const staff = await db\.staff\.findUnique\(\{ where: \{ id: s\.staffId \}, select: \{ collegeId: true \} \}\)/);
+    expect(src).toMatch(/\.\.\.\(staff\?\.collegeId \? \{ id: staff\.collegeId \} : \{\}\)/);
+  });
+
+  it("reports page's analytics widgets (below the already-scoped headline report) are scoped too", () => {
+    const src = read("app/s/reports/page.tsx");
+    expect(src).toMatch(/at: \{ gte: new Date\(now - 8 \* weekMs\) \}, \.\.\.\(staff\.collegeId \? \{ collegeId: staff\.collegeId \} : \{\}\)/);
+    expect(src).toMatch(/db\.subscription\.count\(\{ where: \{ active: true, \.\.\.\(staff\.collegeId \? \{ student: \{ collegeId: staff\.collegeId \} \} : \{\}\) \} \}\)/);
+  });
+});
+
+describe("three previously-uncovered functions have their key invariants locked in", () => {
+  const orders = read("lib/actions/orders.ts");
+  const subs = read("lib/actions/subscription.ts");
+
+  it("recordPay checks the campus boundary, clamps applied credit, and refuses a GST bill on a no-GST order", () => {
+    const fn = orders.slice(orders.indexOf("export async function recordPay"), orders.indexOf("export async function recordPay") + 900);
+    expect(fn).toMatch(/assertSameCollege\(st, o\.collegeId\)/);
+    expect(fn).toMatch(/Math\.min\(Number\(o\.student\.credits\), Number\(o\.total\)\)/);
+    expect(fn).toMatch(/if \(staffInvoice && o\.noGst\) return \{ ok: false as const, error: "This order was billed without GST — no invoice can be issued" \}/);
+  });
+
+  it("scanTag checks the campus boundary and rejects a tag that doesn't belong to this order", () => {
+    const fn = orders.slice(orders.indexOf("export async function scanTag"), orders.indexOf("export async function scanTag") + 700);
+    expect(fn).toMatch(/assertSameCollege\(st, ord\.collegeId\)/);
+    expect(fn).toMatch(/if \(!tag \|\| tag\.orderId !== orderId\) return \{ ok: false as const, error: "Tag not found on this order" \}/);
+  });
+
+  it("cancelSubscriptionRequest only deletes a PENDING (not-yet-active) request, never a live plan", () => {
+    const fn = subs.slice(subs.indexOf("export async function cancelSubscriptionRequest"), subs.indexOf("export async function cancelSubscriptionRequest") + 500);
+    expect(fn).toMatch(/if \(stu\.subscription && !stu\.subscription\.active\) \{/);
+    expect(fn).toMatch(/db\.subscription\.delete\(\{ where: \{ id: stu\.subscription\.id \} \}\)/);
+  });
+});
+
+describe("high-traffic pages cap unbounded lists and avoid over-fetching full relations", () => {
+  it("staff complaints list is capped and selects only rendered fields", () => {
+    const src = read("app/s/complaints/page.tsx");
+    expect(src).toMatch(/take: 300/);
+    expect(src).toMatch(/select: \{/);
+  });
+  it("customer help and notifications history is capped", () => {
+    expect(read("app/c/help/page.tsx")).toMatch(/take: 50/);
+    expect(read("app/c/notifications/page.tsx")).toMatch(/take: 50/);
+  });
+  it("staff home's order queue selects only the student fields it renders", () => {
+    const src = read("app/s/page.tsx");
+    expect(src).toMatch(/student: \{ select: \{ id: true, name: true, phone: true, collegeId: true \} \}/);
+    expect(src).toMatch(/student: \{ select: \{ id: true, name: true, collegeId: true \} \}/);
+  });
+});
+
+describe("/login is not promoted for indexing via the sitemap", () => {
+  it("sitemap's page list no longer includes /login", () => {
+    const src = read("app/sitemap.ts");
+    expect(src).not.toMatch(/"\/login"/);
+  });
+});
+
+describe("Sheet is a real dialog: focus moves in, Escape closes it, focus returns on close", () => {
+  it("has role=dialog/aria-modal and an Escape key handler", () => {
+    const src = read("components/chrome.tsx");
+    const fn = src.slice(src.indexOf("export function Sheet"));
+    expect(fn).toMatch(/role="dialog" aria-modal="true"/);
+    expect(fn).toMatch(/e\.key === "Escape"/);
+    expect(fn).toMatch(/panelRef\.current\?\.focus\(\)/);
+    expect(fn).toMatch(/restoreFocusTo\.current\?\.focus\?\.\(\)/);
+  });
+});
+
+describe("light-theme muted/faint text colors clear WCAG AA contrast", () => {
+  it("--muted and --faint are darkened from the failing originals", () => {
+    const src = read("app/globals.css");
+    expect(src).toMatch(/--muted:#5c6b65; --faint:#6c7973;/);
+  });
+});
+
+describe("the service worker's offline navigation fallback stays inside the right app", () => {
+  it("falls back to /s or /c based on the path, not unconditionally to the marketing homepage", () => {
+    const src = read("public/sw.js");
+    expect(src).toMatch(/url\.pathname\.startsWith\("\/s"\) \? "\/s" : url\.pathname\.startsWith\("\/c"\) \? "\/c" : "\/"/);
+  });
+});
+
 describe("offline-queued cycle-based walk-ins keep their cycle count on replay", () => {
   it("QueuedIntake declares cycles, and OfflineBanner forwards it to walkInOrder", () => {
     const queueSrc = read("lib/offline-queue.ts");

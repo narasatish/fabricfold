@@ -77,6 +77,8 @@ export function TabBar({ tabs, active }: { tabs: { key: string; label: string; i
 export function Sheet({ open, onClose, children }: { open: boolean; onClose: () => void; children: ReactNode }) {
   const [render, setRender] = useState(open);
   const [show, setShow] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const restoreFocusTo = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (open) {
       setRender(true);
@@ -94,10 +96,30 @@ export function Sheet({ open, onClose, children }: { open: boolean; onClose: () 
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = prev; };
   }, [render]);
+  // Move focus into the sheet on open (a keyboard/screen-reader user must land
+  // somewhere inside it, not be left on whatever was behind it), and restore
+  // focus to what opened it on close — the standard dialog contract.
+  useEffect(() => {
+    if (render) {
+      restoreFocusTo.current = document.activeElement as HTMLElement | null;
+      panelRef.current?.focus();
+    } else {
+      restoreFocusTo.current?.focus?.();
+      restoreFocusTo.current = null;
+    }
+  }, [render]);
+  // Escape closes it, same as a backdrop click — a keyboard user has no
+  // pointer to click outside with.
+  useEffect(() => {
+    if (!render) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, [render, onClose]);
   if (!render) return null;
   return (
     <div className={`sheet-bg ${show ? "show" : ""}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="sheet">
+      <div className="sheet" ref={panelRef} role="dialog" aria-modal="true" tabIndex={-1}>
         <div className="grab" />
         {children}
       </div>

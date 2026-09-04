@@ -1,6 +1,6 @@
 /* FabricFold service worker — offline shell + Web Push. Network-first for
    navigations so deploys show up without manual refresh. */
-const CACHE = "ff-v32";
+const CACHE = "ff-v33";
 
 self.addEventListener("install", () => self.skipWaiting());
 
@@ -32,7 +32,12 @@ self.addEventListener("fetch", (e) => {
         const cached = await caches.match(req);
         if (cached) return cached;
         if (req.mode === "navigate") {
-          const idx = await caches.match("/");
+          // Fall back to THIS app's own shell, not unconditionally "/" — that's
+          // the public marketing site, not either installed app. A staff
+          // member offline under /s (or a customer under /c) hitting a cache
+          // miss must land back in their own app, not get bounced out of it.
+          const shell = url.pathname.startsWith("/s") ? "/s" : url.pathname.startsWith("/c") ? "/c" : "/";
+          const idx = (await caches.match(shell)) || (await caches.match("/"));
           if (idx) return idx;
         }
         return Response.error();

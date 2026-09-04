@@ -13,7 +13,15 @@ export async function GET() {
   let channels: string[] = [];
   if (s.mode === "customer") channels = [`student:${s.studentId}`];
   else {
-    const colleges = await db.college.findMany({ where: { active: true }, select: { id: true } });
+    // A campus-scoped staffer subscribed to every active college's channel
+    // regardless of their own — a continuous live feed of another campus's
+    // order/complaint/payment activity (ids, mostly, but real-time metadata
+    // a scoped role should never see). Owner (collegeId null) still gets all.
+    const staff = await db.staff.findUnique({ where: { id: s.staffId }, select: { collegeId: true } });
+    const colleges = await db.college.findMany({
+      where: { active: true, ...(staff?.collegeId ? { id: staff.collegeId } : {}) },
+      select: { id: true },
+    });
     channels = colleges.map((c) => `orders:${c.id}`);
   }
 

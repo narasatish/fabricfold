@@ -24,6 +24,14 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
     },
   });
   if (!student) notFound();
+  /* This page builds its own query rather than going through a server action,
+     so the assertSameCollege() safety net every action already has doesn't
+     apply here automatically — it must be checked explicitly, the same way,
+     right after the row is loaded. Without it, any authenticated staff member
+     could view any other campus's student in full (name, phone, credits,
+     every order, every compensation, every bag) just by knowing/guessing an
+     id, regardless of their own role or campus assignment. */
+  if (staff.collegeId && staff.collegeId !== student.collegeId) redirect("/s/students");
 
   /* The bag code (B1001/S1055/G1002...) is the CUSTOMER-FACING ID — printed
      on the physical bag, quoted at the counter. student.id is an internal

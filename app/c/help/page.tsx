@@ -13,6 +13,7 @@ export default async function HelpPage() {
     where: { studentId: student.id },
     orderBy: { at: "desc" },
     include: { messages: { orderBy: { at: "asc" } } },
+    take: 50, // a long-tenured student's full complaint history has no reason to all render at once
   });
 
   return (

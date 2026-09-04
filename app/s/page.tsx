@@ -12,17 +12,34 @@ export default async function StaffHomePage() {
   if (!staff) redirect("/login");
 
   const N = (x: unknown) => Number(x || 0);
+  // Every query below used to run company-wide regardless of the signed-in
+  // staff member's own campus, then rely on the CLIENT to filter what's
+  // displayed — meaning the full cross-campus payload (names, phones,
+  // complaint text, revenue) was already shipped to the browser for a
+  // campus-scoped staff member, who should never see another campus's data
+  // at all. `scope` below is the shared filter; Owner (collegeId null) still
+  // sees everything, unchanged.
+  const scope = staff.collegeId ? { collegeId: staff.collegeId } : {};
 
   const orders = await db.order.findMany({
-    where: { status: { in: ["draft", "received", "processing", "ready"] } },
+    where: { status: { in: ["draft", "received", "processing", "ready"] }, ...scope },
     // the ready EVENT, not createdAt, is what ages an uncollected bag — an
     // order can spend days in processing before it ever waits on a student
-    include: { student: true, timeline: { where: { status: "ready" }, orderBy: { at: "desc" }, take: 1 } },
+    include: {
+      // Only the fields this page actually renders — the full Student row
+      // (credits, passwordHash/Salt, lifetimePieces, etc.) has no business
+      // riding along on the highest-traffic staff screen, refreshed every 10s.
+      student: { select: { id: true, name: true, phone: true, collegeId: true } },
+      timeline: { where: { status: "ready" }, orderBy: { at: "desc" }, take: 1 },
+    },
     orderBy: { createdAt: "desc" },
   });
 
   // Pending subscription requests (active=false) + their cash OTP codes
-  const pending = await db.subscription.findMany({ where: { active: false }, include: { student: true } });
+  const pending = await db.subscription.findMany({
+    where: { active: false, ...(staff.collegeId ? { student: { collegeId: staff.collegeId } } : {}) },
+    include: { student: { select: { id: true, name: true, collegeId: true } } },
+  });
   /* One query for every pending code, not one per row. This was a findFirst
      inside a Promise.all — invisible with three pending, a queue of round
      trips with thirty. */
@@ -44,7 +61,11 @@ export default async function StaffHomePage() {
      render, and this screen refreshes every 10 seconds. Search now runs on
      the server (searchStudents), which also means it finds students the old
      first-page fetch would have missed. */
-  const colleges = await db.college.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } });
+  const colleges = await db.college.findMany({
+    where: { active: true, ...(staff.collegeId ? { id: staff.collegeId } : {}) },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
 
   // Attendance state for THIS staff member (IST business day)
   const istDate = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
@@ -56,7 +77,7 @@ export default async function StaffHomePage() {
      staff already replied to (last message from "staff") is not waiting on
      anyone here; it's waiting on the student or on resolution. */
   const openComplaintsRaw = await db.complaint.findMany({
-    where: { status: "open" },
+    where: { status: "open", ...scope },
     include: { student: { select: { name: true, collegeId: true } }, messages: { orderBy: { at: "desc" }, take: 1 } },
     orderBy: { at: "desc" },
   });
@@ -70,11 +91,11 @@ export default async function StaffHomePage() {
      beats N+1 queries, one per campus. */
   const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
   const [todayPays, activeSubsRows, newStudentsByCollege] = await Promise.all([
-    db.payment.findMany({ where: { at: { gte: startOfDay }, amount: { gt: 0 }, method: { in: ["cash", "upi", "credit"] } }, select: { amount: true, collegeId: true } }),
-    db.subscription.findMany({ where: { active: true }, select: { student: { select: { collegeId: true } } } }),
+    db.payment.findMany({ where: { at: { gte: startOfDay }, amount: { gt: 0 }, method: { in: ["cash", "upi", "credit"] }, ...scope }, select: { amount: true, collegeId: true } }),
+    db.subscription.findMany({ where: { active: true, ...(staff.collegeId ? { student: { collegeId: staff.collegeId } } : {}) }, select: { student: { select: { collegeId: true } } } }),
     // Still a COUNT, not a fetch — groupBy aggregates in the database, same
     // as db.student.count() did before campuses needed splitting apart.
-    db.student.groupBy({ by: ["collegeId"], where: { createdAt: { gte: startOfDay } }, _count: true }),
+    db.student.groupBy({ by: ["collegeId"], where: { createdAt: { gte: startOfDay }, ...scope }, _count: true }),
   ]);
   const newStudentsCount = (collegeId: string | null) =>
     newStudentsByCollege.filter((g) => !collegeId || g.collegeId === collegeId).reduce((s, g) => s + g._count, 0);

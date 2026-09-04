@@ -29,9 +29,16 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
   const N = (x: unknown) => Number(x || 0);
 
   // analytics — 8-week revenue bars, repeat rate, subscriber split
+  // Unlike computeReport() just above (properly scoped), these ran
+  // company-wide regardless of the viewing staff member's own campus — a
+  // campus-scoped Manager reading "repeat customer rate" was actually
+  // seeing every campus's number, silently mixed into what looks like
+  // their own report on the same page.
   const now = Date.now();
   const weekMs = 7 * 86_400_000;
-  const allPayments = await db.payment.findMany({ where: { at: { gte: new Date(now - 8 * weekMs) } } });
+  const allPayments = await db.payment.findMany({
+    where: { at: { gte: new Date(now - 8 * weekMs) }, ...(staff.collegeId ? { collegeId: staff.collegeId } : {}) },
+  });
   const weeks = Array.from({ length: 8 }, (_, i) => {
     const from = now - (8 - i) * weekMs, to = now - (7 - i) * weekMs;
     return allPayments.filter((p) => p.at.getTime() >= from && p.at.getTime() < to && N(p.amount) > 0).reduce((s2, p) => s2 + N(p.amount), 0);
@@ -49,9 +56,9 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
      Prisma aggregates rather than raw SQL on purpose: the money suite still
      has a SQLite fallback, and `count(*) FILTER (...)` is Postgres-only. */
   const [perStudent, payAgg, activeSubs] = await Promise.all([
-    db.order.groupBy({ by: ["studentId"], _count: { _all: true } }),
-    db.order.aggregate({ _sum: { total: true }, where: { usedCycle: false, paid: true } }),
-    db.subscription.count({ where: { active: true } }),
+    db.order.groupBy({ by: ["studentId"], _count: { _all: true }, where: staff.collegeId ? { collegeId: staff.collegeId } : undefined }),
+    db.order.aggregate({ _sum: { total: true }, where: { usedCycle: false, paid: true, ...(staff.collegeId ? { collegeId: staff.collegeId } : {}) } }),
+    db.subscription.count({ where: { active: true, ...(staff.collegeId ? { student: { collegeId: staff.collegeId } } : {}) } }),
   ]);
   const repeatRate = perStudent.length
     ? Math.round((perStudent.filter((g) => g._count._all >= 2).length / perStudent.length) * 100)

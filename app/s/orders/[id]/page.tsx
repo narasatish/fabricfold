@@ -24,6 +24,10 @@ export default async function StaffOrderPage({ params }: { params: Promise<{ id:
     },
   });
   if (!order) notFound();
+  // Same explicit check as customers/[id] — this page queries the DB
+  // directly rather than through a server action, so it needs its own
+  // campus guard rather than inheriting one from assertSameCollege().
+  if (staff.collegeId && staff.collegeId !== order.collegeId) redirect("/s");
 
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const rates = resolveCollegeRates(cfg.rates as unknown as RateTable, order.college?.rates as unknown as RateTable | null);

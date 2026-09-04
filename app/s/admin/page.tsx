@@ -18,20 +18,31 @@ export default async function StaffAdminPage() {
 
   const istDate = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
   const month = istDate.slice(0, 7);
+  // A campus-scoped Admin (role 3 with a collegeId set — "can only create/edit
+  // staff ON their own campus", per saveStaff) was still shown every OTHER
+  // campus's staff directory, payslips (net pay), plans, and attendance here
+  // — the write side was already correctly guarded (assertSameCollege), only
+  // the read side leaked. Owner (collegeId null) is unaffected.
+  const staffScope = staff.collegeId ? { collegeId: staff.collegeId } : {};
   const [cfg, colleges, staffList, payslips, plans, attToday, attMonth] = await Promise.all([
     db.appConfig.findUniqueOrThrow({ where: { id: "main" } }),
-    /* ALL colleges, not just active ones. Filtering here is what made
-       "remove campus" a one-way door: the removed campus vanished from the
-       only screen that could bring it back. */
-    db.college.findMany({ orderBy: [{ active: "desc" }, { name: "asc" }] }),
-    db.staff.findMany({ orderBy: { role: "desc" } }),
-    db.payslip.findMany({ include: { staff: true }, orderBy: { at: "desc" }, take: 12 }),
-    db.plan.findMany({ orderBy: [{ collegeId: "asc" }, { price: "asc" }] }),
-    db.attendance.findMany({ where: { date: istDate } }),
-    db.attendance.groupBy({ by: ["staffId"], where: { date: { startsWith: month } }, _count: true }),
+    /* ALL colleges, not just active ones, for an OWNER — filtering here is
+       what made "remove campus" a one-way door: the removed campus vanished
+       from the only screen that could bring it back. A campus-scoped Admin
+       has no business seeing (or reviving) a DIFFERENT campus either way. */
+    db.college.findMany({
+      where: staff.collegeId ? { id: staff.collegeId } : {},
+      orderBy: [{ active: "desc" }, { name: "asc" }],
+    }),
+    db.staff.findMany({ where: staffScope, orderBy: { role: "desc" } }),
+    db.payslip.findMany({ where: staff.collegeId ? { staff: staffScope } : {}, include: { staff: true }, orderBy: { at: "desc" }, take: 12 }),
+    db.plan.findMany({ where: staffScope, orderBy: [{ collegeId: "asc" }, { price: "asc" }] }),
+    db.attendance.findMany({ where: { date: istDate, ...(staff.collegeId ? { staff: staffScope } : {}) } }),
+    db.attendance.groupBy({ by: ["staffId"], where: { date: { startsWith: month }, ...(staff.collegeId ? { staff: staffScope } : {}) }, _count: true }),
   ]);
 
   const slotWindows = await db.slotWindow.findMany({
+    where: staffScope,
     orderBy: [{ collegeId: "asc" }, { weekday: "asc" }, { startMin: "asc" }],
   });
 

@@ -10,7 +10,11 @@ services:
     runtime: node
     plan: starter
     region: singapore
-    buildCommand: npm run build
+    # Render skips its default `npm install` when a custom buildCommand is
+    # given, which is what produced "sh: 1: prisma: not found" on the first
+    # deploy — the build ran before dependencies existed. Installing
+    # explicitly first fixes it.
+    buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /login
     envVars:

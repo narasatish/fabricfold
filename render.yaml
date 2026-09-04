@@ -11,10 +11,12 @@ services:
     plan: starter
     region: singapore
     # Render skips its default `npm install` when a custom buildCommand is
-    # given, which is what produced "sh: 1: prisma: not found" on the first
-    # deploy — the build ran before dependencies existed. Installing
-    # explicitly first fixes it.
-    buildCommand: npm install && npm run build
+    # given (fixed: "prisma: not found" on the first deploy). --include=dev
+    # is needed too: devDependencies hold @types/web-push, required for the
+    # build's own type-check, not the running app — Render's production
+    # install skips devDependencies by default; Vercel's build step doesn't,
+    # which is why this never surfaced there.
+    buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /login
     envVars:

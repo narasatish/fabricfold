@@ -31,6 +31,10 @@ export async function submitComplaint(text: string, orderId?: string | null, pho
       error: `Please attach at least ${MIN_DAMAGE_PHOTOS} photos of the problem (${pics.length} so far) — they are what settles the claim.`,
     };
   }
+  if (orderId) {
+    const o = await db.order.findUnique({ where: { id: orderId }, select: { studentId: true } });
+    if (!o || o.studentId !== stu.id) return { ok: false as const, error: "Not your order" };
+  }
   const c = await db.complaint.create({
     data: {
       studentId: stu.id, collegeId: stu.collegeId, text: t, orderId: orderId || null,

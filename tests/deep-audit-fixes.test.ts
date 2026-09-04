@@ -165,6 +165,15 @@ describe("money-moving buttons can't be double-tapped, and refund/compensation c
   });
 });
 
+describe("submitComplaint can't be attached to someone else's order", () => {
+  it("looks up the order and rejects if it isn't the caller's", () => {
+    const src = read("lib/actions/complaints.ts");
+    const fn = src.slice(src.indexOf("export async function submitComplaint"), src.indexOf("export async function sendComplaintMessage"));
+    expect(fn).toMatch(/const o = await db\.order\.findUnique\(\{ where: \{ id: orderId \}, select: \{ studentId: true \} \}\)/);
+    expect(fn).toMatch(/if \(!o \|\| o\.studentId !== stu\.id\) return \{ ok: false as const, error: "Not your order" \}/);
+  });
+});
+
 describe("two customer-facing reliability fixes", () => {
   it("wallet page: per-bucket progress bar can't divide by zero", () => {
     const src = read("app/c/wallet/page.tsx");

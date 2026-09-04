@@ -4,7 +4,7 @@
 import { Prisma } from "../generated/prisma/client";
 import { db } from "../db";
 import { FEATURE_DEFAULTS, featureOn, type FeatureKey } from "../features";
-import { requireStaff } from "../auth";
+import { requireStaff, assertSameCollege } from "../auth";
 import { PERM_DEFS } from "../perms";
 import { rosterSoon } from "../sheets-sync";
 import { audit } from "../notify";
@@ -23,6 +23,7 @@ export async function registerStudent(input: { name: string; phone: string; coll
   if (name.length < 2) return { ok: false as const, error: "Enter the student's name" };
   if (phone.length !== 10) return { ok: false as const, error: "Enter a valid 10-digit mobile number" };
   if (await db.student.findUnique({ where: { phone } })) return { ok: false as const, error: "This number is already registered" };
+  assertSameCollege(st, input.collegeId);
   const college = await db.college.findUnique({ where: { id: input.collegeId } });
   if (!college || !college.active) return { ok: false as const, error: "Pick a campus" };
 
@@ -52,6 +53,7 @@ export async function updateStudentPhone(studentId: string, newPhone: string) {
   if (existing && existing.id !== studentId) return { ok: false as const, error: "This number is already registered to another student" };
   const stu = await db.student.findUnique({ where: { id: studentId } });
   if (!stu) return { ok: false as const, error: "Student not found" };
+  assertSameCollege(st, stu.collegeId);
   await db.student.update({ where: { id: studentId }, data: { phone } });
   await audit("Student phone changed", `${stu.name} (${stu.id}) · +91 ${stu.phone} -> +91 ${phone}`, st.id);
   rosterSoon();
@@ -77,6 +79,12 @@ export async function updateStudentDetails(
   const st = await requireStaff(3);
   const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: { include: { planRef: true } } } });
   if (!stu) return { ok: false as const, error: "Student not found" };
+  assertSameCollege(st, stu.collegeId);
+  // Moving a student INTO another campus is a cross-campus action — reserved
+  // for global staff (collegeId null), not a campus-scoped Admin.
+  if (st.collegeId && input.collegeId !== undefined && input.collegeId !== stu.collegeId) {
+    return { ok: false as const, error: "Moving a student to another campus needs an Owner/Admin who isn't tied to one campus" };
+  }
 
   const data: { name?: string; collegeId?: string } = {};
   const changes: string[] = [];
@@ -135,6 +143,7 @@ export async function savePlan(input: {
   buckets: { service: string; cycles: number; kgPerCycle: number }[];
 }) {
   const st = await requireStaff(3);
+  assertSameCollege(st, input.collegeId);
   const name = input.name.trim();
   if (name.length < 2) return { ok: false as const, error: "Give the plan a name" };
   if (!input.price || input.price <= 0) return { ok: false as const, error: "Enter a valid price" };
@@ -142,6 +151,12 @@ export async function savePlan(input: {
   if (!buckets.length) return { ok: false as const, error: "Add at least one service with cycles" };
   const college = await db.college.findUnique({ where: { id: input.collegeId } });
   if (!college) return { ok: false as const, error: "Pick a campus" };
+  if (input.id) {
+    // Editing an existing plan: it must already belong to the caller's
+    // campus, not just be reassigned there by whatever collegeId was sent.
+    const existing = await db.plan.findUnique({ where: { id: input.id }, select: { collegeId: true } });
+    if (existing) assertSameCollege(st, existing.collegeId);
+  }
 
   // The tier decides which letter goes on the student's bag (B/S/G), so an
   // unrecognised value is stored as null rather than guessed at.
@@ -156,6 +171,7 @@ export async function savePlan(input: {
 export async function togglePlan(planId: string) {
   const st = await requireStaff(3);
   const p = await db.plan.findUniqueOrThrow({ where: { id: planId } });
+  assertSameCollege(st, p.collegeId);
   await db.plan.update({ where: { id: planId }, data: { active: !p.active } });
   await audit("Plan " + (p.active ? "disabled" : "enabled"), p.name, st.id);
   return { ok: true as const, active: !p.active };
@@ -174,6 +190,7 @@ export async function saveRates(rates: Record<string, { label: string; items: [s
 /** Save per-college rate override (Admin+). Pass null rates to clear the override. */
 export async function saveCollegeRates(collegeId: string, rates: Record<string, { label: string; items: [string, number][] }> | null) {
   const st = await requireStaff(3);
+  assertSameCollege(st, collegeId);
   const college = await db.college.findUniqueOrThrow({ where: { id: collegeId } });
   // For nullable Json fields, Prisma.JsonNull is used to clear; undefined to skip
   await db.college.update({
@@ -207,6 +224,7 @@ export async function saveSettings(settings: Record<string, unknown>) {
 /* ----- Colleges + per-college feature flags ----- */
 export async function toggleFeature(collegeId: string, key: string) {
   const st = await requireStaff(2); // Manager+ toggle features
+  assertSameCollege(st, collegeId);
   const c = await db.college.findUniqueOrThrow({ where: { id: collegeId } });
   /* Flip the EFFECTIVE value, not the stored one. When a key was absent the
      old line wrote `false` regardless of what the admin saw, so the first
@@ -281,6 +299,13 @@ export async function saveStaff(input: { id?: string; name: string; phone: strin
   const phone = input.phone.replace(/\D/g, "").slice(-10);
   if (!input.name.trim() || phone.length !== 10) return { ok: false as const, error: "Name and a valid mobile are required" };
   if (input.role >= 4 && st.role < 4) return { ok: false as const, error: "Only the owner can grant Owner" };
+  // A campus-scoped Admin can only create/edit staff ON their own campus —
+  // never a global (collegeId null) account, never another campus's.
+  assertSameCollege(st, input.collegeId);
+  if (input.id) {
+    const existing = await db.staff.findUnique({ where: { id: input.id }, select: { collegeId: true } });
+    if (existing) assertSameCollege(st, existing.collegeId);
+  }
   /* Only known tool keys survive, and only real booleans — the override map
      reaches every permission check, so a stray key must die at the door. */
   const perms = input.perms
@@ -314,6 +339,7 @@ export async function setStaffActive(staffId: string, active: boolean) {
   const st = await requireStaff(3); // Admin+
   const target = await db.staff.findUnique({ where: { id: staffId } });
   if (!target) return { ok: false as const, error: "Staff member not found" };
+  assertSameCollege(st, target.collegeId);
   if (target.active === active) return { ok: true as const, active };
 
   if (!active) {
@@ -357,6 +383,7 @@ export async function createPayslip(input: { staffId: string; month: string; bas
   const net = Math.round(input.basic + input.allowances - input.deductions);
   if (net < 0) return { ok: false as const, error: "Net pay cannot be negative" };
   const target = await db.staff.findUniqueOrThrow({ where: { id: input.staffId } });
+  assertSameCollege(st, target.collegeId);
   const ym = input.month.replace(/\D/g, ""); // YYYYMM
 
   const slip = await db.$transaction(async (tx) => {

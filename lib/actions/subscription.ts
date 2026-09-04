@@ -5,7 +5,7 @@
    their college's plans; Manager+ activates (cash OTP / UPI) or assigns
    directly. Cycle consumption per-bucket happens in acceptOrder. */
 import { db } from "../db";
-import { requireStudent, requireStaff } from "../auth";
+import { requireStudent, requireStaff, assertSameCollege } from "../auth";
 import { publish } from "../realtime";
 import { pushNotif, audit } from "../notify";
 import { notifyOwner } from "../mail";
@@ -33,6 +33,7 @@ export async function adjustCycleUsage(studentId: string, updates: { service: st
   const st = await requireStaff(3);
   const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: true } });
   if (!stu) return { ok: false as const, error: "Student not found" };
+  assertSameCollege(st, stu.collegeId);
   const sub = stu.subscription;
   if (!sub) return { ok: false as const, error: "This student has no plan" };
 
@@ -88,6 +89,7 @@ export async function requestSubscription(_planId: string, _method: "cash" | "up
 export async function activateSubscription(studentId: string, method: "cash" | "upi", otpCode?: string) {
   const st = await requireStaff(2); // Manager+ only
   const stu = await db.student.findUniqueOrThrow({ where: { id: studentId }, include: { subscription: { include: { planRef: true } } } });
+  assertSameCollege(st, stu.collegeId);
   if (!stu.subscription) return { ok: false as const, error: "No pending subscription request" };
 
   if (method === "cash") {
@@ -134,6 +136,7 @@ export async function assignSubscription(studentId: string, planId: string, meth
   const st = await requireStaff(2); // Manager+ only
   const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: true } });
   if (!stu) return { ok: false as const, error: "Student not found" };
+  assertSameCollege(st, stu.collegeId);
   if (stu.subscription?.active) return { ok: false as const, error: "This student already has an active plan" };
 
   const plan = await db.plan.findUnique({ where: { id: planId } });
@@ -198,6 +201,7 @@ export async function upgradeSubscription(studentId: string, planId: string, met
     include: { subscription: { include: { planRef: true } } },
   });
   if (!stu) return { ok: false as const, error: "Student not found" };
+  assertSameCollege(st, stu.collegeId);
   const cur = stu.subscription;
   if (!cur || !cur.active) return { ok: false as const, error: "This student has no active plan to change" };
   if (cur.expiresAt && cur.expiresAt.getTime() < Date.now()) {
@@ -291,6 +295,7 @@ export async function cancelSubscription(studentId: string, reason: string) {
     include: { subscription: true },
   });
   if (!stu) return { ok: false as const, error: "Student not found" };
+  assertSameCollege(st, stu.collegeId);
   const sub = stu.subscription;
   if (!sub) return { ok: false as const, error: "This student has no plan" };
   if (!sub.active) return { ok: false as const, error: "That plan is already inactive" };
@@ -356,6 +361,7 @@ export async function sellCyclePack(
 
   const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: true } });
   if (!stu) return { ok: false as const, error: "Student not found" };
+  assertSameCollege(st, stu.collegeId);
 
   const price = cycles * rate;
   const label = input.service === "washFold" ? "Wash & Fold" : "Wash & Iron";

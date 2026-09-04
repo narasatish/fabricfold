@@ -79,6 +79,24 @@ export async function requireStaff(minRole = 1) {
 }
 
 /**
+ * Enforces the campus boundary a college-scoped staff member must never
+ * cross: a Staff row with `collegeId` set is confined to that campus, full
+ * stop — even for a target reached by direct id (an order/student/bag/
+ * complaint from another college), not just what the UI happens to show.
+ * `collegeId: null` on the Staff row (Owner/Admin spanning every campus,
+ * by design — see requireStaff) is the one case allowed through unchecked.
+ *
+ * Called with the STAFF row from requireStaff() and the collegeId the
+ * target row actually belongs to. Throws the same AuthError shape as every
+ * other guard, so callers don't need a separate error path.
+ */
+export function assertSameCollege(st: { collegeId: string | null }, targetCollegeId: string | null | undefined) {
+  if (st.collegeId && st.collegeId !== targetCollegeId) {
+    throw new AuthError("That's a different campus — not yours to change");
+  }
+}
+
+/**
  * The session, but only if the account behind it can still sign in.
  *
  * getSession() answers "is the cookie validly signed?". That is not the same

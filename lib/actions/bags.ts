@@ -10,7 +10,7 @@
    the student is issued a NEW code, because the old label is still out there
    on a bag someone may hand in. */
 import { db } from "../db";
-import { requireStaff } from "../auth";
+import { requireStaff, assertSameCollege } from "../auth";
 import { pushNotif, audit } from "../notify";
 import { rosterSoon } from "../sheets-sync";
 import { publish } from "../realtime";
@@ -30,6 +30,7 @@ export async function issueBag(
     include: { subscription: { include: { planRef: true } }, bags: { orderBy: { issuedAt: "desc" } } },
   });
   if (!stu) return { ok: false as const, error: "Student not found" };
+  assertSameCollege(st, stu.collegeId);
 
   // A student should be carrying one bag at a time. Selling a second while the
   // first is still active is almost always a mis-click — make them mark the old
@@ -133,12 +134,13 @@ export async function issueBag(
  */
 export async function syncBagToPlan(studentId: string) {
   try {
-    await requireStaff(1);
+    const st = await requireStaff(1);
     const stu = await db.student.findUnique({
       where: { id: studentId },
       include: { subscription: { include: { planRef: true } }, bags: { orderBy: { issuedAt: "desc" } } },
     });
     if (!stu) return { ok: false as const, error: "Student not found" };
+    assertSameCollege(st, stu.collegeId);
 
     const tier = stu.subscription?.active ? stu.subscription.planRef?.tier : null;
     const wanted = bagKindFor(tier);
@@ -190,6 +192,7 @@ export async function reissueBagSameCode(bagId: string, reason: "lost" | "damage
   const st = await requireStaff(1);
   const bag = await db.bag.findUnique({ where: { id: bagId }, include: { student: true } });
   if (!bag) return { ok: false as const, error: "Bag not found" };
+  assertSameCollege(st, bag.student.collegeId);
   if (bag.status !== "active") return { ok: false as const, error: `That bag is already marked ${bag.status}` };
 
   const fresh = await db.$transaction(async (tx) => {
@@ -238,6 +241,7 @@ export async function setBagCode(bagId: string, rawCode: string) {
   const st = await requireStaff(3);
   const bag = await db.bag.findUnique({ where: { id: bagId }, include: { student: { include: { subscription: { include: { planRef: true } } } } } });
   if (!bag) return { ok: false as const, error: "Bag not found" };
+  assertSameCollege(st, bag.student.collegeId);
   if (bag.status === "released") return { ok: false as const, error: "This code has been released — issue a new bag instead" };
 
   const code = (rawCode || "").trim().toUpperCase();
@@ -297,6 +301,7 @@ export async function releaseBagCode(bagId: string, note?: string) {
   const st = await requireStaff(2); // Manager+
   const bag = await db.bag.findUnique({ where: { id: bagId }, include: { student: true } });
   if (!bag) return { ok: false as const, error: "Bag not found" };
+  assertSameCollege(st, bag.student.collegeId);
   if (bag.status === "released") return { ok: false as const, error: "This code has already been released" };
 
   /* Refuse while the student can still place orders against it. Releasing a
@@ -327,6 +332,7 @@ export async function retireBag(bagId: string, status: "lost" | "replaced", note
   const st = await requireStaff(1);
   const bag = await db.bag.findUnique({ where: { id: bagId }, include: { student: true } });
   if (!bag) return { ok: false as const, error: "Bag not found" };
+  assertSameCollege(st, bag.student.collegeId);
   if (bag.status !== "active") return { ok: false as const, error: `This bag is already marked ${bag.status}` };
 
   await db.bag.update({

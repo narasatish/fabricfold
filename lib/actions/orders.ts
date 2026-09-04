@@ -6,7 +6,7 @@ import { db } from "../db";
 import { featureOn, serviceOn } from "../features";
 import { enqueueSheetEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import type { Prisma } from "../generated/prisma/client";
-import { requireStudent, requireStaff, requireStaffPerm } from "../auth";
+import { requireStudent, requireStaff, requireStaffPerm, assertSameCollege } from "../auth";
 import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, expressFlatFee, collegeExpressFee, isCycleService, collegeUsesCycleBasedPricing, resolveCollegeRates } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
@@ -130,6 +130,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
 
   // Fetch the order first to get collegeId so we can get the right config
   const draftOrder = await db.order.findUniqueOrThrow({ where: { id: orderId }, select: { collegeId: true } });
+  assertSameCollege(st, draftOrder.collegeId);
   const cfg = await getConfig(draftOrder.collegeId);
 
   let result;
@@ -279,6 +280,7 @@ export async function walkInOrder(
 
   const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: { include: { planRef: true } }, college: true } });
   if (!stu) return { ok: false as const, error: "Student not found" };
+  assertSameCollege(st, stu.collegeId);
 
   // Fetch config with college context to get correct rates and pricing model
   const cfg = await getConfig(stu.collegeId);
@@ -430,6 +432,7 @@ export async function advanceStatus(orderId: string, input?: { countedPieces?: n
   const st = await requireStaff(1);
   const cfg = await getConfig();
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId }, include: { student: true } });
+  assertSameCollege(st, o.collegeId);
   const nextMap: Record<string, string> = { received: "processing", processing: "ready" };
   const next = nextMap[o.status];
   if (!next) return { ok: false as const, error: "Use the collect flow for ready orders" };
@@ -481,6 +484,7 @@ export async function advanceStatus(orderId: string, input?: { countedPieces?: n
 export async function collectOrder(orderId: string, code: string) {
   const st = await requireStaff(1);
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
+  assertSameCollege(st, o.collegeId);
   const otp = await db.otp.findFirst({ where: { purpose: "pickup", refId: o.id, usedAt: null } });
   const v = (code || "").replace(/[^0-9]/g, "");
   const ok = (otp && v === otp.code) || v === o.id.slice(-4) || v === o.id.replace(/\D/g, "");
@@ -584,6 +588,7 @@ export async function payOrder(orderId: string, method: "upi" | "cash", applyCre
 export async function recordPay(orderId: string, method: "upi" | "cash", applyCredits: boolean, staffInvoice: boolean) {
   const st = await requireStaff(1);
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId }, include: { student: true } });
+  assertSameCollege(st, o.collegeId);
   const creditApplied = applyCredits ? Math.min(Number(o.student.credits), Number(o.total)) : 0;
   if (staffInvoice && o.noGst) return { ok: false as const, error: "This order was billed without GST — no invoice can be issued" };
   try {
@@ -610,6 +615,7 @@ export async function refundOrder(orderId: string, amount: number, via: "upi" | 
   const st = await requireStaffPerm("refunds");
   if (!amount || amount <= 0) return { ok: false, error: "Enter a valid amount" };
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId }, include: { invoice: true, student: { include: { subscription: true } } } });
+  assertSameCollege(st, o.collegeId);
 
   await db.$transaction(async (tx) => {
     await tx.payment.create({
@@ -632,6 +638,7 @@ export async function redoOrder(orderId: string): Promise<ActionResult> {
   const st = await requireStaff(1);
   const cfg = await getConfig();
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
+  assertSameCollege(st, o.collegeId);
   const n = await db.order.create({
     data: {
       id: orderCode(), studentId: o.studentId, collegeId: o.collegeId, service: o.service,
@@ -722,6 +729,7 @@ export async function cancelOrder(orderId: string): Promise<ActionResult> {
     where: { id: orderId },
     include: { student: { include: { subscription: true } } },
   });
+  assertSameCollege(st, ord.collegeId);
   if (ord.status === "cancelled") return { ok: false as const, error: "This order is already cancelled" };
   if (ord.status === "collected") return { ok: false as const, error: "This order has already been collected" };
 
@@ -765,7 +773,9 @@ export async function deleteDraft(orderId: string) {
 
 /* ---------- Garment tag scan ---------- */
 export async function scanTag(orderId: string, code: string) {
-  await requireStaff(1);
+  const st = await requireStaff(1);
+  const ord = await db.order.findUniqueOrThrow({ where: { id: orderId }, select: { collegeId: true } });
+  assertSameCollege(st, ord.collegeId);
   const tag = await db.garmentTag.findUnique({ where: { code } });
   if (!tag || tag.orderId !== orderId) return { ok: false as const, error: "Tag not found on this order" };
   await db.garmentTag.update({ where: { id: tag.id }, data: { scanned: !tag.scanned } });

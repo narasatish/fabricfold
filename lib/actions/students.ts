@@ -1,7 +1,7 @@
 "use server";
 /* Admin student tools: bulk import and campus-wide broadcast. */
 import { db } from "../db";
-import { requireStaff } from "../auth";
+import { requireStaff, assertSameCollege } from "../auth";
 import { audit } from "../notify";
 
 /**
@@ -16,7 +16,7 @@ import { audit } from "../notify";
  * is exactly the query that gets slow once it matters.
  */
 export async function searchStudents(query: string) {
-  await requireStaff(1);
+  const st = await requireStaff(1);
   const q = (query || "").trim();
   // Two characters is the point where a search stops meaning "everyone".
   if (q.length < 2) return { ok: true as const, students: [] };
@@ -38,8 +38,13 @@ export async function searchStudents(query: string) {
   ];
   if (digits.length >= 2) or.push({ phone: { contains: digits } });
 
+  /* A campus-scoped staff member (Staff.collegeId set) must never find, let
+     alone act on, another campus's student — not even by name/phone/code
+     search. Global staff (collegeId null: Owner/Admin) search everywhere. */
+  const where = st.collegeId ? { AND: [{ OR: or }, { collegeId: st.collegeId }] } : { OR: or };
+
   const students = await db.student.findMany({
-    where: { OR: or },
+    where,
     select: { id: true, name: true, phone: true, bags: { where: { status: "active" }, select: { code: true }, take: 1 } },
     orderBy: { name: "asc" },
     take: 20,
@@ -73,6 +78,7 @@ function parseLine(line: string): { name: string; phone: string } {
 /** Register many students at once (any staff). Skips duplicates and bad rows. */
 export async function bulkRegisterStudents(text: string, collegeId: string) {
   const st = await requireStaff(1);
+  assertSameCollege(st, collegeId);
   const college = await db.college.findUnique({ where: { id: collegeId } });
   if (!college || !college.active) return { ok: false as const, error: "Pick a campus" };
 
@@ -101,6 +107,11 @@ export async function broadcastNotice(scope: string, text: string) {
   const st = await requireStaff(2);
   const msg = text.trim();
   if (msg.length < 3) return { ok: false as const, error: "Enter a message" };
+  // A campus-scoped staff member can't broadcast to "all" (that reaches
+  // other campuses) or to any campus but their own.
+  if (st.collegeId && (scope === "all" || scope !== st.collegeId)) {
+    return { ok: false as const, error: "You can only notify your own campus" };
+  }
   const where = scope === "all" ? {} : { collegeId: scope };
   const students = await db.student.findMany({ where, select: { id: true } });
   if (!students.length) return { ok: false as const, error: "No students to notify" };

@@ -2,7 +2,7 @@
 /* Compensation — credits by default; cash is Manager+ only, posts a cash_out
    payment and (if the order was invoiced) raises a proportional credit note. */
 import { db } from "../db";
-import { requireStaffPerm } from "../auth";
+import { requireStaffPerm, assertSameCollege } from "../auth";
 import { createCreditNote } from "../money";
 import { publish } from "../realtime";
 import { pushNotif, audit } from "../notify";
@@ -19,6 +19,7 @@ export async function submitCompensation(input: { studentId: string; orderId?: s
   const amount = Math.floor(input.amount);
   if (!amount || amount <= 0) return { ok: false as const, error: "Enter a valid amount" };
   const stu = await db.student.findUniqueOrThrow({ where: { id: input.studentId } });
+  assertSameCollege(st, stu.collegeId);
 
   await db.$transaction(async (tx) => {
     await tx.compensation.create({

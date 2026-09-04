@@ -14,7 +14,21 @@ export const dynamic = "force-dynamic";
 async function mayView(key: string) {
   const s = await getSession().catch(() => null);
   if (!s) return false;
-  if (s.mode === "staff") return true;
+  if (s.mode === "staff") {
+    // Campus-scoped staff can only see photos from their OWN campus's
+    // complaints — the same boundary every other staff action enforces.
+    // Global staff (collegeId null) see everything, as elsewhere.
+    if (!s.staffId) return false;
+    const st = await db.staff.findUnique({ where: { id: s.staffId }, select: { collegeId: true } });
+    if (!st) return false;
+    if (!st.collegeId) return true;
+    const rows = await db.complaintMessage.findMany({
+      where: { complaint: { collegeId: st.collegeId } },
+      select: { photos: true },
+      take: 500,
+    });
+    return rows.some((r) => Array.isArray(r.photos) && (r.photos as unknown[]).some((k) => String(k) === key));
+  }
   if (s.mode !== "customer" || !s.studentId) return false;
 
   // The student may see this key only if it hangs off one of their own threads.

@@ -1,7 +1,7 @@
 "use server";
 /* Complaints + chat threads (realtime both sides). */
 import { db } from "../db";
-import { requireStudent, requireStaff, getSession } from "../auth";
+import { requireStudent, requireStaff, getSession, assertSameCollege } from "../auth";
 import { publish } from "../realtime";
 import { pushNotif, audit, sendWhatsAppPhotos } from "../notify";
 import { notifyOwner } from "../mail";
@@ -68,6 +68,7 @@ export async function sendComplaintMessage(complaintId: string, text: string, ph
     publish([`orders:${c.collegeId}`], { type: "complaint.message", payload: { complaintId } });
   } else {
     const st = await requireStaff(1);
+    assertSameCollege(st, c.collegeId);
     await db.complaintMessage.create({ data: { complaintId, from: "staff", by: st.id, text: t, photos: pics.length ? pics : undefined } });
     await pushNotif(c.studentId, t ? `Staff replied to your complaint: "${t.slice(0, 80)}"` : "Staff sent photos on your complaint.", "status");
     if (pics.length) {
@@ -94,6 +95,7 @@ export async function reportOrderDamage(orderId: string, input: { comment: strin
 
   const o = await db.order.findUnique({ where: { id: orderId }, include: { student: true } });
   if (!o) return { ok: false as const, error: "Order not found" };
+  assertSameCollege(st, o.collegeId);
 
   const c = await db.complaint.create({
     data: {
@@ -124,6 +126,7 @@ export async function reportOrderDamage(orderId: string, input: { comment: strin
 export async function grantFreeReservice(complaintId: string) {
   const st = await requireStaff(2); // Manager+ — this is money out the door
   const c = await db.complaint.findUniqueOrThrow({ where: { id: complaintId } });
+  assertSameCollege(st, c.collegeId);
   if (!c.orderId) return { ok: false as const, error: "This complaint isn't linked to an order" };
   if (c.redoOrderId) return { ok: false as const, error: "A free re-service was already given for this complaint" };
 
@@ -143,6 +146,7 @@ export async function grantFreeReservice(complaintId: string) {
 export async function resolveComplaint(complaintId: string, resolution: string): Promise<{ ok: boolean; error?: string }> {
   const st = await requireStaff(1);
   const c = await db.complaint.findUniqueOrThrow({ where: { id: complaintId } });
+  assertSameCollege(st, c.collegeId);
   const res = resolution.trim() || "Resolved by staff.";
   await db.complaint.update({ where: { id: complaintId }, data: { status: "resolved", resolvedAt: new Date() } });
   await db.complaintMessage.create({ data: { complaintId, from: "staff", by: st.id, text: "Resolved: " + res } });

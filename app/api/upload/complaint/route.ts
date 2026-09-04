@@ -9,6 +9,7 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { getSession } from "@/lib/auth";
+import { sniffMatchesType } from "@/lib/file-sniff";
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const ALLOWED = ["image/jpeg", "image/png", "image/webp"];
@@ -28,6 +29,7 @@ export async function POST(req: Request) {
   const ext = file.type.split("/")[1];
   const key = `intake/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const bytes = Buffer.from(await file.arrayBuffer());
+  if (!sniffMatchesType(bytes, file.type)) return new Response("file content doesn't match its type", { status: 415 });
 
   const supaUrl = process.env.SUPABASE_URL, supaKey = process.env.SUPABASE_SERVICE_KEY;
   if (supaUrl && supaKey) {

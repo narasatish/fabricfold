@@ -196,10 +196,10 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
               <a className="btn xs sec" href={`/api/export/college-statement?collegeId=${c.id}&m=${month}`} target="_blank">Statement</a>
               {currentRole >= 4 && (
                 <>
-                  <button className="btn xs sec" onClick={() => { setColEdit({ id: c.id, name: c.name, address: c.address, closedWeekday: c.closedWeekday }); setSheet("college"); }}><Svg name="edit" size={13} /></button>
+                  <button className="btn xs sec" aria-label="Edit campus" onClick={() => { setColEdit({ id: c.id, name: c.name, address: c.address, closedWeekday: c.closedWeekday }); setSheet("college"); }}><Svg name="edit" size={13} /></button>
                   {c.active ? (
                     colleges.filter((x) => x.active).length > 1 && (
-                      <button className="btn xs sec" style={{ color: "var(--red)" }} onClick={() => { if (confirm(`Remove ${c.name}?
+                      <button className="btn xs sec" aria-label="Remove campus" style={{ color: "var(--red)" }} onClick={() => { if (confirm(`Remove ${c.name}?
 
 Students already registered there keep their records and can be restored with the campus.`)) run(() => deleteCollege(c.id), "College removed"); }}><Svg name="trash" size={13} /></button>
                     )
@@ -487,7 +487,7 @@ Students already registered there keep their records and can be restored with th
               <input className="input" style={{ flex: 1, height: 42 }} type="number" placeholder="cycles" value={b.cycles || ""} onChange={(e) => { const bs = [...planEdit.buckets]; bs[i] = { ...b, cycles: Number(e.target.value) }; setPlanEdit({ ...planEdit, buckets: bs }); }} />
               <input className="input" style={{ flex: 1, height: 42 }} type="number" placeholder="kg" value={b.kgPerCycle || ""} onChange={(e) => { const bs = [...planEdit.buckets]; bs[i] = { ...b, kgPerCycle: Number(e.target.value) }; setPlanEdit({ ...planEdit, buckets: bs }); }} />
               {planEdit.buckets.length > 1 && (
-                <button className="action" onClick={() => setPlanEdit({ ...planEdit, buckets: planEdit.buckets.filter((_, j) => j !== i) })}><Svg name="x" size={16} /></button>
+                <button className="action" aria-label="Remove service" onClick={() => setPlanEdit({ ...planEdit, buckets: planEdit.buckets.filter((_, j) => j !== i) })}><Svg name="x" size={16} /></button>
               )}
             </div>
             <div className="muted mt4" style={{ fontSize: 11 }}>cycles · kg per drop-off</div>

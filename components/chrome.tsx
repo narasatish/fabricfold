@@ -118,6 +118,42 @@ export function Seg<T extends string>({ options, value, onChange }: { options: [
   );
 }
 
+/* ---------- Campus switch ----------
+   A staff member juggling multiple campuses (St Mary's, BVRIT, ...) needs to
+   flip between them without re-navigating or hunting through a buried filter
+   row — the owner's own complaint after seeing them mixed together on one
+   screen. One shared hook + pill row, used the same way on every staff
+   screen that's per-campus: Home, Students, and anywhere else that follows.
+   Sticky in localStorage so the choice survives a page change or reload. */
+const CAMPUS_KEY = "ff-staff-campus";
+export function useCampusSwitch(colleges: { id: string; name: string }[]) {
+  const [campus, setCampusState] = useState<string>("all");
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(CAMPUS_KEY);
+      if (saved && (saved === "all" || colleges.some((c) => c.id === saved))) setCampusState(saved);
+    } catch { /* private browsing / storage blocked — default "all" is fine */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const setCampus = useCallback((v: string) => {
+    setCampusState(v);
+    try { localStorage.setItem(CAMPUS_KEY, v); } catch { /* not persisted this session, still works */ }
+  }, []);
+  return [campus, setCampus] as const;
+}
+
+export function CampusSwitch({ colleges, value, onChange }: { colleges: { id: string; name: string }[]; value: string; onChange: (v: string) => void }) {
+  if (colleges.length < 2) return null; // nothing to switch between
+  return (
+    <div className="seg" style={{ margin: "0 16px 10px" }}>
+      <button className={value === "all" ? "active" : ""} onClick={() => onChange("all")}>All</button>
+      {colleges.map((c) => (
+        <button key={c.id} className={value === c.id ? "active" : ""} onClick={() => onChange(c.id)}>{c.name}</button>
+      ))}
+    </div>
+  );
+}
+
 /* ---------- Switch ---------- */
 export function Switch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return <button type="button" className={`switch ${on ? "on" : ""}`} onClick={onToggle} role="switch" aria-checked={on} />;

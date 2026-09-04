@@ -35,7 +35,7 @@ export default async function StaffHomePage() {
   const withOtp = new Set(pendingOtps.map((o) => o.refId));
   const pendingSubs = pending.map((p) => ({
     studentId: p.studentId,
-    student: { id: p.student.id, name: p.student.name },
+    student: { id: p.student.id, name: p.student.name, collegeId: p.student.collegeId },
     hasOtp: withOtp.has(p.studentId),
   }));
 
@@ -57,31 +57,41 @@ export default async function StaffHomePage() {
      anyone here; it's waiting on the student or on resolution. */
   const openComplaintsRaw = await db.complaint.findMany({
     where: { status: "open" },
-    include: { student: { select: { name: true } }, messages: { orderBy: { at: "desc" }, take: 1 } },
+    include: { student: { select: { name: true, collegeId: true } }, messages: { orderBy: { at: "desc" }, take: 1 } },
     orderBy: { at: "desc" },
   });
   const openComplaints = openComplaintsRaw
     .filter((c) => !c.messages[0] || c.messages[0].from === "student")
-    .map((c) => ({ id: c.id, studentId: c.studentId, studentName: c.student.name, at: (c.messages[0]?.at ?? c.at).getTime() }));
+    .map((c) => ({ id: c.id, studentId: c.studentId, studentName: c.student.name, collegeId: c.student.collegeId, at: (c.messages[0]?.at ?? c.at).getTime() }));
 
-  // At-a-glance dashboard metrics
+  /* At-a-glance dashboard metrics — one campus at a time, switched instantly
+     on the client rather than a server round-trip per tap. Cheap because the
+     college count is small (a handful, not hundreds): grouping in memory
+     beats N+1 queries, one per campus. */
   const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
-  const [todayPays, activeSubs, newStudents] = await Promise.all([
-    db.payment.findMany({ where: { at: { gte: startOfDay }, amount: { gt: 0 }, method: { in: ["cash", "upi", "credit"] } }, select: { amount: true } }),
-    db.subscription.count({ where: { active: true } }),
-    db.student.count({ where: { createdAt: { gte: startOfDay } } }),
+  const [todayPays, activeSubsRows, newStudentsByCollege] = await Promise.all([
+    db.payment.findMany({ where: { at: { gte: startOfDay }, amount: { gt: 0 }, method: { in: ["cash", "upi", "credit"] } }, select: { amount: true, collegeId: true } }),
+    db.subscription.findMany({ where: { active: true }, select: { student: { select: { collegeId: true } } } }),
+    // Still a COUNT, not a fetch — groupBy aggregates in the database, same
+    // as db.student.count() did before campuses needed splitting apart.
+    db.student.groupBy({ by: ["collegeId"], where: { createdAt: { gte: startOfDay } }, _count: true }),
   ]);
-  const metrics = {
-    todayRevenue: todayPays.reduce((s, p) => s + N(p.amount), 0),
-    pending: orders.filter((o) => o.status === "received" || o.status === "processing").length,
-    ready: orders.filter((o) => o.status === "ready").length,
-    activeSubs,
-    newStudents,
-  };
+  const newStudentsCount = (collegeId: string | null) =>
+    newStudentsByCollege.filter((g) => !collegeId || g.collegeId === collegeId).reduce((s, g) => s + g._count, 0);
+  const metricsFor = (collegeId: string | null) => ({
+    todayRevenue: todayPays.filter((p) => !collegeId || p.collegeId === collegeId).reduce((s, p) => s + N(p.amount), 0),
+    pending: orders.filter((o) => (o.status === "received" || o.status === "processing") && (!collegeId || o.student.collegeId === collegeId)).length,
+    ready: orders.filter((o) => o.status === "ready" && (!collegeId || o.student.collegeId === collegeId)).length,
+    activeSubs: activeSubsRows.filter((s) => !collegeId || s.student.collegeId === collegeId).length,
+    newStudents: newStudentsCount(collegeId),
+  });
+  const metrics: Record<string, ReturnType<typeof metricsFor>> = { all: metricsFor(null) };
+  for (const c of colleges) metrics[c.id] = metricsFor(c.id);
 
   const plainOrders = orders.map((o) => ({
     id: o.id,
     studentId: o.studentId,
+    collegeId: o.student.collegeId,
     status: o.status,
     express: o.express,
     actualPieces: o.actualPieces,

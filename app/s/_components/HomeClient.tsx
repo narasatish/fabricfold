@@ -2,7 +2,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
-import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
+import { Seg, Sheet, Switch, useToast, CampusSwitch, useCampusSwitch } from "@/components/chrome";
 import { fmt, timeAgo, initials } from "@/lib/format";
 import { isOverdue } from "@/lib/money";
 import { dayLabel, hhmm, istDateStr, istMinutes } from "@/lib/slots";
@@ -15,6 +15,7 @@ import { advanceStatusBatch } from "@/lib/actions/orders";
 type Order = {
   id: string;
   studentId: string;
+  collegeId: string;
   status: string;
   express: boolean;
   actualPieces: number | null;
@@ -31,12 +32,12 @@ type Order = {
 
 type PendingSub = {
   studentId: string;
-  student: { id: string; name: string };
+  student: { id: string; name: string; collegeId: string };
   hasOtp: boolean;
 };
 
 type Metrics = { todayRevenue: number; pending: number; ready: number; activeSubs: number; newStudents: number };
-type OpenComplaint = { id: string; studentId: string; studentName: string; at: number };
+type OpenComplaint = { id: string; studentId: string; studentName: string; collegeId: string; at: number };
 
 export default function StaffHomeClient({
   staff,
@@ -51,12 +52,17 @@ export default function StaffHomeClient({
   orders: Order[];
   pendingSubs: PendingSub[];
   colleges: { id: string; name: string }[];
-  metrics: Metrics;
+  metrics: Record<string, Metrics>;
   attendance: { clockedIn: boolean; clockedOut: boolean; since: number | null };
   openComplaints: OpenComplaint[];
 }) {
   const router = useRouter();
   const toast = useToast();
+  const [campus, setCampus] = useCampusSwitch(colleges);
+  const campusOrders = useMemo(() => (campus === "all" ? orders : orders.filter((o) => o.collegeId === campus)), [orders, campus]);
+  const campusPendingSubs = useMemo(() => (campus === "all" ? pendingSubs : pendingSubs.filter((p) => p.student.collegeId === campus)), [pendingSubs, campus]);
+  const campusComplaints = useMemo(() => (campus === "all" ? openComplaints : openComplaints.filter((c) => c.collegeId === campus)), [openComplaints, campus]);
+  const campusMetrics = metrics[campus] ?? metrics.all;
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "received" | "processing" | "ready" | "overdue">("all");
   const [showSubSheet, setShowSubSheet] = useState<string | null>(null);
@@ -75,7 +81,7 @@ export default function StaffHomeClient({
   const q = search.trim().toLowerCase();
 
   // Actionable orders: draft, received, processing, ready (sorted by status then date desc)
-  const actionable = orders.filter((o) => ["draft", "received", "processing", "ready"].includes(o.status));
+  const actionable = campusOrders.filter((o) => ["draft", "received", "processing", "ready"].includes(o.status));
   const ov = (o: Order) => isOverdue({ status: o.status, receivedAt: o.receivedAt ? new Date(o.receivedAt) : null, express: o.express });
   const overdueOrders = actionable.filter(ov);
   /* Ready 5+ days: shelf space and a student who has forgotten. Aged from the
@@ -234,28 +240,32 @@ export default function StaffHomeClient({
         )}
       </div>
 
+      {/* Campus switch — one tap to see St Mary's, BVRIT, or everything
+          together, instead of hunting for a filter buried in a list. */}
+      <CampusSwitch colleges={colleges} value={campus} onChange={setCampus} />
+
       {/* At-a-glance dashboard */}
       <div className="stat-grid">
         <div className="stat-tile">
-          <div className="stat-num">{fmt(metrics.todayRevenue)}</div>
+          <div className="stat-num">{fmt(campusMetrics.todayRevenue)}</div>
           <div className="stat-lbl">Today&apos;s takings</div>
         </div>
         <button className="stat-tile tap" onClick={() => setFilter("received")}>
-          <div className="stat-num">{metrics.pending}</div>
+          <div className="stat-num">{campusMetrics.pending}</div>
           <div className="stat-lbl">In progress</div>
         </button>
         <button className="stat-tile tap" onClick={() => setFilter("ready")}>
-          <div className="stat-num">{metrics.ready}</div>
+          <div className="stat-num">{campusMetrics.ready}</div>
           <div className="stat-lbl">Ready to collect</div>
         </button>
         <div className="stat-tile">
-          <div className="stat-num">{metrics.activeSubs}</div>
+          <div className="stat-num">{campusMetrics.activeSubs}</div>
           <div className="stat-lbl">Active plans</div>
         </div>
       </div>
-      {metrics.newStudents > 0 && (
+      {campusMetrics.newStudents > 0 && (
         <div className="muted center mt8" style={{ fontSize: "12px" }}>
-          {metrics.newStudents} new student{metrics.newStudents > 1 ? "s" : ""} registered today
+          {campusMetrics.newStudents} new student{campusMetrics.newStudents > 1 ? "s" : ""} registered today
         </div>
       )}
 
@@ -322,10 +332,10 @@ export default function StaffHomeClient({
       ) : (
         <>
           {/* Subscription requests */}
-          {pendingSubs.length > 0 && (
+          {campusPendingSubs.length > 0 && (
             <>
               <div className="sec-title mt20">Subscription requests</div>
-              {pendingSubs.map((p) => (
+              {campusPendingSubs.map((p) => (
                 <button
                   key={p.studentId}
                   className="card mt10"
@@ -375,7 +385,7 @@ export default function StaffHomeClient({
               from this screen. A complaint sitting unanswered is worse than a
               late order: the student is already unhappy and now also
               ignored. */}
-          {openComplaints.length > 0 && (
+          {campusComplaints.length > 0 && (
             <button
               className="card pad mt10"
               onClick={() => router.push("/s/complaints")}
@@ -386,10 +396,10 @@ export default function StaffHomeClient({
                   <Svg name="alert" size={20} />
                 </span>
                 <span style={{ color: "var(--red)", fontSize: "13.5px", fontWeight: "600" }}>
-                  {openComplaints.length} complaint{openComplaints.length > 1 ? "s" : ""} waiting on a reply
+                  {campusComplaints.length} complaint{campusComplaints.length > 1 ? "s" : ""} waiting on a reply
                 </span>
               </div>
-              {openComplaints.slice(0, 3).map((c) => (
+              {campusComplaints.slice(0, 3).map((c) => (
                 <div key={c.id} className="muted mt6" style={{ fontSize: 12.5 }}>{c.studentName} — {timeAgo(c.at)}</div>
               ))}
             </button>

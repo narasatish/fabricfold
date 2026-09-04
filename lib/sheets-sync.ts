@@ -267,30 +267,56 @@ export async function runSheetsSync() {
    a register that lags a day is one nobody trusts. Wholesale rewrite, not
    append: the roster is small (hundreds of rows), and rewriting is immune to
    the dedup drift that append-based tabs suffer. */
+function studentRow(st: {
+  bags: { code: string }[]; id: string; name: string; phone: string; kind: string;
+  college: { name: string } | null;
+  subscription: { active: boolean; plan: string; cyclesTotal: number; cyclesUsed: number } | null;
+  createdAt: Date;
+}): (string | number)[] {
+  return [
+    st.bags[0]?.code || st.id,
+    st.name,
+    "'+91 " + st.phone, // leading apostrophe — see staffRows note above
+    st.kind === "faculty" ? "Faculty" : "Student",
+    st.college?.name || "—",
+    st.subscription?.active ? st.subscription.plan : "—",
+    st.subscription?.active ? st.subscription.cyclesTotal - st.subscription.cyclesUsed : "—",
+    st.createdAt.toISOString().slice(0, 10),
+  ];
+}
+
+const STUDENT_HEADER = ["Customer ID", "Name", "Phone", "Type", "College", "Plan", "Cycles left", "Joined"];
+
+/* One combined "Students" tab, PLUS one tab per campus (owner, Sep 2026: "no
+   mix-up between colleges — even the Sheet"). A counter working BVRIT only
+   should never have to filter St Mary's rows out by eye; a separate tab does
+   that for free and can't drift, since both are built from the same query. */
 export async function writeStudentsTab() {
-  const students = await db.student.findMany({
-    orderBy: { createdAt: "asc" },
-    include: {
-      college: { select: { name: true } },
-      subscription: { select: { active: true, plan: true, cyclesTotal: true, cyclesUsed: true } },
-      bags: { where: { status: "active" }, select: { code: true }, take: 1 },
-    },
-  });
-  const rows: (string | number)[][] = [["Customer ID", "Name", "Phone", "Type", "College", "Plan", "Cycles left", "Joined"]];
-  for (const st of students) {
-    rows.push([
-      st.bags[0]?.code || st.id,
-      st.name,
-      "'+91 " + st.phone, // leading apostrophe — see staffRows note above
-      st.kind === "faculty" ? "Faculty" : "Student",
-      st.college?.name || "—",
-      st.subscription?.active ? st.subscription.plan : "—",
-      st.subscription?.active ? st.subscription.cyclesTotal - st.subscription.cyclesUsed : "—",
-      st.createdAt.toISOString().slice(0, 10),
-    ]);
-  }
+  const [students, colleges] = await Promise.all([
+    db.student.findMany({
+      orderBy: { createdAt: "asc" },
+      include: {
+        college: { select: { id: true, name: true } },
+        subscription: { select: { active: true, plan: true, cyclesTotal: true, cyclesUsed: true } },
+        bags: { where: { status: "active" }, select: { code: true }, take: 1 },
+      },
+    }),
+    db.college.findMany({ where: { active: true }, select: { id: true, name: true } }),
+  ]);
+
+  const rows: (string | number)[][] = [STUDENT_HEADER];
+  for (const st of students) rows.push(studentRow(st));
   rows.push([], ["Total", students.length, "Faculty", students.filter((x) => x.kind === "faculty").length]);
   await writeSheet("Students", rows);
+
+  for (const c of colleges) {
+    const theirs = students.filter((st) => st.college?.id === c.id);
+    const campusRows: (string | number)[][] = [STUDENT_HEADER];
+    for (const st of theirs) campusRows.push(studentRow(st));
+    campusRows.push([], ["Total", theirs.length, "Faculty", theirs.filter((x) => x.kind === "faculty").length]);
+    // Sheet tab names can't carry "/" — campus names are free text elsewhere.
+    await writeSheet(`Students — ${c.name}`.replace(/\//g, "-").slice(0, 100), campusRows);
+  }
 }
 
 export async function runRosterSync() {

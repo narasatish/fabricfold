@@ -28,6 +28,15 @@ describe("the Students roster tab", () => {
   it("counts faculty separately at the foot", () => {
     expect(sync).toMatch(/"Faculty", students\.filter\(\(x\) => x\.kind === "faculty"\)\.length/);
   });
+  it("also writes ONE tab per campus, built from the same rows — no manual filtering, no drift", () => {
+    /* Owner, Sep 2026: "nothing should mixup" between colleges, down to the
+       Sheet itself. Same query, same row-builder as the combined tab — a
+       campus tab can't show different data than the combined one shows for
+       that campus, because there is only one source of truth for a row. */
+    expect(sync).toMatch(/for \(const c of colleges\) \{/);
+    expect(sync).toMatch(/const theirs = students\.filter\(\(st\) => st\.college\?\.id === c\.id\)/);
+    expect(sync).toMatch(/await writeSheet\(`Students — \$\{c\.name\}`\.replace\(\/\\\/\/g, "-"\)\.slice\(0, 100\), campusRows\)/);
+  });
 });
 
 describe("the Staff tab", () => {

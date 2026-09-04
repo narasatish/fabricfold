@@ -25,8 +25,11 @@ describe("staff home no longer ships the student table", () => {
     expect(students).toMatch(/export async function searchStudents/);
     expect(homeUi).toMatch(/await searchStudents\(q\)/);
   });
-  it("still counts new students with a COUNT, not a fetch", () => {
-    expect(home).toMatch(/db\.student\.count\(\{ where: \{ createdAt/);
+  it("still counts new students by an aggregate, not a full-row fetch", () => {
+    // groupBy (per-campus breakdown) replaced count(), but it's still the
+    // database doing the counting — not a findMany shipping whole rows over.
+    expect(home).toMatch(/db\.student\.groupBy\(\{ by: \["collegeId"\], where: \{ createdAt/);
+    expect(home).not.toMatch(/db\.student\.findMany\(\{ where: \{ createdAt/);
   });
 });
 

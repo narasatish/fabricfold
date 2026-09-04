@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
-import { Seg, Sheet, useToast } from "@/components/chrome";
+import { Seg, Sheet, useToast, CampusSwitch, useCampusSwitch } from "@/components/chrome";
 import { fmt, initials } from "@/lib/format";
 import { bulkRegisterStudents, broadcastNotice } from "@/lib/actions/students";
 
@@ -22,7 +22,7 @@ export default function StudentsClient({ students, colleges, staffRole }: { stud
   };
 
   const [q, setQ] = useState("");
-  const [campus, setCampus] = useState<"all" | string>("all");
+  const [campus, setCampus] = useCampusSwitch(colleges);
   const [sub, setSub] = useState<"all" | "active" | "none">("all");
 
   const [showImport, setShowImport] = useState(false);
@@ -79,6 +79,10 @@ export default function StudentsClient({ students, colleges, staffRole }: { stud
 
   return (
     <div className="pad">
+      {/* Campus switch — same shared control as Home, same persisted choice,
+          so a manager working BVRIT doesn't see St Mary's names mixed in. */}
+      <CampusSwitch colleges={colleges} value={campus} onChange={setCampus} />
+
       {/* Action buttons */}
       <div className="row gap8">
         <button className="btn" onClick={() => { setImportResult(null); setShowImport(true); }}>
@@ -98,14 +102,6 @@ export default function StudentsClient({ students, colleges, staffRole }: { stud
         {q && <button className="action" onClick={() => setQ("")} aria-label="Clear"><Svg name="x" size={18} /></button>}
       </div>
 
-      {colleges.length > 1 && (
-        <div className="mt12">
-          <Seg<"all" | string>
-            options={[["all", "All campuses"], ...colleges.map((c) => [c.id, c.name] as [string, string])]}
-            value={campus} onChange={setCampus}
-          />
-        </div>
-      )}
       <div className="mt10">
         <Seg<"all" | "active" | "none">
           options={[["all", "Everyone"], ["active", "Subscribers"], ["none", "No plan"]]}

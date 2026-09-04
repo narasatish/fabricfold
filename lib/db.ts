@@ -15,9 +15,12 @@ function makeAdapter() {
     const schema = new URL(url).searchParams.get("schema") || undefined;
     // Cap connections so a serverless instance never exhausts Supabase's pooler.
     // The transaction pooler (port 6543) releases each connection after a query,
-    // so a small client pool is plenty and safe under concurrency.
+    // so a small client pool is plenty and safe under concurrency. Overridable
+    // via DB_POOL_MAX for load-testing against a host without that pooler
+    // (e.g. Render's direct Postgres) — production default stays 4.
+    const max = Number(process.env.DB_POOL_MAX) || 4;
     return new PrismaPg(
-      { connectionString: url, max: 4, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 15_000 },
+      { connectionString: url, max, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 15_000 },
       schema ? { schema } : undefined,
     );
   }

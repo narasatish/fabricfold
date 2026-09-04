@@ -81,11 +81,15 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   const [slotEdit, setSlotEdit] = useState<ReturnType<typeof emptySlot>>(emptySlot(colleges[0]?.id || ""));
 
   const run = async (fn: () => Promise<{ ok: boolean; error?: string }>, okMsg: string) => {
-    const r = await fn();
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(okMsg);
-    setSheet(null);
-    router.refresh();
+    try {
+      const r = await fn();
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(okMsg);
+      setSheet(null);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    }
   };
 
   const setRatePrice = (svc: string, idx: number, price: number) => {

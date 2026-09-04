@@ -7,6 +7,17 @@ import { sendPushTo } from "./push";
    never blocks an order. */
 const WA_API = "https://graph.facebook.com/v20.0";
 
+/* A failed send used to only reach console.error, which nobody reviews on
+   Vercel serverless — a sustained outage (rate-limit, expired token) meant
+   students silently stopped getting "order ready" pings with no trace
+   anywhere the owner would see, including the app's own error-digest cron.
+   Record it too, best-effort — logging a failure must never itself throw. */
+async function logWaFailure(message: string) {
+  try {
+    await db.errorLog.create({ data: { kind: "server", message: `WhatsApp: ${message}`.slice(0, 2000) } });
+  } catch { /* logging is best-effort */ }
+}
+
 function waCreds() {
   const token = process.env.WHATSAPP_TOKEN, phoneId = process.env.WHATSAPP_PHONE_ID;
   return token && phoneId ? { token, phoneId } : null;
@@ -22,12 +33,15 @@ async function waPost(body: unknown) {
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      console.error("WhatsApp send failed", res.status, await res.text().catch(() => ""));
+      const detail = await res.text().catch(() => "");
+      console.error("WhatsApp send failed", res.status, detail);
+      await logWaFailure(`send failed (${res.status}) ${detail}`);
       return false;
     }
     return true;
   } catch (e) {
     console.error("WhatsApp send error", e);
+    await logWaFailure(`send error: ${e instanceof Error ? e.message : String(e)}`);
     return false;
   }
 }
@@ -84,11 +98,13 @@ async function twilioWaSend(phone: string, body: string, mediaUrl?: string) {
       // failure and worth naming rather than logging a bare status code.
       const detail = await res.text().catch(() => "");
       console.error("Twilio WhatsApp send failed", res.status, detail);
+      await logWaFailure(`Twilio send failed (${res.status}) ${detail}`);
       return false;
     }
     return true;
   } catch (e) {
     console.error("Twilio WhatsApp send error", e);
+    await logWaFailure(`Twilio send error: ${e instanceof Error ? e.message : String(e)}`);
     return false;
   }
 }

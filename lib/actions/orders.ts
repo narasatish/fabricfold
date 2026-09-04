@@ -490,6 +490,13 @@ export async function collectOrder(orderId: string, code: string) {
   const ok = (otp && v === otp.code) || v === o.id.slice(-4) || v === o.id.replace(/\D/g, "");
   if (!ok) return { ok: false as const, error: "Code / Order ID does not match" };
   if (!o.paid && Number(o.total) > 0) return { ok: false as const, error: "Record payment before collection" };
+  // Collection is the last step of the lifecycle (received → processing →
+  // ready → collected) — every other transition enforces its starting state
+  // explicitly, this one didn't, so an order could be marked collected
+  // straight from "received"/"processing", skipping the piece-recount that
+  // normally happens on the way to "ready" and trusting the customer's own
+  // declared piece count as the final lifetimePieces figure.
+  if (o.status !== "ready") return { ok: false as const, error: `Order is ${o.status}, not ready for collection` };
 
   try {
     await db.$transaction(async (tx) => {
@@ -498,10 +505,10 @@ export async function collectOrder(orderId: string, code: string) {
          "collected" before either writes, so a bare update would run twice —
          double-counting lifetimePieces and double-writing the Sheet row, with
          no unique index to collide on (unlike payCore's payment rows). Scoping
-         the update itself to `status: { not: "collected" }` and checking the
-         affected count makes the transition atomic: only the FIRST call's
-         update actually matches a row, so only it proceeds. */
-      const updated = await tx.order.updateMany({ where: { id: o.id, status: { not: "collected" } }, data: { status: "collected" } });
+         the update itself to `status: "ready"` and checking the affected
+         count makes the transition atomic: only the FIRST call's update
+         actually matches a row, so only it proceeds. */
+      const updated = await tx.order.updateMany({ where: { id: o.id, status: "ready" }, data: { status: "collected" } });
       if (updated.count === 0) throw new Error("This order was already collected");
       await tx.orderEvent.create({ data: { orderId: o.id, status: "collected" } });
       await tx.student.update({ where: { id: o.studentId }, data: { lifetimePieces: { increment: o.actualPieces || 0 } } });
@@ -662,6 +669,13 @@ export async function redoOrder(orderId: string): Promise<ActionResult> {
   const cfg = await getConfig();
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
   assertSameCollege(st, o.collegeId);
+  // A re-do exists to make good on a real service failure — it makes no
+  // sense against an order that was never actually placed for real (a draft)
+  // or one the student already backed out of (cancelled). Unlike every other
+  // transition this one had no starting-state check at all.
+  if (o.status === "draft" || o.status === "cancelled") {
+    return { ok: false, error: `Can't re-do a ${o.status} order` };
+  }
   const n = await db.order.create({
     data: {
       id: orderCode(), studentId: o.studentId, collegeId: o.collegeId, service: o.service,

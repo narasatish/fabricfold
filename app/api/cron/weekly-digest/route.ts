@@ -18,8 +18,17 @@ export async function GET(req: Request) {
   }
 
   const cfg = await db.appConfig.findUnique({ where: { id: "main" } });
-  const to = (cfg?.settings as { reportEmail?: string } | null)?.reportEmail || process.env.OWNER_EMAIL;
+  const settings = (cfg?.settings as { reportEmail?: string; lastWeeklyDigestAt?: string } | null) ?? {};
+  const to = settings.reportEmail || process.env.OWNER_EMAIL;
   if (!to) return Response.json({ ok: false, reason: "no owner email configured" });
+
+  // Guards a retried/duplicate trigger in the same window from double-emailing
+  // the owner — collection-reminders and error-digest already have their own
+  // equivalent guard, this one was missing it.
+  const lastSent = settings.lastWeeklyDigestAt ? new Date(settings.lastWeeklyDigestAt) : null;
+  if (lastSent && Date.now() - lastSent.getTime() < 6 * 86_400_000) {
+    return Response.json({ ok: true, skipped: "already sent this week" });
+  }
 
   const since = new Date(Date.now() - 7 * 86_400_000);
   const N = (x: unknown) => Number(x || 0);
@@ -58,6 +67,11 @@ export async function GET(req: Request) {
       `Complaints: ${complaints} new · ${openComplaints} still open` +
       stale,
   );
+
+  await db.appConfig.update({
+    where: { id: "main" },
+    data: { settings: { ...settings, lastWeeklyDigestAt: new Date().toISOString() } },
+  });
 
   return Response.json({ ok: true, revenue: Math.round(revenue), orders, newStudents, staleReady: ready.length });
 }

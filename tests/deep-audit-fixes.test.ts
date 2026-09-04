@@ -193,6 +193,40 @@ describe("a staff role change forces re-login, same as deactivation does", () =>
   });
 });
 
+describe("collectOrder can't skip straight from received/processing to collected", () => {
+  it("requires status === \"ready\" before it will even try the transaction", () => {
+    const src = read("lib/actions/orders.ts");
+    const fn = src.slice(src.indexOf("export async function collectOrder"), src.indexOf("export async function payOrder"));
+    expect(fn).toMatch(/if \(o\.status !== "ready"\) return \{ ok: false as const, error: `Order is \$\{o\.status\}, not ready for collection` \};/);
+    expect(fn).toMatch(/tx\.order\.updateMany\(\{ where: \{ id: o\.id, status: "ready" \}, data: \{ status: "collected" \} \}\)/);
+  });
+});
+
+describe("redoOrder refuses a draft or already-cancelled order", () => {
+  it("checks status before creating the free re-do", () => {
+    const src = read("lib/actions/orders.ts");
+    const fn = src.slice(src.indexOf("export async function redoOrder"), src.indexOf("export async function redoOrder") + 1500);
+    expect(fn).toMatch(/if \(o\.status === "draft" \|\| o\.status === "cancelled"\)/);
+  });
+});
+
+describe("weekly-digest cron won't double-email the owner on a retried trigger", () => {
+  it("checks and stamps lastWeeklyDigestAt in AppConfig.settings", () => {
+    const src = read("app/api/cron/weekly-digest/route.ts");
+    expect(src).toMatch(/if \(lastSent && Date\.now\(\) - lastSent\.getTime\(\) < 6 \* 86_400_000\)/);
+    expect(src).toMatch(/lastWeeklyDigestAt: new Date\(\)\.toISOString\(\)/);
+  });
+});
+
+describe("a WhatsApp send failure is persisted, not just console.error'd into the void", () => {
+  it("logWaFailure writes to ErrorLog and is called from every failure branch", () => {
+    const src = read("lib/notify.ts");
+    expect(src).toMatch(/async function logWaFailure\(message: string\) \{/);
+    expect(src).toMatch(/db\.errorLog\.create\(\{ data: \{ kind: "server", message: `WhatsApp: \$\{message\}`/);
+    expect((src.match(/await logWaFailure\(/g) || []).length).toBeGreaterThanOrEqual(4);
+  });
+});
+
 describe("adjustCycleUsage locks the subscription row before writing buckets", () => {
   it("uses SELECT ... FOR UPDATE inside a transaction, re-reading fresh", () => {
     const src = read("lib/actions/subscription.ts");

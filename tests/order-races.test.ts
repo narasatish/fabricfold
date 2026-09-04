@@ -20,7 +20,7 @@ describe("collectOrder can't double-collect under concurrency", () => {
     // `if (o.status === "collected")` before the transaction — that read
     // happens before the transaction starts and two concurrent calls would
     // both pass it under READ COMMITTED.
-    expect(fn).toMatch(/tx\.order\.updateMany\(\{ where: \{ id: o\.id, status: \{ not: "collected" \} \}, data: \{ status: "collected" \} \}\)/);
+    expect(fn).toMatch(/tx\.order\.updateMany\(\{ where: \{ id: o\.id, status: "ready" \}, data: \{ status: "collected" \} \}\)/);
   });
   it("checks the affected row count and refuses if nothing actually transitioned", () => {
     expect(fn).toMatch(/if \(updated\.count === 0\) throw new Error\("This order was already collected"\)/);

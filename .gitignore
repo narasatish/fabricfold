@@ -36,3 +36,6 @@ android/gradle-apk.txt
 # restore-test snapshots
 snap*.json
 *.tsbuildinfo
+
+.vercel
+.env*

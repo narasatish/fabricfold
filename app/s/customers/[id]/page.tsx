@@ -25,6 +25,13 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
   });
   if (!student) notFound();
 
+  /* The bag code (B1001/S1055/G1002...) is the CUSTOMER-FACING ID — printed
+     on the physical bag, quoted at the counter. student.id is an internal
+     random 6-digit row key nobody outside the database should ever see; the
+     header was showing that instead, which is exactly what looked wrong. */
+  const activeBag = student.bags.find((b) => b.status === "active");
+  const displayId = activeBag?.code ?? student.id;
+
   /* Campuses a student may be moved to, plus each one's closed day so the
      edit sheet can grey out a wash day the campus does not operate. */
   const colleges = await db.college.findMany({
@@ -72,6 +79,7 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
           kgPerCycle: N(student.subscription.kgPerCycle),
           expiresAt: student.subscription.expiresAt ? student.subscription.expiresAt.getTime() : null,
           cycleLog: student.subscription.cycleLog.map((c) => ({ at: c.at.getTime(), orderId: c.orderId })),
+          buckets: ((student.subscription.buckets as unknown as { service: string; cycles: number; used: number; kgPerCycle: number }[] | null) ?? []).map((b) => ({ ...b, label: SERVICE_LABEL[b.service] || b.service })),
         }
       : null,
     orders: student.orders.map((o) => ({ id: o.id, status: o.status, service: o.service, total: N(o.total), createdAt: o.createdAt.getTime() })),
@@ -82,7 +90,7 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
 
   return (
     <div className="screen">
-      <TopBar title={student.name} sub={`ID ${student.id}`} back="/s" />
+      <TopBar title={student.name} sub={`ID ${displayId}`} back="/s" />
       <StaffCustomerClient
         colleges={colleges}
         student={plain}

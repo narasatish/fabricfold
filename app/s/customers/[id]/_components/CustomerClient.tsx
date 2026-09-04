@@ -5,7 +5,7 @@ import { Svg } from "@/components/icons";
 import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, loyaltyBadge } from "@/lib/format";
 import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
-import { assignSubscription, upgradeSubscription, cancelSubscription } from "@/lib/actions/subscription";
+import { assignSubscription, upgradeSubscription, cancelSubscription, adjustCycleUsage } from "@/lib/actions/subscription";
 import { issueBag, retireBag, releaseBagCode, setBagCode, reissueBagSameCode } from "@/lib/actions/bags";
 import { walkInOrder } from "@/lib/actions/orders";
 import { sellCyclePack } from "@/lib/actions/subscription";
@@ -26,6 +26,7 @@ type Student = {
   subscription: {
     active: boolean; plan: string; cyclesTotal: number; cyclesUsed: number; kgPerCycle: number;
     expiresAt: number | null; cycleLog: { at: number; orderId: string }[];
+    buckets: { service: string; label: string; cycles: number; used: number; kgPerCycle: number }[];
   } | null;
   bags: { id: string; code: string; tier: string | null; complimentary: boolean; price: number; status: string; issuedAt: number }[];
   orders: { id: string; status: string; service: string; total: number; createdAt: number }[];
@@ -229,6 +230,27 @@ Currently ${current}. Type the code printed on the bag they are being given.
   const cyclesLeft = student.subscription
     ? Math.max(0, student.subscription.cyclesTotal - student.subscription.cyclesUsed)
     : 0;
+
+  // Correct cycle usage per bucket (Admin+) — e.g. fixing a bulk-import count.
+  const [showCycleEdit, setShowCycleEdit] = useState(false);
+  const [cycleEdits, setCycleEdits] = useState<Record<string, number>>({});
+  const [cycleEditBusy, setCycleEditBusy] = useState(false);
+  const openCycleEdit = () => {
+    const init: Record<string, number> = {};
+    (student.subscription?.buckets ?? []).forEach((b) => { init[b.service] = b.used; });
+    setCycleEdits(init);
+    setShowCycleEdit(true);
+  };
+  const doAdjustCycles = async () => {
+    setCycleEditBusy(true);
+    const updates = Object.entries(cycleEdits).map(([service, used]) => ({ service, used }));
+    const r = await adjustCycleUsage(student.id, updates);
+    setCycleEditBusy(false);
+    if (!r.ok) return toast(r.error || "Failed", true);
+    toast(r.changed ? "Cycle usage corrected" : "Nothing changed");
+    setShowCycleEdit(false);
+    router.refresh();
+  };
 
   const doCancel = async () => {
     setCancelBusy(true);
@@ -435,10 +457,21 @@ Currently ${current}. Type the code printed on the bag they are being given.
           </div>
           <div className="kv mt8"><span className="k">Plan</span><span>{student.subscription.plan}</span></div>
           <div className="kv"><span className="k">Cycles used</span><span className="mono">{student.subscription.cyclesUsed} / {student.subscription.cyclesTotal}</span></div>
+          {student.subscription.buckets.map((b) => (
+            <div key={b.service} className="kv" style={{ paddingLeft: 12 }}>
+              <span className="k muted" style={{ fontSize: 12.5 }}>{b.label}</span>
+              <span className="mono muted" style={{ fontSize: 12.5 }}>{b.used} / {b.cycles}</span>
+            </div>
+          ))}
           <div className="row wrap gap8 mt12">
             {staffRole >= 2 && upgradeOptions.length > 0 && (
               <button className="btn xs sec" onClick={() => { setUpgradePlanId(upgradeOptions[0].id); setShowUpgrade(true); }}>
                 <Svg name="layers" size={13} /> Change plan
+              </button>
+            )}
+            {staffRole >= 3 && (
+              <button className="btn xs sec" onClick={openCycleEdit}>
+                <Svg name="edit" size={13} /> Correct cycles used
               </button>
             )}
             {staffRole >= 3 && student.subscription.active && (
@@ -715,6 +748,33 @@ Currently ${current}. Type the code printed on the bag they are being given.
       </Sheet>
 
       {/* Cancel a plan (Admin+) */}
+      {/* Correct cycles used, per service bucket (Admin+) */}
+      <Sheet open={showCycleEdit} onClose={() => setShowCycleEdit(false)}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "6px" }}>Correct cycles used</h2>
+          <div className="muted" style={{ fontSize: "12.5px", marginBottom: "14px" }}>
+            Sets exactly how many cycles have been used, per service — for fixing an import or a
+            counter mistake, not for normal use (orders burn cycles automatically).
+          </div>
+          {(student.subscription?.buckets ?? []).map((b) => {
+            const val = cycleEdits[b.service] ?? b.used;
+            return (
+              <div key={b.service} className="field">
+                <label>{b.label} <span className="muted">(max {b.cycles})</span></label>
+                <div className="qty">
+                  <button onClick={() => setCycleEdits({ ...cycleEdits, [b.service]: Math.max(0, val - 1) })}>−</button>
+                  <span className="mono">{val}</span>
+                  <button onClick={() => setCycleEdits({ ...cycleEdits, [b.service]: Math.min(b.cycles, val + 1) })}>+</button>
+                </div>
+              </div>
+            );
+          })}
+          <button className="btn mt16" onClick={doAdjustCycles} disabled={cycleEditBusy}>
+            {cycleEditBusy ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </Sheet>
+
       <Sheet open={showCancel} onClose={() => setShowCancel(false)}>
         <div className="pad">
           <h2 style={{ marginBottom: "6px" }}>Cancel plan</h2>

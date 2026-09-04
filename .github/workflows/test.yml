@@ -1,0 +1,46 @@
+name: Test
+
+on:
+  push:
+    branches: [main, render-migration]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Ephemeral Postgres for this run only — never touches production.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: fabricfold
+          POSTGRES_PASSWORD: fabricfold
+          POSTGRES_DB: fabricfold_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://fabricfold:fabricfold@localhost:5432/fabricfold_ci?schema=ff_test
+      AUTH_SECRET: ci-test-secret-not-used-in-production
+      DEV_OTP: "123456"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Push schema to the CI database
+        run: npx prisma db push --skip-generate
+
+      - run: npx tsc --noEmit
+
+      - run: npm test

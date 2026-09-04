@@ -149,20 +149,31 @@ export async function assignSubscription(studentId: string, planId: string, meth
   const creditApplied = applyCredits ? Math.min(Number(stu.credits), gross) : 0;
   const cash = gross - creditApplied;
 
-  await db.$transaction(async (tx) => {
-    await tx.subscription.upsert({
-      where: { studentId },
-      create: { studentId, active: true, plan: plan.name, planId: plan.id, buckets, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesTotal, kgPerCycle: buckets[0]?.kgPerCycle ?? 7 },
-      update: { active: true, plan: plan.name, planId: plan.id, buckets, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesTotal, cyclesUsed: 0, kgPerCycle: buckets[0]?.kgPerCycle ?? 7 },
+  try {
+    await db.$transaction(async (tx) => {
+      /* Locked, then re-checked — the `stu.subscription?.active` guard above
+         ran before this transaction started, so two concurrent assigns for a
+         student with no plan yet would both pass it and both charge a
+         Payment row for the same plan. */
+      await tx.$executeRaw`SELECT id FROM "Subscription" WHERE "studentId" = ${studentId} FOR UPDATE`;
+      const fresh = await tx.subscription.findUnique({ where: { studentId } });
+      if (fresh?.active) throw new Error("This student already has an active plan");
+      await tx.subscription.upsert({
+        where: { studentId },
+        create: { studentId, active: true, plan: plan.name, planId: plan.id, buckets, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesTotal, kgPerCycle: buckets[0]?.kgPerCycle ?? 7 },
+        update: { active: true, plan: plan.name, planId: plan.id, buckets, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesTotal, cyclesUsed: 0, kgPerCycle: buckets[0]?.kgPerCycle ?? 7 },
+      });
+      if (creditApplied > 0) {
+        await tx.student.update({ where: { id: studentId }, data: { credits: { decrement: creditApplied } } });
+        await tx.payment.create({ data: { method: "credit", amount: creditApplied, collegeId: stu.collegeId, studentId, note: `Subscription: ${plan.name} (credit applied)` } });
+      }
+      if (cash > 0) {
+        await tx.payment.create({ data: { method, amount: cash, collegeId: stu.collegeId, studentId, note: `Subscription: ${plan.name} (assigned at counter)` } });
+      }
     });
-    if (creditApplied > 0) {
-      await tx.student.update({ where: { id: studentId }, data: { credits: { decrement: creditApplied } } });
-      await tx.payment.create({ data: { method: "credit", amount: creditApplied, collegeId: stu.collegeId, studentId, note: `Subscription: ${plan.name} (credit applied)` } });
-    }
-    if (cash > 0) {
-      await tx.payment.create({ data: { method, amount: cash, collegeId: stu.collegeId, studentId, note: `Subscription: ${plan.name} (assigned at counter)` } });
-    }
-  });
+  } catch (e) {
+    return { ok: false as const, error: (e as Error).message };
+  }
   await db.otp.deleteMany({ where: { purpose: "subscription", refId: studentId } });
 
   /* The customer ID follows the plan. Bronze -> B###, Silver -> S###, Gold ->
@@ -220,40 +231,49 @@ export async function upgradeSubscription(studentId: string, planId: string, met
     return { ok: false as const, error: "That plan isn't more expensive — handle a downgrade at the counter" };
   }
 
-  // Rebuild buckets on the new plan, carrying the old usage across.
   type Used = { service: string; cycles: number; used: number; kgPerCycle: number };
-  const oldBuckets = (cur.buckets as unknown as Used[] | null) || [];
-  const usedByService = new Map<string, number>();
-  for (const b of oldBuckets) usedByService.set(b.service, (usedByService.get(b.service) || 0) + b.used);
-
-  let buckets = usageBuckets(plan.buckets as unknown as PlanBucket[]).map((b) => ({
-    ...b,
-    used: Math.min(b.cycles, usedByService.get(b.service) || 0),
-  }));
-
-  // A legacy subscription has no per-service buckets, so the map above is empty
-  // and every bucket would come out unused — handing the student back every
-  // cycle they had already spent. Spend their old total across the new buckets
-  // instead, so a plan change can never be a free reset.
-  if (!oldBuckets.length && cur.cyclesUsed > 0) {
-    let toSpend = cur.cyclesUsed;
-    buckets = buckets.map((b) => {
-      const take = Math.min(b.cycles, toSpend);
-      toSpend -= take;
-      return { ...b, used: take };
-    });
-  }
-
-  const cyclesTotal = buckets.reduce((s, b) => s + b.cycles, 0);
-  const cyclesUsed = buckets.reduce((s, b) => s + b.used, 0);
+  let cyclesTotal = 0, cyclesUsed = 0, kgPerCycle = Number(cur.kgPerCycle);
 
   await db.$transaction(async (tx) => {
+    /* Locked, then re-read fresh — not the `cur` fetched before this
+       transaction started. A cycle burned by an in-flight order between
+       that read and this write (accept/walk-in run their own transaction
+       and could commit in the gap) would otherwise get silently overwritten
+       by this update's stale usedByService snapshot, understating what the
+       student has actually used. */
+    await tx.$executeRaw`SELECT id FROM "Subscription" WHERE "studentId" = ${studentId} FOR UPDATE`;
+    const fresh = await tx.subscription.findUniqueOrThrow({ where: { studentId } });
+
+    // Rebuild buckets on the new plan, carrying the old usage across.
+    const oldBuckets = (fresh.buckets as unknown as Used[] | null) || [];
+    const usedByService = new Map<string, number>();
+    for (const b of oldBuckets) usedByService.set(b.service, (usedByService.get(b.service) || 0) + b.used);
+
+    let buckets = usageBuckets(plan.buckets as unknown as PlanBucket[]).map((b) => ({
+      ...b,
+      used: Math.min(b.cycles, usedByService.get(b.service) || 0),
+    }));
+
+    // A legacy subscription has no per-service buckets, so the map above is empty
+    // and every bucket would come out unused — handing the student back every
+    // cycle they had already spent. Spend their old total across the new buckets
+    // instead, so a plan change can never be a free reset.
+    if (!oldBuckets.length && fresh.cyclesUsed > 0) {
+      let toSpend = fresh.cyclesUsed;
+      buckets = buckets.map((b) => {
+        const take = Math.min(b.cycles, toSpend);
+        toSpend -= take;
+        return { ...b, used: take };
+      });
+    }
+
+    cyclesTotal = buckets.reduce((s, b) => s + b.cycles, 0);
+    cyclesUsed = buckets.reduce((s, b) => s + b.used, 0);
+    kgPerCycle = buckets[0]?.kgPerCycle ?? Number(fresh.kgPerCycle);
+
     await tx.subscription.update({
       where: { studentId },
-      data: {
-        plan: plan.name, planId: plan.id, buckets, cyclesTotal, cyclesUsed,
-        kgPerCycle: buckets[0]?.kgPerCycle ?? Number(cur.kgPerCycle),
-      },
+      data: { plan: plan.name, planId: plan.id, buckets, cyclesTotal, cyclesUsed, kgPerCycle },
     });
     await tx.payment.create({
       data: { method, amount: difference, collegeId: stu.collegeId, studentId, note: `Plan change: ${cur.plan} → ${plan.name}` },
@@ -370,7 +390,19 @@ export async function sellCyclePack(
 
   await db.$transaction(async (tx) => {
     type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
-    const existing = stu.subscription;
+    /* SELECT ... FOR UPDATE, not a plain read — Postgres's default READ
+       COMMITTED lets two concurrent transactions both read the same "before"
+       state before either writes, so reading inside the transaction alone
+       does NOT stop the race: two concurrent top-ups (two terminals, or a
+       retried request) would still both compute from the same snapshot, and
+       the second write overwrites the first's bucket array instead of
+       adding to it — the student pays twice but only one top-up's cycles
+       land. The row lock forces the second transaction to wait for the
+       first to commit, then see its result. A row that doesn't exist yet
+       (first-ever pack for this student) has nothing to lock — fine, since
+       there's nothing to race against either. */
+    await tx.$executeRaw`SELECT id FROM "Subscription" WHERE "studentId" = ${studentId} FOR UPDATE`;
+    const existing = await tx.subscription.findUnique({ where: { studentId } });
     const buckets: Bucket[] = ((existing?.buckets as unknown as Bucket[] | null) ?? []).map((b) => ({ ...b }));
     const idx = buckets.findIndex((b) => b.service === input.service);
     if (idx >= 0) buckets[idx] = { ...buckets[idx], cycles: buckets[idx].cycles + cycles };

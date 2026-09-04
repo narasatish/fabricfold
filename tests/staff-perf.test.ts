@@ -54,7 +54,7 @@ describe("the search action is bounded and guarded", () => {
 
 describe("typing is debounced and can't show stale results", () => {
   it("waits before querying", () => {
-    expect(homeUi).toMatch(/setTimeout\(async \(\) => \{[\s\S]{0,220}\}, 250\)/);
+    expect(homeUi).toMatch(/setTimeout\(async \(\) => \{[\s\S]{0,420}\}, 250\)/);
   });
   it("drops a slow response that a newer query has already replaced", () => {
     /* Without this, typing "raj" then "ravi" can end with raj's results on

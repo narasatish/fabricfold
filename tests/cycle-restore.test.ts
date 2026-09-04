@@ -227,7 +227,10 @@ describe("loopholes closed around walk-ins and plan changes", () => {
   });
 
   it("a legacy plan with no buckets can't be upgraded into a free cycle reset", () => {
-    expect(sub).toMatch(/!oldBuckets\.length && cur\.cyclesUsed > 0/);
+    // Reads from `fresh` (the row re-read under a lock inside the
+    // transaction), not `cur` fetched before it started — see the
+    // subscription-write race fixes in tests/order-races.test.ts.
+    expect(sub).toMatch(/!oldBuckets\.length && fresh\.cyclesUsed > 0/);
     expect(sub).toMatch(/toSpend -= take/);
   });
 });

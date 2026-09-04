@@ -22,27 +22,36 @@ export default function OrderDetailClient({
 
   const handleSubmitRating = async () => {
     setLoading(true);
-    const r = await rateOrder(orderId, rating, comment);
-    setLoading(false);
-    if (!r.ok) {
-      toast(r.error, true);
-      return;
+    try {
+      const r = await rateOrder(orderId, rating, comment);
+      if (!r.ok) {
+        toast(r.error, true);
+        return;
+      }
+      toast("Rating submitted");
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setLoading(false);
     }
-    toast("Rating submitted");
-    router.refresh();
   };
 
   const handleDeleteDraft = async () => {
     if (!confirm("Delete this draft order?")) return;
     setLoading(true);
-    const r = await deleteDraft(orderId);
-    setLoading(false);
-    if (!r.ok) {
-      toast(r.error || "Could not delete", true);
-      return;
+    try {
+      const r = await deleteDraft(orderId);
+      if (!r.ok) {
+        toast(r.error || "Could not delete", true);
+        return;
+      }
+      toast("Draft deleted");
+      router.push("/c/orders");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+      setLoading(false);
     }
-    toast("Draft deleted");
-    router.push("/c/orders");
   };
 
   if (isDraft) {

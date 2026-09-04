@@ -58,15 +58,15 @@ export function shouldInvoiceOrder(o: { noGst?: boolean }, method: string, staff
 
 /* ─── Cycle weight allowance ───────────────────────────────────────────────
 
-   Every plan includes the SAME 7 kg per cycle, whatever the tier. The tiers
+   Every plan includes the SAME 5 kg per cycle, whatever the tier. The tiers
    differ in how many cycles you get, not how heavy each one may be — so this
    is a constant, not a per-plan field.
 
    It deliberately ignores Subscription.kgPerCycle and the per-bucket
    kgPerCycle still stored on existing rows. Reading those meant two students
    on the same plan could get different allowances depending on when they
-   subscribed, and nothing stopped a stray value being saved. 7 matches what
-   current plans were sold with, so existing subscribers keep exactly the deal
+   subscribed, and nothing stopped a stray value being saved. 5 matches what
+   current plans are sold with, so existing subscribers keep exactly the deal
    they bought. The columns stay (old orders were billed against them and the
    history must still read correctly); they are simply no longer consulted
    when billing a new order. */

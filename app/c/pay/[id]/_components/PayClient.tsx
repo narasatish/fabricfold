@@ -52,43 +52,61 @@ export default function PayClient({
   /* Credits cover the whole bill — settle immediately through the real money path. */
   const payWithCredits = async () => {
     setLoading(true);
-    const r = await payOrder(orderId, "upi", true);
-    setLoading(false);
-    if (!r.ok) return toast(r.error || "Payment failed", true);
-    toast("Paid with credits");
-    router.push(`/c/orders/${orderId}`);
+    try {
+      const r = await payOrder(orderId, "upi", true);
+      if (!r.ok) return toast(r.error || "Payment failed", true);
+      toast("Paid with credits");
+      router.push(`/c/orders/${orderId}`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Payment failed", true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   /* Online payment via Razorpay checkout (UPI / card / netbanking). */
   const payOnline = async () => {
     setLoading(true);
-    const r = await createGatewayOrder(orderId, applied > 0);
-    if (!r.ok) { setLoading(false); return toast(r.error || "Could not start payment", true); }
-    const ok = await loadRazorpay();
-    if (!ok || !window.Razorpay) { setLoading(false); return toast("Could not load the payment window", true); }
-    const rzp = new window.Razorpay({
-      key: r.keyId,
-      order_id: r.rzpOrderId,
-      amount: r.amount,
-      currency: "INR",
-      name: "FabricFold",
-      description: `Order #${orderId.slice(-4)} · ${orderService}`,
-      prefill: { name: r.name, contact: r.phone },
-      theme: { color: "#0e9271" },
-      handler: async (resp: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
-        const v = await confirmGatewayPayment(orderId, applied > 0, {
-          orderId: resp.razorpay_order_id,
-          paymentId: resp.razorpay_payment_id,
-          signature: resp.razorpay_signature,
-        });
-        setLoading(false);
-        if (!v.ok) return toast(v.error || "Payment verification failed", true);
-        toast("Payment successful");
-        router.push(`/c/orders/${orderId}`);
-      },
-      modal: { ondismiss: () => setLoading(false) },
-    });
-    rzp.open();
+    try {
+      const r = await createGatewayOrder(orderId, applied > 0);
+      if (!r.ok) { setLoading(false); return toast(r.error || "Could not start payment", true); }
+      const ok = await loadRazorpay();
+      if (!ok || !window.Razorpay) { setLoading(false); return toast("Could not load the payment window", true); }
+      const rzp = new window.Razorpay({
+        key: r.keyId,
+        order_id: r.rzpOrderId,
+        amount: r.amount,
+        currency: "INR",
+        name: "FabricFold",
+        description: `Order #${orderId.slice(-4)} · ${orderService}`,
+        prefill: { name: r.name, contact: r.phone },
+        theme: { color: "#0e9271" },
+        handler: async (resp: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
+          try {
+            const v = await confirmGatewayPayment(orderId, applied > 0, {
+              orderId: resp.razorpay_order_id,
+              paymentId: resp.razorpay_payment_id,
+              signature: resp.razorpay_signature,
+            });
+            if (!v.ok) return toast(v.error || "Payment verification failed", true);
+            toast("Payment successful");
+            router.push(`/c/orders/${orderId}`);
+          } catch (e) {
+            // The payment may have gone through even if verification threw —
+            // never claim failure outright here, since Razorpay already took
+            // the money. Point the student to the order instead of guessing.
+            toast(e instanceof Error ? e.message : "Payment received — refresh your order to confirm", true);
+          } finally {
+            setLoading(false);
+          }
+        },
+        modal: { ondismiss: () => setLoading(false) },
+      });
+      rzp.open();
+    } catch (e) {
+      setLoading(false);
+      toast(e instanceof Error ? e.message : "Could not start payment", true);
+    }
   };
 
   const totalPieces = orderPieces.reduce((s, i) => s + i.qty, 0);
@@ -150,11 +168,16 @@ export default function PayClient({
             <button className="card-btn" style={{ borderColor: "var(--amber)" }} disabled={loading}
               onClick={async () => {
                 setLoading(true);
-                const r = await simulateGatewayPayment(orderId, applied > 0);
-                setLoading(false);
-                if (!r.ok) return toast(r.error || "Failed", true);
-                toast("Test payment successful");
-                router.push(`/c/orders/${orderId}`);
+                try {
+                  const r = await simulateGatewayPayment(orderId, applied > 0);
+                  if (!r.ok) return toast(r.error || "Failed", true);
+                  toast("Test payment successful");
+                  router.push(`/c/orders/${orderId}`);
+                } catch (e) {
+                  toast(e instanceof Error ? e.message : "Failed", true);
+                } finally {
+                  setLoading(false);
+                }
               }}>
               <div className="icon-tile"><Svg name="card" size={22} /></div>
               <div style={{ flex: 1 }}>

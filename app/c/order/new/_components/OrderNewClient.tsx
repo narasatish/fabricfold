@@ -84,25 +84,29 @@ export default function OrderNewClient({
       return;
     }
     setLoading(true);
-    const r = await placeOrder({
-      service,
-      cycles: cycleBased ? cycles : undefined,
-      items: cycleBased
-        ? []
-        : rateItems
-            .filter(([label]) => quantities[label] > 0)
-            .map(([label]) => ({ label, qty: quantities[label] })),
-      express,
-      dropSlotAt: dropSlotAt || undefined,
-    });
-    setLoading(false);
-
-    if (!r.ok) {
-      toast(r.error, true);
-      return;
+    try {
+      const r = await placeOrder({
+        service,
+        cycles: cycleBased ? cycles : undefined,
+        items: cycleBased
+          ? []
+          : rateItems
+              .filter(([label]) => quantities[label] > 0)
+              .map(([label]) => ({ label, qty: quantities[label] })),
+        express,
+        dropSlotAt: dropSlotAt || undefined,
+      });
+      if (!r.ok) {
+        toast(r.error, true);
+        return;
+      }
+      toast("Order pre-booked · " + r.id);
+      router.push(`/c/orders/${r.id}`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setLoading(false);
     }
-    toast("Order pre-booked · " + r.id);
-    router.push(`/c/orders/${r.id}`);
   };
 
   return (

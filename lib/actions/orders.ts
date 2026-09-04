@@ -491,20 +491,34 @@ export async function collectOrder(orderId: string, code: string) {
   if (!ok) return { ok: false as const, error: "Code / Order ID does not match" };
   if (!o.paid && Number(o.total) > 0) return { ok: false as const, error: "Record payment before collection" };
 
-  await db.$transaction(async (tx) => {
-    await tx.order.update({ where: { id: o.id }, data: { status: "collected", timeline: { create: { status: "collected" } } } });
-    await tx.student.update({ where: { id: o.studentId }, data: { lifetimePieces: { increment: o.actualPieces || 0 } } });
-    if (otp) await tx.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
-    const stu = await tx.student.findUniqueOrThrow({ where: { id: o.studentId }, select: { name: true } });
-    await enqueueSheetEvent(tx, "collection", [
-      istStamp(),
-      "#" + o.id.slice(-6),
-      await customerIdFor(tx, o.studentId),
-      stu.name,
-      o.actualPieces || 0,
-      st.name,
-    ]);
-  });
+  try {
+    await db.$transaction(async (tx) => {
+      /* A plain `update` can't stop two concurrent taps (double-tap on a slow
+         connection, or a retried offline-queue action): both read status !=
+         "collected" before either writes, so a bare update would run twice —
+         double-counting lifetimePieces and double-writing the Sheet row, with
+         no unique index to collide on (unlike payCore's payment rows). Scoping
+         the update itself to `status: { not: "collected" }` and checking the
+         affected count makes the transition atomic: only the FIRST call's
+         update actually matches a row, so only it proceeds. */
+      const updated = await tx.order.updateMany({ where: { id: o.id, status: { not: "collected" } }, data: { status: "collected" } });
+      if (updated.count === 0) throw new Error("This order was already collected");
+      await tx.orderEvent.create({ data: { orderId: o.id, status: "collected" } });
+      await tx.student.update({ where: { id: o.studentId }, data: { lifetimePieces: { increment: o.actualPieces || 0 } } });
+      if (otp) await tx.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
+      const stu = await tx.student.findUniqueOrThrow({ where: { id: o.studentId }, select: { name: true } });
+      await enqueueSheetEvent(tx, "collection", [
+        istStamp(),
+        "#" + o.id.slice(-6),
+        await customerIdFor(tx, o.studentId),
+        stu.name,
+        o.actualPieces || 0,
+        st.name,
+      ]);
+    });
+  } catch (e) {
+    return { ok: false as const, error: (e as Error).message };
+  }
   bcast(o);
   flushSoon();
   return { ok: true as const };
@@ -616,6 +630,15 @@ export async function refundOrder(orderId: string, amount: number, via: "upi" | 
   if (!amount || amount <= 0) return { ok: false, error: "Enter a valid amount" };
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId }, include: { invoice: true, student: { include: { subscription: true } } } });
   assertSameCollege(st, o.collegeId);
+  // Nothing capped this against what was actually billed — a typo (₹5000
+  // instead of ₹500) went through silently. Cap at the order total minus
+  // whatever's already been refunded, same idea as payInner clamping
+  // creditApplied to the order total.
+  const alreadyRefunded = Number(o.refundAmount || 0);
+  const refundable = Number(o.total) - alreadyRefunded;
+  if (amount > refundable) {
+    return { ok: false, error: refundable > 0 ? `Only ₹${refundable} left to refund on this order` : "This order has already been fully refunded" };
+  }
 
   await db.$transaction(async (tx) => {
     await tx.payment.create({

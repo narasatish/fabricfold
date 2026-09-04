@@ -108,8 +108,14 @@ export default function StaffHomeClient({
     if (!q) { setFoundStudents([]); return; }
     const seq = ++searchSeq.current;
     const t = setTimeout(async () => {
-      const r = await searchStudents(q);
-      if (seq === searchSeq.current && r.ok) setFoundStudents(r.students);
+      try {
+        const r = await searchStudents(q);
+        if (seq === searchSeq.current && r.ok) setFoundStudents(r.students);
+      } catch (e) {
+        // Typeahead search: a transient failure shouldn't toast on every
+        // keystroke pause — just leave the last good results showing.
+        console.error("[home] search failed:", e);
+      }
     }, 250);
     return () => clearTimeout(t);
   }, [q]);
@@ -120,45 +126,63 @@ export default function StaffHomeClient({
   }, [q, orders, foundStudents]);
 
   const handleClock = async () => {
-    const r = attendance.clockedIn && !attendance.clockedOut ? await clockOut() : await clockIn();
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast("hours" in r && r.hours ? `Clocked out — ${r.hours}h today` : "Clocked in — have a good shift!");
-    router.refresh();
+    try {
+      const r = attendance.clockedIn && !attendance.clockedOut ? await clockOut() : await clockIn();
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast("hours" in r && r.hours ? `Clocked out — ${r.hours}h today` : "Clocked in — have a good shift!");
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    }
   };
 
   const handleRegister = async () => {
     setRegLoading(true);
-    const r = await registerStudent(reg);
-    setRegLoading(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(`Student registered — ID ${r.id}`);
-    setShowRegister(false);
-    setReg({ name: "", phone: "", collegeId: colleges[0]?.id || "", kind: "student" });
-    router.push(`/s/customers/${r.id}`);
+    try {
+      const r = await registerStudent(reg);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(`Student registered — ID ${r.id}`);
+      setShowRegister(false);
+      setReg({ name: "", phone: "", collegeId: colleges[0]?.id || "", kind: "student" });
+      router.push(`/s/customers/${r.id}`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setRegLoading(false);
+    }
   };
 
   const handleActivateSub = async (studentId: string) => {
-    const r = await activateSubscription(studentId, subMethod, subOtp || undefined);
-    if (!r.ok) {
-      toast(r.error || "Failed", true);
-      return;
+    try {
+      const r = await activateSubscription(studentId, subMethod, subOtp || undefined);
+      if (!r.ok) {
+        toast(r.error || "Failed", true);
+        return;
+      }
+      toast("Subscription activated");
+      setShowSubSheet(null);
+      setSubOtp("");
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
     }
-    toast("Subscription activated");
-    setShowSubSheet(null);
-    setSubOtp("");
-    router.refresh();
   };
 
   const doBatchAdvance = async () => {
     if (!batchIds.size) return;
     setBatchBusy(true);
-    const r = await advanceStatusBatch([...batchIds]);
-    setBatchBusy(false);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    toast(`${r.advanced} advanced${r.failed.length ? ` · ${r.failed.length} couldn't (already moved?)` : ""}`, r.advanced === 0);
-    setBatchIds(new Set());
-    setBatchMode(false);
-    router.refresh();
+    try {
+      const r = await advanceStatusBatch([...batchIds]);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(`${r.advanced} advanced${r.failed.length ? ` · ${r.failed.length} couldn't (already moved?)` : ""}`, r.advanced === 0);
+      setBatchIds(new Set());
+      setBatchMode(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setBatchBusy(false);
+    }
   };
 
   const renderOrderRow = (o: Order) => {

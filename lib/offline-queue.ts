@@ -27,6 +27,7 @@ export type QueuedIntake = {
   studentId: string;
   studentLabel: string; // shown in the pending list; the counter needs a name, not an id
   service: string;
+  cycles?: number; // cycle-based services: walkInOrder defaults this to 1 if omitted, so it must survive the replay
   items: { label: string; qty: number }[];
   weightKg: number | null;
   useCycle: boolean;

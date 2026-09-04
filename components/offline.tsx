@@ -61,6 +61,7 @@ export function OfflineBanner() {
     const r = await replayQueue((row) =>
       walkInOrder(row.studentId, {
         service: row.service,
+        cycles: row.cycles,
         items: row.items,
         weightKg: row.weightKg,
         useCycle: row.useCycle,

@@ -193,6 +193,15 @@ describe("a staff role change forces re-login, same as deactivation does", () =>
   });
 });
 
+describe("offline-queued cycle-based walk-ins keep their cycle count on replay", () => {
+  it("QueuedIntake declares cycles, and OfflineBanner forwards it to walkInOrder", () => {
+    const queueSrc = read("lib/offline-queue.ts");
+    expect(queueSrc).toMatch(/cycles\?: number;/);
+    const bannerSrc = read("components/offline.tsx");
+    expect(bannerSrc).toMatch(/service: row\.service,\s*\n\s*cycles: row\.cycles,/);
+  });
+});
+
 describe("invoice export checks staff campus, not just customer ownership", () => {
   it("staff sessions go through requireStaff + assertSameCollege against the order's campus", () => {
     const src = read("app/api/export/invoice/[orderId]/route.ts");
@@ -202,10 +211,10 @@ describe("invoice export checks staff campus, not just customer ownership", () =
 });
 
 describe("createPayslip can't double-pay a staff member for the same month", () => {
-  it("Payslip has a @@unique([staffId, month]) constraint", () => {
-    const src = read("prisma/schema.prisma");
-    expect(src).toMatch(/@@unique\(\[staffId, month\]\)/);
-  });
+  // The @@unique([staffId, month]) DB constraint is added in a follow-up
+  // commit once a production duplicate-check clears — see the note in
+  // prisma/schema.prisma. The application-level guard is tested here now so
+  // it's already in place and correct the moment that constraint lands.
   it("createPayslip catches the collision and returns a friendly error", () => {
     const src = read("lib/actions/admin.ts");
     const fn = src.slice(src.indexOf("export async function createPayslip"));

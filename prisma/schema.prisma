@@ -467,6 +467,9 @@ model Payslip {
   net        Decimal
   expenseId  String?  @unique // auto-posted "Salaries" expense
   at         DateTime @default(now())
+
+  @@unique([staffId, month]) // one payslip per staff member per month — a
+  // retried/double-tapped submission must not double-pay someone
 }
 
 // ───────────── Support / comms ─────────────

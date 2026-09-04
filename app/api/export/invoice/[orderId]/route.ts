@@ -1,7 +1,7 @@
 /* Printable GST tax invoice (HTML → user prints to PDF). Accessible to the
-   order's student or any staff. */
+   order's student, or staff at the order's own campus. */
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/auth";
+import { getSession, requireStaff, assertSameCollege, AuthError } from "@/lib/auth";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ orderId: string }> }) {
   const { orderId } = await ctx.params;
@@ -11,6 +11,14 @@ export async function GET(_req: Request, ctx: { params: Promise<{ orderId: strin
   const inv = await db.invoice.findUnique({ where: { orderId }, include: { order: { include: { student: true } }, creditNotes: true } });
   if (!inv) return new Response("no invoice for this order", { status: 404 });
   if (s.mode === "customer" && s.studentId !== inv.studentId) return new Response("forbidden", { status: 403 });
+  if (s.mode === "staff") {
+    try {
+      const st = await requireStaff(1);
+      assertSameCollege(st, inv.order.collegeId);
+    } catch (e) {
+      return new Response(e instanceof AuthError ? e.message : "forbidden", { status: 403 });
+    }
+  }
 
   const o = inv.order;
   const items = o.items as unknown as { label: string; rate: number; qty: number }[];

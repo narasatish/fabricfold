@@ -193,6 +193,26 @@ describe("a staff role change forces re-login, same as deactivation does", () =>
   });
 });
 
+describe("invoice export checks staff campus, not just customer ownership", () => {
+  it("staff sessions go through requireStaff + assertSameCollege against the order's campus", () => {
+    const src = read("app/api/export/invoice/[orderId]/route.ts");
+    expect(src).toMatch(/if \(s\.mode === "staff"\) \{/);
+    expect(src).toMatch(/assertSameCollege\(st, inv\.order\.collegeId\)/);
+  });
+});
+
+describe("createPayslip can't double-pay a staff member for the same month", () => {
+  it("Payslip has a @@unique([staffId, month]) constraint", () => {
+    const src = read("prisma/schema.prisma");
+    expect(src).toMatch(/@@unique\(\[staffId, month\]\)/);
+  });
+  it("createPayslip catches the collision and returns a friendly error", () => {
+    const src = read("lib/actions/admin.ts");
+    const fn = src.slice(src.indexOf("export async function createPayslip"));
+    expect(fn).toMatch(/if \(\(e as \{ code\?: string \}\)\.code === "P2002"\) return \{ ok: false as const, error: `\$\{target\.name\} already has a payslip for \$\{input\.month\}` \};/);
+  });
+});
+
 describe("collectOrder can't skip straight from received/processing to collected", () => {
   it("requires status === \"ready\" before it will even try the transaction", () => {
     const src = read("lib/actions/orders.ts");

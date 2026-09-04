@@ -413,24 +413,32 @@ export async function createPayslip(input: { staffId: string; month: string; bas
   assertSameCollege(st, target.collegeId);
   const ym = input.month.replace(/\D/g, ""); // YYYYMM
 
-  const slip = await db.$transaction(async (tx) => {
-    const seq = await tx.fySequence.upsert({
-      where: { kind_fyTag: { kind: "payslip", fyTag: ym } },
-      create: { kind: "payslip", fyTag: ym, value: 1 },
-      update: { value: { increment: 1 } },
-    });
-    const number = `PS-${ym}-${String(seq.value).padStart(3, "0")}`;
-    let expenseId: string | null = null;
-    if (input.postExpense) {
-      const ex = await tx.expense.create({
-        data: { category: "Salaries", amount: net, note: `Payslip ${number} · ${target.name}`, method: "upi", by: st.id, collegeId: target.collegeId || st.collegeId || "" },
+  let slip;
+  try {
+    slip = await db.$transaction(async (tx) => {
+      const seq = await tx.fySequence.upsert({
+        where: { kind_fyTag: { kind: "payslip", fyTag: ym } },
+        create: { kind: "payslip", fyTag: ym, value: 1 },
+        update: { value: { increment: 1 } },
       });
-      expenseId = ex.id;
-    }
-    return tx.payslip.create({
-      data: { number, staffId: input.staffId, month: input.month, basic: input.basic, allowances: input.allowances, deductions: input.deductions, net, expenseId },
+      const number = `PS-${ym}-${String(seq.value).padStart(3, "0")}`;
+      let expenseId: string | null = null;
+      if (input.postExpense) {
+        const ex = await tx.expense.create({
+          data: { category: "Salaries", amount: net, note: `Payslip ${number} · ${target.name}`, method: "upi", by: st.id, collegeId: target.collegeId || st.collegeId || "" },
+        });
+        expenseId = ex.id;
+      }
+      // @@unique([staffId, month]) is the actual guard — a retried/double-tapped
+      // submission for the same staff+month must not silently double-pay them.
+      return tx.payslip.create({
+        data: { number, staffId: input.staffId, month: input.month, basic: input.basic, allowances: input.allowances, deductions: input.deductions, net, expenseId },
+      });
     });
-  });
+  } catch (e) {
+    if ((e as { code?: string }).code === "P2002") return { ok: false as const, error: `${target.name} already has a payslip for ${input.month}` };
+    throw e;
+  }
 
   await audit("Payslip", `${slip.number} · ${target.name} · net ₹${net}${input.postExpense ? " · posted to Salaries" : ""}`, st.id);
   return { ok: true as const, number: slip.number };

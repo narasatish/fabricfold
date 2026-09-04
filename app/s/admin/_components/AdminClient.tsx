@@ -80,7 +80,10 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   const emptySlot = (collegeId: string) => ({ id: undefined as string | undefined, collegeId, weekday: 1, startMin: 540, endMin: 660, capacity: 15 });
   const [slotEdit, setSlotEdit] = useState<ReturnType<typeof emptySlot>>(emptySlot(colleges[0]?.id || ""));
 
+  const [runBusy, setRunBusy] = useState(false);
   const run = async (fn: () => Promise<{ ok: boolean; error?: string }>, okMsg: string) => {
+    if (runBusy) return; // one save/create/toggle in flight at a time — a double-tap can't double-submit
+    setRunBusy(true);
     try {
       const r = await fn();
       if (!r.ok) return toast(r.error || "Failed", true);
@@ -89,6 +92,8 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setRunBusy(false);
     }
   };
 
@@ -204,7 +209,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
 Students already registered there keep their records and can be restored with the campus.`)) run(() => deleteCollege(c.id), "College removed"); }}><Svg name="trash" size={13} /></button>
                     )
                   ) : (
-                    <button className="btn xs sec" onClick={() => run(() => setCollegeActive(c.id, true), "Campus restored")}>Restore</button>
+                    <button disabled={runBusy} className="btn xs sec" onClick={() => run(() => setCollegeActive(c.id, true), "Campus restored")}>Restore</button>
                   )}
                 </>
               )}
@@ -447,7 +452,7 @@ Students already registered there keep their records and can be restored with th
         {gstOn && (
           <div className="field"><label>GST %</label><input className="input" type="number" value={gst} onChange={(e) => setGst(Number(e.target.value))} /></div>
         )}
-        <button className="btn" onClick={() => run(() => saveRates(rates, gst, gstOn), "Rates saved")}>Save rates</button>
+        <button disabled={runBusy} className="btn" onClick={() => run(() => saveRates(rates, gst, gstOn), "Rates saved")}>Save rates</button>
       </Sheet>
 
       <Sheet open={sheet === "plan"} onClose={() => setSheet(null)}>
@@ -496,7 +501,7 @@ Students already registered there keep their records and can be restored with th
         <button className="btn xs sec" onClick={() => setPlanEdit({ ...planEdit, buckets: [...planEdit.buckets, { service: "washFold", cycles: 20, kgPerCycle: 7 }] })}>
           <Svg name="plus" size={13} /> Add another service
         </button>
-        <button className="btn mt12" onClick={() => run(() => savePlan(planEdit), "Plan saved")}>Save plan</button>
+        <button disabled={runBusy} className="btn mt12" onClick={() => run(() => savePlan(planEdit), "Plan saved")}>Save plan</button>
       </Sheet>
 
       <Sheet open={sheet === "payment"} onClose={() => setSheet(null)}>
@@ -507,7 +512,7 @@ Students already registered there keep their records and can be restored with th
             <input className="input" value={pay[k] || ""} onChange={(e) => setPay({ ...pay, [k]: e.target.value })} />
           </div>
         ))}
-        <button className="btn" onClick={() => run(() => savePaymentConfig(pay), "Payment details saved")}>Save details</button>
+        <button disabled={runBusy} className="btn" onClick={() => run(() => savePaymentConfig(pay), "Payment details saved")}>Save details</button>
       </Sheet>
 
       <Sheet open={sheet === "settings"} onClose={() => setSheet(null)}>
@@ -520,7 +525,7 @@ Students already registered there keep their records and can be restored with th
         <div className="field"><label>Opening cash float (₹)</label><input className="input" type="number" value={settings.openingFloat} onChange={(e) => setSettings({ ...settings, openingFloat: Number(e.target.value) })} /></div>
         {/* Per-garment QR tagging toggle removed (owner, Sep 2026) — the
             backend flag still exists but stays off; restore from git if wanted. */}
-        <button className="btn" onClick={() => run(() => saveSettings(settings), "Settings saved")}>Save settings</button>
+        <button disabled={runBusy} className="btn" onClick={() => run(() => saveSettings(settings), "Settings saved")}>Save settings</button>
       </Sheet>
 
       <Sheet open={sheet === "college"} onClose={() => setSheet(null)}>
@@ -538,7 +543,7 @@ Students already registered there keep their records and can be restored with th
             {WEEKDAY_NAMES.map((n, i) => <option key={i} value={i}>{n}</option>)}
           </select>
         </div>
-        <button className="btn" onClick={() => run(() => saveCollege(colEdit), "College saved")}>{colEdit.id ? "Save" : "Create college"}</button>
+        <button disabled={runBusy} className="btn" onClick={() => run(() => saveCollege(colEdit), "College saved")}>{colEdit.id ? "Save" : "Create college"}</button>
       </Sheet>
 
       <Sheet open={sheet === "staff"} onClose={() => setSheet(null)}>
@@ -573,7 +578,7 @@ Students already registered there keep their records and can be restored with th
             })}
           </div>
         )}
-        <button className="btn" onClick={() => run(() => saveStaff({ ...stEdit, collegeId: null }), "Staff saved")}>{stEdit.id ? "Save" : "Create staff account"}</button>
+        <button disabled={runBusy} className="btn" onClick={() => run(() => saveStaff({ ...stEdit, collegeId: null }), "Staff saved")}>{stEdit.id ? "Save" : "Create staff account"}</button>
         <div className="muted center mt8" style={{ fontSize: 12 }}>They sign in to the staff app with this mobile.</div>
 
         {/* Removal is a separate, explicit action — never a side effect of Save.
@@ -582,6 +587,7 @@ Students already registered there keep their records and can be restored with th
         {stEdit.id && (
           stEdit.active === false ? (
             <button
+              disabled={runBusy}
               className="btn sec mt12"
               onClick={() => run(() => setStaffActive(stEdit.id!, true), "Staff login restored")}
             >
@@ -671,7 +677,7 @@ Students already registered there keep their records and can be restored with th
         <div className="muted" style={{ fontSize: "12px", padding: "0 4px 12px" }}>
           Once {slotEdit.capacity} orders are booked, students see this window as full and must pick another.
         </div>
-        <button className="btn" onClick={() => run(() => saveSlotWindow(slotEdit), slotEdit.id ? "Window updated" : "Window added")}>
+        <button disabled={runBusy} className="btn" onClick={() => run(() => saveSlotWindow(slotEdit), slotEdit.id ? "Window updated" : "Window added")}>
           {slotEdit.id ? "Save window" : "Add window"}
         </button>
         {slotEdit.id && (

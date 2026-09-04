@@ -13,9 +13,15 @@ import type { Prisma } from "./generated/prisma/client";
    same number either way. */
 
 export function financialYearTag(ts?: number | Date) {
-  const dt = ts ? new Date(ts) : new Date();
-  const y = dt.getFullYear();
-  const start = dt.getMonth() >= 3 ? y : y - 1;
+  // The Indian FY turns over at midnight IST (April 1), which is 18:30 UTC on
+  // March 31 — well before UTC's own month rolls over. Servers run in UTC, so
+  // getFullYear()/getMonth() on a bare Date misassigns invoices created in
+  // that ~5.5h window to the previous FY. Shift into IST first, same as
+  // istToday() in lib/actions/ops.ts.
+  const base = ts ? new Date(ts).getTime() : Date.now();
+  const dt = new Date(base + 5.5 * 3600_000);
+  const y = dt.getUTCFullYear();
+  const start = dt.getUTCMonth() >= 3 ? y : y - 1;
   return String(start).slice(-2) + String((start + 1) % 100).padStart(2, "0");
 }
 

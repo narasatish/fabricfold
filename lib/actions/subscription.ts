@@ -34,25 +34,33 @@ export async function adjustCycleUsage(studentId: string, updates: { service: st
   const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: true } });
   if (!stu) return { ok: false as const, error: "Student not found" };
   assertSameCollege(st, stu.collegeId);
-  const sub = stu.subscription;
-  if (!sub) return { ok: false as const, error: "This student has no plan" };
+  if (!stu.subscription) return { ok: false as const, error: "This student has no plan" };
 
   type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
-  const buckets = (sub.buckets as unknown as Bucket[] | null) ?? [];
   const byService = new Map(updates.map((u) => [u.service, u.used]));
   const changes: string[] = [];
 
-  const newBuckets = buckets.map((b) => {
-    if (!byService.has(b.service)) return b;
-    const requested = byService.get(b.service)!;
-    const clamped = Math.max(0, Math.min(b.cycles, Math.floor(requested)));
-    if (clamped !== b.used) changes.push(`${b.service} ${b.used} → ${clamped}`);
-    return { ...b, used: clamped };
+  // Locked, then re-read fresh — same hazard as every other writer of
+  // Subscription.buckets (sellCyclePack/assignSubscription/upgradeSubscription):
+  // a cycle consumed by an in-flight order between the read above and this
+  // write would otherwise be silently overwritten by this stale snapshot.
+  const changed = await db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT id FROM "Subscription" WHERE "studentId" = ${studentId} FOR UPDATE`;
+    const fresh = await tx.subscription.findUniqueOrThrow({ where: { studentId } });
+    const buckets = (fresh.buckets as unknown as Bucket[] | null) ?? [];
+    const newBuckets = buckets.map((b) => {
+      if (!byService.has(b.service)) return b;
+      const requested = byService.get(b.service)!;
+      const clamped = Math.max(0, Math.min(b.cycles, Math.floor(requested)));
+      if (clamped !== b.used) changes.push(`${b.service} ${b.used} → ${clamped}`);
+      return { ...b, used: clamped };
+    });
+    if (!changes.length) return false;
+    const cyclesUsed = newBuckets.reduce((s, b) => s + b.used, 0);
+    await tx.subscription.update({ where: { studentId }, data: { buckets: newBuckets, cyclesUsed } });
+    return true;
   });
-  if (!changes.length) return { ok: true as const, changed: false };
-
-  const cyclesUsed = newBuckets.reduce((s, b) => s + b.used, 0);
-  await db.subscription.update({ where: { studentId }, data: { buckets: newBuckets, cyclesUsed } });
+  if (!changed) return { ok: true as const, changed: false };
   await audit("Cycle usage corrected", `${stu.name} (${stu.id}) · ${changes.join("; ")}`, st.id);
   rosterSoon();
   publish([`student:${studentId}`], { type: "subscription", payload: { studentId } });

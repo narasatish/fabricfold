@@ -165,6 +165,68 @@ describe("money-moving buttons can't be double-tapped, and refund/compensation c
   });
 });
 
+describe("adjustCycleUsage locks the subscription row before writing buckets", () => {
+  it("uses SELECT ... FOR UPDATE inside a transaction, re-reading fresh", () => {
+    const src = read("lib/actions/subscription.ts");
+    const fn = src.slice(src.indexOf("export async function adjustCycleUsage"), src.indexOf("async function planGross"));
+    expect(fn).toMatch(/FOR UPDATE`/);
+    expect(fn).toMatch(/const fresh = await tx\.subscription\.findUniqueOrThrow/);
+  });
+});
+
+describe("two more campus-boundary bypasses closed (privacy + slot windows)", () => {
+  it("eraseStudentData checks the requesting staff's own campus", () => {
+    const src = read("lib/actions/privacy.ts");
+    const fn = src.slice(src.indexOf("export async function eraseStudentData"));
+    expect(fn).toMatch(/assertSameCollege\(st, stu\.collegeId\)/);
+  });
+  it("saveSlotWindow/toggleSlotWindow/deleteSlotWindow all check campus ownership", () => {
+    const src = read("lib/actions/slots.ts");
+    expect((src.match(/assertSameCollege\(st, /g) || []).length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe("retireBag can't have its status raced by two near-simultaneous calls", () => {
+  it("claims atomically on status still being 'active'", () => {
+    const src = read("lib/actions/bags.ts");
+    const fn = src.slice(src.indexOf("export async function retireBag"));
+    expect(fn).toMatch(/db\.bag\.updateMany\(\{\s*\n\s*where: \{ id: bagId, status: "active" \}/);
+    expect(fn).toMatch(/if \(claimed\.count === 0\)/);
+  });
+});
+
+describe("AdminClient's shared run() helper can't double-submit", () => {
+  it("guards re-entrancy and disables the triggering buttons while busy", () => {
+    const src = read("app/s/admin/_components/AdminClient.tsx");
+    expect(src).toMatch(/const \[runBusy, setRunBusy\] = useState\(false\)/);
+    expect(src).toMatch(/if \(runBusy\) return;/);
+    expect((src.match(/disabled=\{runBusy\}/g) || []).length).toBeGreaterThanOrEqual(9);
+  });
+});
+
+describe("financialYearTag is IST-aware, not server-local UTC", () => {
+  it("shifts into IST before deriving the FY, matching istToday()'s pattern", () => {
+    const src = read("lib/money.ts");
+    expect(src).toMatch(/new Date\(base \+ 5\.5 \* 3600_000\)/);
+    expect(src).toMatch(/dt\.getUTCMonth\(\) >= 3/);
+  });
+});
+
+describe("Excel student import caps row count like the text-paste import does", () => {
+  it("rejects a sheet with more than 500 data rows before processing it", () => {
+    const src = read("app/api/import/students/route.ts");
+    expect(src).toMatch(/if \(ws\.rowCount - 1 > 500\)/);
+  });
+});
+
+describe("OTP verification uses a timing-safe comparison, not ===", () => {
+  it("compares code buffers with crypto.timingSafeEqual, guarded by a length check", () => {
+    const src = read("lib/actions/auth.ts");
+    expect(src).toMatch(/submitted\.length === otp\.code\.length &&\s*\n\s*crypto\.timingSafeEqual\(Buffer\.from\(otp\.code\), Buffer\.from\(submitted\)\)/);
+    expect(src).not.toMatch(/if \(otp\.code !== code\.trim\(\)\)/);
+  });
+});
+
 describe("submitComplaint can't be attached to someone else's order", () => {
   it("looks up the order and rejects if it isn't the caller's", () => {
     const src = read("lib/actions/complaints.ts");

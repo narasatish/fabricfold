@@ -17,7 +17,7 @@
    the student is told exactly that rather than being promised a deletion that
    cannot happen. */
 import { db } from "../db";
-import { requireStudent, requireStaff, clearSession } from "../auth";
+import { requireStudent, requireStaff, assertSameCollege, clearSession } from "../auth";
 import { audit } from "../notify";
 
 /** Everything held about the signed-in student, as plain JSON. */
@@ -109,6 +109,7 @@ export async function eraseStudentData(studentId: string, reason: string) {
 
   const stu = await db.student.findUnique({ where: { id: studentId } });
   if (!stu) return { ok: false as const, error: "Student not found" };
+  assertSameCollege(st, stu.collegeId);
   if (stu.anonymisedAt) return { ok: false as const, error: "That account has already been erased" };
 
   await db.$transaction(async (tx) => {

@@ -3,7 +3,7 @@
    queue stays spread. Windows are per-college weekly templates (Admin+ edits
    them); capacity caps how many orders may land in one window. */
 import { db } from "../db";
-import { requireStaff, requireStudent } from "../auth";
+import { requireStaff, requireStudent, assertSameCollege } from "../auth";
 import { audit } from "../notify";
 import { buildSlots, type Win } from "../slots";
 import { BOOK_AHEAD_DAYS } from "../slot-capacity";
@@ -52,12 +52,17 @@ export async function saveSlotWindow(input: {
 }) {
   const st = await requireStaff(3);
   const { id, collegeId, weekday, startMin, endMin, capacity } = input;
+  assertSameCollege(st, collegeId);
 
   if (weekday < 0 || weekday > 6) return { ok: false as const, error: "Pick a day" };
   if (startMin < 0 || endMin > 24 * 60) return { ok: false as const, error: "Times must be within the day" };
   if (endMin <= startMin) return { ok: false as const, error: "End time must be after the start time" };
   if (capacity < 1 || capacity > 500) return { ok: false as const, error: "Capacity must be 1–500" };
 
+  if (id) {
+    const existing = await db.slotWindow.findUniqueOrThrow({ where: { id } });
+    assertSameCollege(st, existing.collegeId);
+  }
   const data = { collegeId, weekday, startMin, endMin, capacity };
   const row = id
     ? await db.slotWindow.update({ where: { id }, data })
@@ -69,6 +74,7 @@ export async function saveSlotWindow(input: {
 export async function toggleSlotWindow(id: string) {
   const st = await requireStaff(3);
   const w = await db.slotWindow.findUniqueOrThrow({ where: { id } });
+  assertSameCollege(st, w.collegeId);
   await db.slotWindow.update({ where: { id }, data: { active: !w.active } });
   await audit("Slot window " + (w.active ? "disabled" : "enabled"), id, st.id);
   return { ok: true as const, active: !w.active };
@@ -76,6 +82,8 @@ export async function toggleSlotWindow(id: string) {
 
 export async function deleteSlotWindow(id: string) {
   const st = await requireStaff(3);
+  const w = await db.slotWindow.findUniqueOrThrow({ where: { id } });
+  assertSameCollege(st, w.collegeId);
   await db.slotWindow.delete({ where: { id } });
   await audit("Slot window deleted", id, st.id);
   return { ok: true as const };

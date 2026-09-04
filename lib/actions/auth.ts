@@ -353,7 +353,13 @@ export async function verifyOtp(
     await db.otp.delete({ where: { id: otp.id } }).catch(() => {});
     return { ok: false as const, error: "Too many wrong attempts — request a new OTP" };
   }
-  if (otp.code !== code.trim()) {
+  const submitted = code.trim();
+  // timingSafeEqual throws on unequal-length buffers, so pad/compare a fixed
+  // width first — a length mismatch is itself a wrong guess either way.
+  const codesMatch =
+    submitted.length === otp.code.length &&
+    crypto.timingSafeEqual(Buffer.from(otp.code), Buffer.from(submitted));
+  if (!codesMatch) {
     const updated = await db.otp.update({ where: { id: otp.id }, data: { attempts: { increment: 1 } } });
     if (updated.attempts >= 5) {
       await db.otp.delete({ where: { id: otp.id } }).catch(() => {});

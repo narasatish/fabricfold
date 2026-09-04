@@ -97,6 +97,12 @@ export async function POST(req: Request) {
   }
   const ws = wb.worksheets[0];
   if (!ws || ws.rowCount < 2) return Response.json({ ok: false, error: "The sheet looks empty" }, { status: 400 });
+  // Each row does a handful of sequential awaits (existsPhone/bag lookups),
+  // so an unbounded sheet risks a partial, silently-truncated import once the
+  // route's maxDuration is hit — same 500-row ceiling as the text-paste path.
+  if (ws.rowCount - 1 > 500) {
+    return Response.json({ ok: false, error: "Max 500 students per import — split the sheet and upload in batches" }, { status: 400 });
+  }
 
   const cols = headerIndex(ws.getRow(1));
   if (!cols.name || !cols.phone || !cols.code) {

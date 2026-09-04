@@ -350,10 +350,14 @@ export async function retireBag(bagId: string, status: "lost" | "replaced", note
   assertSameCollege(st, bag.student.collegeId);
   if (bag.status !== "active") return { ok: false as const, error: `This bag is already marked ${bag.status}` };
 
-  await db.bag.update({
-    where: { id: bagId },
+  // Claim atomically on the status still being "active" — two near-simultaneous
+  // retireBag calls (e.g. "lost" then "replaced" tapped back to back) would
+  // otherwise both pass the check above and the second write silently wins.
+  const claimed = await db.bag.updateMany({
+    where: { id: bagId, status: "active" },
     data: { status, note: note?.trim() || bag.note },
   });
+  if (claimed.count === 0) return { ok: false as const, error: "This bag was just updated by someone else — refresh and try again" };
   await audit("Bag retired", `${bag.code} · ${bag.student.name} · ${status}${note ? ` — ${note}` : ""}`, st.id);
   publish([`student:${bag.studentId}`], { type: "bag", payload: { studentId: bag.studentId } });
   return { ok: true as const };

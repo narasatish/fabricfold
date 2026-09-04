@@ -91,6 +91,13 @@ describe("financial year tag (Indian FY, April start)", () => {
     expect(money.financialYearTag(new Date("2026-03-31"))).toBe("2526");
     expect(money.financialYearTag(new Date("2026-04-01"))).toBe("2627");
   });
+  it("is IST-aware: the last ~5.5h of March 31 UTC are already April 1 in India", () => {
+    // 2026-03-31T19:00:00Z = 2026-04-01T00:30 IST — already the new FY in India,
+    // even though the bare UTC date/month are still March.
+    expect(money.financialYearTag(new Date("2026-03-31T19:00:00Z"))).toBe("2627");
+    // 2026-03-31T18:00:00Z = 2026-03-31T23:30 IST — still the old FY.
+    expect(money.financialYearTag(new Date("2026-03-31T18:00:00Z"))).toBe("2526");
+  });
 });
 
 describe("GST is payment-method driven", () => {

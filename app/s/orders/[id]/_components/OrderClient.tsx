@@ -728,26 +728,32 @@ export default function StaffOrderClient({
         <div className="pad">
           <h2 style={{ marginBottom: "16px" }}>Accept order</h2>
           <div className="field">
-            <label>Weight (kg)</label>
-            {/* type="text" + inputMode="decimal": a number input shows spinner
-                arrows nobody weighs with, and its value-coercion made "5." and
-                a leading zero fight the typist. The raw string is kept in
-                state so the field shows exactly what was typed; it is parsed
-                once, on Accept. */}
-            <input
-              className="input"
-              type="text"
-              inputMode="decimal"
-              autoComplete="off"
-              placeholder="e.g. 4.6"
-              value={weightText}
-              onChange={(e) => {
-                const t = e.target.value;
-                if (t !== "" && !/^\d{0,3}(\.\d{0,2})?$/.test(t)) return; // ignore stray characters
-                setWeightText(t);
-                setAcceptInput((a) => ({ ...a, weightKg: Number(t) || 0 }));
-              }}
-            />
+            {cycleBased && (
+              <>
+                <label>Weight (kg)</label>
+                {/* type="text" + inputMode="decimal": a number input shows spinner
+                    arrows nobody weighs with, and its value-coercion made "5." and
+                    a leading zero fight the typist. The raw string is kept in
+                    state so the field shows exactly what was typed; it is parsed
+                    once, on Accept. Only cycle services (wash & fold/iron) bill
+                    by weight — dry cleaning and iron-only are per-piece, so the
+                    field stays out of their way entirely. */}
+                <input
+                  className="input"
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  placeholder="e.g. 4.6"
+                  value={weightText}
+                  onChange={(e) => {
+                    const t = e.target.value;
+                    if (t !== "" && !/^\d{0,3}(\.\d{0,2})?$/.test(t)) return; // ignore stray characters
+                    setWeightText(t);
+                    setAcceptInput((a) => ({ ...a, weightKg: Number(t) || 0 }));
+                  }}
+                />
+              </>
+            )}
             {cycleBased && (
               <div className="field" style={{ marginTop: "12px" }}>
                 <label>Cycles</label>

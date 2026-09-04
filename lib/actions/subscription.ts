@@ -316,9 +316,6 @@ export async function sellCyclePack(
 
   const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: true } });
   if (!stu) return { ok: false as const, error: "Student not found" };
-  if (stu.kind !== "faculty") {
-    return { ok: false as const, error: "Cycle packs are for faculty — students buy plans" };
-  }
 
   const price = cycles * rate;
   const label = input.service === "washFold" ? "Wash & Fold" : "Wash & Iron";

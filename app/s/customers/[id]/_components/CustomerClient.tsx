@@ -458,11 +458,12 @@ Currently ${current}. Type the code printed on the bag they are being given.
       {/* Orders */}
       {student.orders.length > 0 && (
         <>
-          {/* Faculty buy flexible cycle PACKS, not tiered plans — the owner's
-              "6 months x 4 a month" model. Manager+ takes the money here. */}
-          {student.kind === "faculty" && staffRole >= 2 && (
+          {/* Flexible cycle PACKS — the owner's "6 months x 4 a month" model
+              for faculty, and a top-up for any student whose plan cycles
+              have run out but the term hasn't. Manager+ takes the money here. */}
+          {staffRole >= 2 && (
             <>
-              <div className="sec-title mt20">Cycle pack (faculty)</div>
+              <div className="sec-title mt20">Cycle pack (top-up)</div>
               <div className="card pad mt10">
                 <div className="row gap8" style={{ flexWrap: "wrap", alignItems: "center" }}>
                   <select className="input" style={{ width: "auto" }} value={packSvc} onChange={(e) => setPackSvc(e.target.value as "washFold" | "washIron")}>
@@ -653,10 +654,12 @@ Currently ${current}. Type the code printed on the bag they are being given.
               </div>
             ))
           )}
-          <div className="field mt8">
-            <label>Weight (kg)</label>
-            <input className="input" type="number" step="0.1" value={wiWeight || ""} onChange={(e) => setWiWeight(Number(e.target.value))} />
-          </div>
+          {isCycleService(wiService) && (
+            <div className="field mt8">
+              <label>Weight (kg)</label>
+              <input className="input" type="number" step="0.1" value={wiWeight || ""} onChange={(e) => setWiWeight(Number(e.target.value))} />
+            </div>
+          )}
           {subHasCycles && (
             <div className="chip-toggle" style={{ marginBottom: "12px" }}>
               <div>

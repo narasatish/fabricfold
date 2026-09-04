@@ -112,8 +112,9 @@ describe("as faculty", () => {
     const fn = subs.slice(subs.indexOf("export async function sellCyclePack"));
     expect(fn).toMatch(/cycles: buckets\[idx\]\.cycles \+ cycles/);
   });
-  it("students cannot be sold packs — they buy plans", () => {
-    expect(subs).toMatch(/Cycle packs are for faculty — students buy plans/);
+  it("students can also be sold a top-up pack once their plan runs out", () => {
+    const fn = subs.slice(subs.indexOf("export async function sellCyclePack"));
+    expect(fn).not.toMatch(/Cycle packs are for faculty/);
   });
   it("faculty carry the F series whatever they have bought", () => {
     expect(BAG_LETTER.faculty).toBe("F");
@@ -156,9 +157,9 @@ describe("the screens quote what the server bills", () => {
     expect(read("app/s/orders/[id]/_components/OrderClient.tsx")).toMatch(/\{!acceptInput\.useCycle && !cycleBased && \(/);
     expect(read("app/s/customers/[id]/_components/CustomerClient.tsx")).toMatch(/!wiUseCycle && gstEnabled && !isCycleService\(wiService\) && \(/);
   });
-  it("the pack card exists, faculty-only, Manager+, with the 6-months example", () => {
+  it("the pack card exists for any student, Manager+, with the 6-months example", () => {
     const ui = read("app/s/customers/[id]/_components/CustomerClient.tsx");
-    expect(ui).toMatch(/student\.kind === "faculty" && staffRole >= 2 && \(/);
+    expect(ui).toMatch(/\{staffRole >= 2 && \(/);
     expect(ui).toMatch(/6 months × 4\/month = 24 cycles/);
   });
 });

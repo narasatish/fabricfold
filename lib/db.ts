@@ -35,3 +35,21 @@ const g = globalThis as unknown as { __ffdb?: PrismaClient };
 export const db = g.__ffdb ?? new PrismaClient({ adapter: makeAdapter() });
 
 if (process.env.NODE_ENV !== "production") g.__ffdb = db;
+
+/**
+ * The ?schema=… param above scopes every Prisma-generated ORM query to a
+ * non-default schema (tests use ff_test, a few dev sandboxes use their own).
+ * Raw SQL ($queryRaw/$executeRaw) does NOT pick that up automatically — it
+ * runs against whatever the connection's default search_path is, which is
+ * "public" unless told otherwise. Two raw-SQL call sites (rate-limit.ts,
+ * sheet-events.ts) found this out the hard way: their writes landed in
+ * public."RateLimit" while the tests around them cleaned up ff_test's copy,
+ * so a stray public-schema row from a completely unrelated run silently
+ * exhausted the rate limit for every test in the file. Prefix any raw
+ * table reference with this (via Prisma.raw, since it's config-derived,
+ * never user input) to keep raw SQL scoped the same as everything else.
+ */
+export const dbSchemaPrefix = (() => {
+  const schema = /^postgres(ql)?:\/\//.test(url) ? new URL(url).searchParams.get("schema") : null;
+  return schema ? `"${schema}".` : "";
+})();

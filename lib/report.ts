@@ -33,16 +33,29 @@ export function parsePeriod(sp: { p?: string; d?: string; m?: string; y?: string
 
 const inRange = (p: Period) => (p.from ? { gte: p.from, lt: p.to! } : undefined);
 
-export async function computeReport(p: Period) {
+/**
+ * `collegeId` scopes every figure to one campus — pass a campus-scoped
+ * staff member's own `collegeId` here. Omit it (undefined) for the
+ * company-wide view: the Owner-facing daily/weekly email and cron reports
+ * are meant to see every campus, so they call this with no second argument.
+ * Before this parameter existed, EVERY caller got the unfiltered company
+ * total regardless of who was asking — a Manager confined to one campus
+ * saw every campus's cash/UPI/GST/expenses on the Reports screen and in
+ * the XLSX export, not just their own.
+ */
+export async function computeReport(p: Period, collegeId?: string | null) {
   const at = inRange(p);
+  const withCollege = (where: Record<string, unknown>) => (collegeId ? { ...where, collegeId } : where);
   const [payments, invoices, creditNotes, expenses, orders, compensations, complaints, cfg] = await Promise.all([
-    db.payment.findMany({ where: at ? { at } : {}, orderBy: { at: "desc" } }),
-    db.invoice.findMany({ where: at ? { at } : {}, orderBy: { at: "desc" } }),
-    db.creditNote.findMany({ where: at ? { at } : {}, orderBy: { at: "desc" } }),
-    db.expense.findMany({ where: at ? { at } : {}, orderBy: { at: "desc" } }),
-    db.order.findMany({ where: at ? { createdAt: at } : {}, include: { timeline: true } }),
-    db.compensation.findMany({ where: at ? { at } : {} }),
-    db.complaint.findMany({ where: at ? { at } : {} }),
+    db.payment.findMany({ where: withCollege(at ? { at } : {}), orderBy: { at: "desc" } }),
+    db.invoice.findMany({ where: withCollege(at ? { at } : {}), orderBy: { at: "desc" } }),
+    db.creditNote.findMany({ where: withCollege(at ? { at } : {}), orderBy: { at: "desc" } }),
+    db.expense.findMany({ where: withCollege(at ? { at } : {}), orderBy: { at: "desc" } }),
+    db.order.findMany({ where: withCollege(at ? { createdAt: at } : {}), include: { timeline: true } }),
+    // Compensation/Complaint don't carry collegeId directly — scope through
+    // the student they belong to, so a campus manager still only sees theirs.
+    db.compensation.findMany({ where: { ...(at ? { at } : {}), ...(collegeId ? { student: { collegeId } } : {}) } }),
+    db.complaint.findMany({ where: withCollege(at ? { at } : {}) }),
     db.appConfig.findUniqueOrThrow({ where: { id: "main" } }),
   ]);
 

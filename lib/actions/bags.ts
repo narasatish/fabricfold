@@ -32,13 +32,6 @@ export async function issueBag(
   if (!stu) return { ok: false as const, error: "Student not found" };
   assertSameCollege(st, stu.collegeId);
 
-  // A student should be carrying one bag at a time. Selling a second while the
-  // first is still active is almost always a mis-click — make them mark the old
-  // one lost first, so the code history stays truthful.
-  if (stu.bags.some((b) => b.status === "active")) {
-    return { ok: false as const, error: "This student already has an active bag — mark it lost or replaced first" };
-  }
-
   const tier = stu.subscription?.active ? stu.subscription.planRef?.tier : null;
   // Faculty carry the F series regardless of what they have bought — the
   // letter tells the counter WHO this is, and a teacher on a cycle pack is
@@ -64,26 +57,48 @@ export async function issueBag(
   const price = complimentary ? 0 : Math.max(0, Math.round(Number(input.price) || 0));
 
   let bag;
-  try {
-    bag = await db.$transaction(async (tx) => {
-      const code = await allocateBagCode(tx, kind);
-      const b = await tx.bag.create({
-        data: {
-          code, studentId, tier: isTier(tier) ? tier : null,
-          complimentary, price, issuedBy: st.id,
-          note: input.note?.trim() || null,
-        },
-      });
-      if (price > 0) {
-        await tx.payment.create({
-          data: { method: input.method || "cash", amount: price, collegeId: stu.collegeId, studentId, note: `Bag ${code}` },
+  /* allocateBagCode's recycled-code check (two findMany, no lock) can pick
+     the SAME candidate code for two counters issuing bags of the same tier
+     at the same instant. The partial unique index on active bags correctly
+     rejects the loser at commit — no double-issuance, just an opaque
+     failure — so retrying the whole transaction (a fresh allocateBagCode
+     call sees the other one's now-taken code) turns that into an automatic
+     success instead of a "try again" for the counter. Not needed for the
+     "already has an active bag" race just below: that one is a real
+     business rule refusal, not a code collision, so it must not retry. */
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      bag = await db.$transaction(async (tx) => {
+        /* "Already has an active bag" was checked outside this transaction —
+           two concurrent issuances for the same student (a double-tap at a
+           busy counter) both saw no active bag and both proceeded, leaving
+           two simultaneously "active" bags and possibly two charges. Locked
+           and re-checked here, fresh, before allocating a code. */
+        await tx.$executeRaw`SELECT id FROM "Bag" WHERE "studentId" = ${studentId} AND status = 'active' FOR UPDATE`;
+        const stillActive = await tx.bag.findFirst({ where: { studentId, status: "active" } });
+        if (stillActive) throw new Error("This student already has an active bag — mark it lost or replaced first");
+        const code = await allocateBagCode(tx, kind);
+        const b = await tx.bag.create({
+          data: {
+            code, studentId, tier: isTier(tier) ? tier : null,
+            complimentary, price, issuedBy: st.id,
+            note: input.note?.trim() || null,
+          },
         });
-      }
-      return b;
-    });
-  } catch (e) {
-    return { ok: false as const, error: (e as Error).message };
+        if (price > 0) {
+          await tx.payment.create({
+            data: { method: input.method || "cash", amount: price, collegeId: stu.collegeId, studentId, note: `Bag ${code}` },
+          });
+        }
+        return b;
+      });
+      break;
+    } catch (e) {
+      const isCodeCollision = (e as { code?: string }).code === "P2002";
+      if (!isCodeCollision || attempt === 2) return { ok: false as const, error: isCodeCollision ? "Couldn't allocate a code — please try again" : (e as Error).message };
+    }
   }
+  if (!bag) return { ok: false as const, error: "Couldn't allocate a code — please try again" };
 
   await pushNotif(
     studentId,

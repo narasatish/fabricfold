@@ -97,7 +97,10 @@ describe("rows and the ledger cannot disagree", () => {
 
   it("gives up after a bounded number of attempts", () => {
     expect(MAX_ATTEMPTS).toBeGreaterThan(1);
-    expect(events).toMatch(/attempts: \{ lt: MAX_ATTEMPTS \}/);
+    // Now a raw-SQL claim (SELECT ... FOR UPDATE SKIP LOCKED, held through the
+    // Google API call to close the duplicate-write race) instead of a plain
+    // Prisma findMany — same bound, different syntax.
+    expect(events).toMatch(/attempts < \$\{MAX_ATTEMPTS\}/);
   });
 });
 

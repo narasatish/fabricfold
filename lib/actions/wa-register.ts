@@ -186,6 +186,14 @@ export async function checkWhatsAppRegister(code: string, studentName: string) {
     bagCode = result.code;
   } catch (e) {
     console.error("[wa-register] account creation failed", e);
+    /* The claim above marked this row "claimed" BEFORE the account-creation
+       transaction ran — so a failure here (e.g. the phone already belongs
+       to another student, a realistic case for someone registering twice)
+       left the row permanently claimed with no route back to "verified".
+       The comment above once claimed this was safe to retry; it wasn't.
+       Revert the claim so the student can actually try again instead of
+       being silently locked out of self-registration for this code. */
+    await db.waVerify.updateMany({ where: { id: row.id, status: "claimed" }, data: { status: "verified" } });
     return { ok: false as const, status: "failed" as const, error: "Account creation failed. Please try again or visit the counter." };
   }
 

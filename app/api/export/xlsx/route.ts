@@ -8,17 +8,18 @@ import { db } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  let me;
   try {
-    await requireStaffPerm("reports");
+    me = await requireStaffPerm("reports");
   } catch {
     return new Response("unauthorized", { status: 401 });
   }
   const url = new URL(req.url);
   const type = url.searchParams.get("type") || "full";
   const p = parsePeriod(Object.fromEntries(url.searchParams) as Record<string, string>);
-  const r = await computeReport(p);
-  const staff = await db.staff.findMany();
-  const students = await db.student.findMany();
+  const r = await computeReport(p, me.collegeId);
+  const staff = await db.staff.findMany(me.collegeId ? { where: { collegeId: me.collegeId } } : undefined);
+  const students = await db.student.findMany(me.collegeId ? { where: { collegeId: me.collegeId } } : undefined);
   const byId = (id: string | null | undefined, list: { id: string; name: string }[]) => list.find((x) => x.id === id)?.name || id || "";
   const N = (x: unknown) => Number(x || 0);
 

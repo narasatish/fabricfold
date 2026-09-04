@@ -34,7 +34,16 @@ export async function registerStudent(input: { name: string; phone: string; coll
     if (!(await db.student.findUnique({ where: { id } }))) break;
   }
   const kind = input.kind === "faculty" ? "faculty" : "student";
-  const stu = await db.student.create({ data: { id, phone, name, collegeId: college.id, kind } });
+  let stu;
+  try {
+    stu = await db.student.create({ data: { id, phone, name, collegeId: college.id, kind } });
+  } catch (e) {
+    // The pre-check above ran before this create — two concurrent
+    // registrations for the same number both pass it, and the second
+    // create hits the unique constraint on `phone` and throws unhandled.
+    if ((e as { code?: string }).code === "P2002") return { ok: false as const, error: "This number is already registered" };
+    throw e;
+  }
   await audit(kind === "faculty" ? "Faculty registered" : "Student registered", `${name} · +91 ${phone} · ${college.name}`, st.id);
   rosterSoon();
   void notifyOwner("New student registered", `${name} (+91 ${phone}) registered at the counter (${college.name}) by ${st.name} — ID ${stu.id}.`);
@@ -317,7 +326,12 @@ export async function saveStaff(input: { id?: string; name: string; phone: strin
     await audit("Staff updated", `${input.name} (role ${input.role})${granted ? ` · tools ${granted}` : ""}`, st.id);
   rosterSoon();
   } else {
-    await db.staff.create({ data: { name: input.name.trim(), phone, role: input.role, collegeId: input.collegeId } });
+    try {
+      await db.staff.create({ data: { name: input.name.trim(), phone, role: input.role, collegeId: input.collegeId } });
+    } catch (e) {
+      if ((e as { code?: string }).code === "P2002") return { ok: false as const, error: "This number is already registered to another staff member" };
+      throw e;
+    }
     await audit("Staff added", `${input.name} (role ${input.role})`, st.id);
   rosterSoon();
   }

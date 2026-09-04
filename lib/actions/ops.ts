@@ -1,7 +1,7 @@
 "use server";
 /* Operations: staff attendance, day-close cash ritual, wallet top-ups. */
 import { db } from "../db";
-import { requireStaff, requireStaffPerm } from "../auth";
+import { requireStaff, requireStaffPerm, assertSameCollege } from "../auth";
 import { audit } from "../notify";
 import { notifyOwner } from "../mail";
 import { computeReport, parsePeriod } from "../report";
@@ -92,6 +92,7 @@ export async function topUpCredits(studentId: string, amount: number, method: "c
   if (!amount || amount <= 0 || amount > 50_000) return { ok: false as const, error: "Enter a valid amount" };
   const stu = await db.student.findUnique({ where: { id: studentId } });
   if (!stu) return { ok: false as const, error: "Student not found" };
+  assertSameCollege(st, stu.collegeId);
 
   await db.$transaction(async (tx) => {
     await tx.student.update({ where: { id: studentId }, data: { credits: { increment: amount } } });

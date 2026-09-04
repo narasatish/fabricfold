@@ -152,7 +152,9 @@ export default function StaffHomeClient({
     }
   };
 
+  const [activateBusy, setActivateBusy] = useState(false);
   const handleActivateSub = async (studentId: string) => {
+    setActivateBusy(true);
     try {
       const r = await activateSubscription(studentId, subMethod, subOtp || undefined);
       if (!r.ok) {
@@ -165,6 +167,8 @@ export default function StaffHomeClient({
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setActivateBusy(false);
     }
   };
 
@@ -563,11 +567,12 @@ export default function StaffHomeClient({
           )}
           <button
             className="btn mt16"
+            disabled={activateBusy}
             onClick={() => {
               if (showSubSheet) handleActivateSub(showSubSheet);
             }}
           >
-            <Svg name="check" size={18} /> Activate
+            <Svg name="check" size={18} /> {activateBusy ? "Activating…" : "Activate"}
           </button>
         </div>
       </Sheet>

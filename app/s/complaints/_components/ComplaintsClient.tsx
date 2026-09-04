@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
-import { timeAgo, initials } from "@/lib/format";
+import { fmt, timeAgo, initials } from "@/lib/format";
 import { Seg, Sheet, useToast } from "@/components/chrome";
 import { sendComplaintMessage, resolveComplaint } from "@/lib/actions/complaints";
 import { submitCompensation } from "@/lib/actions/credits";
@@ -53,8 +53,11 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
     }
   };
 
+  const [compBusy, setCompBusy] = useState(false);
   const doComp = async () => {
     if (!compFor) return;
+    if (!confirm(`Issue ${fmt(comp.amount)} compensation (${comp.method})? This cannot be undone from here.`)) return;
+    setCompBusy(true);
     try {
       // Pass the complaint through so the payout is traceable to the grievance
       // that justified it, not just to the student.
@@ -66,6 +69,8 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setCompBusy(false);
     }
   };
 
@@ -172,7 +177,7 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
           <label>Comment</label>
           <input className="input" placeholder="Visible to the student" value={comp.comment} onChange={(e) => setComp({ ...comp, comment: e.target.value })} />
         </div>
-        <button className="btn" onClick={doComp}><Svg name="gift" size={16} /> Issue compensation</button>
+        <button className="btn" onClick={doComp} disabled={compBusy}><Svg name="gift" size={16} /> {compBusy ? "Issuing…" : "Issue compensation"}</button>
       </Sheet>
     </div>
   );

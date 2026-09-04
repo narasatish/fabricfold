@@ -2,7 +2,7 @@ import { requireStudent } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { fmt } from "@/lib/format";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import PayClient from "./_components/PayClient";
 
 export default async function PayPage({ params }: { params: Promise<{ id: string }> }) {
@@ -13,6 +13,12 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
   if (!order || order.studentId !== student.id) {
     notFound();
   }
+  /* Paying, then hitting back (or opening this in a second tab) re-rendered
+     a fully "live" payment screen for an order already settled server-side
+     — both actions correctly reject with "Already paid", but a student
+     shouldn't see a real Razorpay checkout open for something already
+     paid for. Send them to the order instead once it's settled. */
+  if (order.paid) redirect(`/c/orders/${order.id}`);
 
   const appConfig = await db.appConfig.findUnique({ where: { id: "main" } });
   const rateLabel = (appConfig?.rates as unknown as Record<string, { label: string }>)?.[order.service]?.label || order.service;

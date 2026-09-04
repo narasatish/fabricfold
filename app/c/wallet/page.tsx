@@ -65,7 +65,7 @@ export default async function WalletPage() {
                     <span className="mono muted" style={{ fontSize: "13px" }}>{b.cycles - b.used} / {b.cycles} left</span>
                   </div>
                   <div style={{ height: "8px", background: "var(--line)", borderRadius: "4px", marginTop: "6px", overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${Math.round(((b.cycles - b.used) / b.cycles) * 100)}%`, background: "var(--teal)" }} />
+                    <div style={{ height: "100%", width: `${Math.round(((b.cycles - b.used) / Math.max(1, b.cycles)) * 100)}%`, background: "var(--teal)" }} />
                   </div>
                   <div className="muted mt4" style={{ fontSize: "11.5px" }}>1 drop-off = 1 cycle · up to {b.kgPerCycle} kg</div>
                 </div>

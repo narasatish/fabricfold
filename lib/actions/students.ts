@@ -95,8 +95,16 @@ export async function bulkRegisterStudents(text: string, collegeId: string) {
     if (seen.has(phone)) { skipped.push({ line, reason: "duplicate in list" }); continue; }
     seen.add(phone);
     if (await db.student.findUnique({ where: { phone } })) { skipped.push({ line, reason: "already registered" }); continue; }
-    await db.student.create({ data: { id: await uniqueId(), phone, name, collegeId } });
-    created++;
+    try {
+      await db.student.create({ data: { id: await uniqueId(), phone, name, collegeId } });
+      created++;
+    } catch (e) {
+      // One bad row (e.g. a phone registered moments ago by another import
+      // or a counter registration racing this one) used to throw and abort
+      // the whole loop — discarding every row already created in this call
+      // with no audit trail. Skip it and keep going instead.
+      skipped.push({ line, reason: (e as { code?: string }).code === "P2002" ? "already registered" : "could not be created" });
+    }
   }
   await audit("Bulk student import", `${created} added to ${college.name}${skipped.length ? `, ${skipped.length} skipped` : ""}`, st.id);
   return { ok: true as const, created, skipped };

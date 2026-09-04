@@ -8,7 +8,8 @@
    boundary and briefly allow 2x), but they need one row and one query. For
    stopping SMS-bombing that is the right trade; a sliding log would cost more
    than the abuse it prevents. */
-import { db } from "./db";
+import { db, dbSchemaPrefix } from "./db";
+import { Prisma } from "./generated/prisma/client";
 
 export type LimitResult = {
   allowed: boolean;
@@ -27,25 +28,31 @@ export async function rateLimit(key: string, max: number, windowSec: number): Pr
   const windowMs = windowSec * 1000;
 
   try {
-    const row = await db.rateLimit.findUnique({ where: { key } });
+    /* ONE atomic statement, not read-then-decide-then-write. The previous
+       version was three round trips (read, then either an upsert or an
+       increment), with no lock across them — under concurrent load
+       (multiple requests for the same key, e.g. an SMS-bombing attempt
+       firing many requests at once) every one of them could read the
+       "before" state and every one would then independently reset the
+       counter to 1, defeating the limiter entirely: the exact abuse this
+       exists to stop. INSERT ... ON CONFLICT serializes on the row's own
+       lock, so concurrent callers queue instead of racing. */
+    const table = Prisma.raw(`${dbSchemaPrefix}"RateLimit"`);
+    const rows = await db.$queryRaw<{ windowStart: Date; count: number }[]>`
+      INSERT INTO ${table} (key, "windowStart", count)
+      VALUES (${key}, ${now}, 1)
+      ON CONFLICT (key) DO UPDATE SET
+        "windowStart" = CASE WHEN ${table}."windowStart" <= ${new Date(now.getTime() - windowMs)} THEN ${now} ELSE ${table}."windowStart" END,
+        count = CASE WHEN ${table}."windowStart" <= ${new Date(now.getTime() - windowMs)} THEN 1 ELSE ${table}.count + 1 END
+      RETURNING "windowStart", count
+    `;
+    const row = rows[0];
 
-    // No row, or the previous window has passed: start a fresh one.
-    if (!row || now.getTime() - row.windowStart.getTime() >= windowMs) {
-      await db.rateLimit.upsert({
-        where: { key },
-        create: { key, windowStart: now, count: 1 },
-        update: { windowStart: now, count: 1 },
-      });
-      return { allowed: true, remaining: max - 1, retryAfterSec: 0 };
-    }
-
-    if (row.count >= max) {
+    if (row.count > max) {
       const retryAfterSec = Math.max(1, Math.ceil((row.windowStart.getTime() + windowMs - now.getTime()) / 1000));
       return { allowed: false, remaining: 0, retryAfterSec };
     }
-
-    const updated = await db.rateLimit.update({ where: { key }, data: { count: { increment: 1 } } });
-    return { allowed: true, remaining: Math.max(0, max - updated.count), retryAfterSec: 0 };
+    return { allowed: true, remaining: Math.max(0, max - row.count), retryAfterSec: 0 };
   } catch (e) {
     console.error("rateLimit failed open:", (e as Error).message);
     return { allowed: true, remaining: max, retryAfterSec: 0 };

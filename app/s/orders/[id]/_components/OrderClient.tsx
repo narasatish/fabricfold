@@ -127,6 +127,10 @@ export default function StaffOrderClient({
   const [damagePhotos, setDamagePhotos] = useState<string[]>([]);
   const [damageComment, setDamageComment] = useState("");
   const [damageBusy, setDamageBusy] = useState(false);
+  // Shared across collect/pay/refund/compensation — each opens its own sheet,
+  // so only one can ever be in flight at a time; a double-tap on any of these
+  // money-moving buttons used to fire the action twice with nothing to stop it.
+  const [actionBusy, setActionBusy] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [collectCode, setCollectCode] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "upi">("cash");
@@ -275,6 +279,7 @@ export default function StaffOrderClient({
 
   // Handler: collect order
   const handleCollect = async () => {
+    setActionBusy(true);
     try {
       const r = await collectOrder(order.id, collectCode);
       if (!r.ok) {
@@ -286,11 +291,14 @@ export default function StaffOrderClient({
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setActionBusy(false);
     }
   };
 
   // Handler: record payment (cash)
   const handlePayCash = async () => {
+    setActionBusy(true);
     try {
       const r = await recordPay(order.id, "cash", applyCredits, staffInvoice);
       if (!r.ok) {
@@ -302,11 +310,14 @@ export default function StaffOrderClient({
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setActionBusy(false);
     }
   };
 
   // Handler: record payment (UPI) — after QR display
   const handlePayUpi = async () => {
+    setActionBusy(true);
     try {
       const r = await recordPay(order.id, "upi", applyCredits, staffInvoice);
       if (!r.ok) {
@@ -319,11 +330,15 @@ export default function StaffOrderClient({
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setActionBusy(false);
     }
   };
 
   // Handler: refund
   const handleRefund = async () => {
+    if (!confirm(`Refund ${fmt(refundInput.amount)} via ${refundInput.via.toUpperCase()}? This cannot be undone from here.`)) return;
+    setActionBusy(true);
     try {
       const r = await refundOrder(order.id, refundInput.amount, refundInput.via, refundInput.reason, refundInput.restoreCycle);
       if (!r.ok) {
@@ -335,11 +350,15 @@ export default function StaffOrderClient({
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setActionBusy(false);
     }
   };
 
   // Handler: compensation
   const handleCompensation = async () => {
+    if (!confirm(`Issue ${fmt(compInput.amount)} compensation (${compInput.method})? This cannot be undone from here.`)) return;
+    setActionBusy(true);
     try {
       const r = await submitCompensation({
         studentId: order.studentId,
@@ -358,6 +377,8 @@ export default function StaffOrderClient({
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setActionBusy(false);
     }
   };
 
@@ -937,11 +958,11 @@ export default function StaffOrderClient({
               autoFocus
               value={collectCode}
               onChange={(e) => setCollectCode(e.target.value.toUpperCase())}
-              onKeyDown={(e) => { if (e.key === "Enter" && collectCode.trim()) handleCollect(); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && collectCode.trim() && !actionBusy) handleCollect(); }}
             />
           </div>
-          <button className="btn mt16" onClick={handleCollect}>
-            <Svg name="check" size={18} /> Verify & collect
+          <button className="btn mt16" onClick={handleCollect} disabled={actionBusy}>
+            <Svg name="check" size={18} /> {actionBusy ? "Collecting…" : "Verify & collect"}
           </button>
           {expectedPickupCode && (
             <div className="muted center mt12" style={{ fontSize: "12px" }}>
@@ -1000,8 +1021,8 @@ export default function StaffOrderClient({
           />
 
           {paymentMethod === "cash" && (
-            <button className="btn mt16" onClick={handlePayCash}>
-              <Svg name="wallet" size={18} /> Record cash payment
+            <button className="btn mt16" onClick={handlePayCash} disabled={actionBusy}>
+              <Svg name="wallet" size={18} /> {actionBusy ? "Recording…" : "Record cash payment"}
             </button>
           )}
 
@@ -1023,8 +1044,8 @@ export default function StaffOrderClient({
           <div className="muted" style={{ fontSize: "12px", marginBottom: "16px" }}>
             Amount: {fmt(remaining)}
           </div>
-          <button className="btn" onClick={handlePayUpi}>
-            <Svg name="check" size={18} /> Mark payment received
+          <button className="btn" onClick={handlePayUpi} disabled={actionBusy}>
+            <Svg name="check" size={18} /> {actionBusy ? "Marking…" : "Mark payment received"}
           </button>
         </div>
       </Sheet>
@@ -1075,8 +1096,8 @@ export default function StaffOrderClient({
               <Switch on={refundInput.restoreCycle} onToggle={() => setRefundInput({ ...refundInput, restoreCycle: !refundInput.restoreCycle })} />
             </div>
           )}
-          <button className="btn mt16" onClick={handleRefund}>
-            <Svg name="back" size={18} /> Process refund
+          <button className="btn mt16" onClick={handleRefund} disabled={actionBusy}>
+            <Svg name="back" size={18} /> {actionBusy ? "Processing…" : "Process refund"}
           </button>
         </div>
       </Sheet>
@@ -1126,8 +1147,8 @@ export default function StaffOrderClient({
               onChange={(e) => setCompInput({ ...compInput, comment: e.target.value })}
             />
           </div>
-          <button className="btn mt16" onClick={handleCompensation}>
-            <Svg name="gift" size={18} /> Issue compensation
+          <button className="btn mt16" onClick={handleCompensation} disabled={actionBusy}>
+            <Svg name="gift" size={18} /> {actionBusy ? "Issuing…" : "Issue compensation"}
           </button>
         </div>
       </Sheet>

@@ -414,7 +414,10 @@ Currently ${current}. Type the code printed on the bag they are being given.
     }
   };
 
+  const [compBusy, setCompBusy] = useState(false);
   const doComp = async () => {
+    if (!confirm(`Issue ${fmt(comp.amount)} compensation (${comp.method}) to ${student.name}? This cannot be undone from here.`)) return;
+    setCompBusy(true);
     try {
       const r = await submitCompensation({ studentId: student.id, orderId: null, kind: comp.kind, amount: comp.amount, method: comp.method, comment: comp.comment });
       if (!r.ok) return toast(r.error || "Failed", true);
@@ -423,6 +426,8 @@ Currently ${current}. Type the code printed on the bag they are being given.
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setCompBusy(false);
     }
   };
 
@@ -1057,7 +1062,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
           <label>Comment</label>
           <input className="input" placeholder="Visible to the student" value={comp.comment} onChange={(e) => setComp({ ...comp, comment: e.target.value })} />
         </div>
-        <button className="btn" onClick={doComp}><Svg name="gift" size={16} /> Issue compensation</button>
+        <button className="btn" onClick={doComp} disabled={compBusy}><Svg name="gift" size={16} /> {compBusy ? "Issuing…" : "Issue compensation"}</button>
       </Sheet>
     </div>
   );

@@ -24,9 +24,9 @@
    the daily sync. This adds an append-only log beside them; it does not
    replace the totals. */
 import { after } from "next/server";
-import { db } from "./db";
+import { db, dbSchemaPrefix } from "./db";
 import { appendSheet, sheetsConfigured } from "./sheets";
-import type { Prisma } from "./generated/prisma/client";
+import { Prisma } from "./generated/prisma/client";
 
 /** One tab per kind, so a reader can filter without formulas. */
 const TAB: Record<string, string> = {
@@ -101,45 +101,66 @@ export async function enqueueSheetEvent(
 export async function flushSheetOutbox(limit = 200) {
   if (!sheetsConfigured()) return { ok: false as const, error: "Google Sheets not configured", sent: 0 };
 
-  const pending = await db.sheetOutbox.findMany({
-    where: { sentAt: null, attempts: { lt: MAX_ATTEMPTS } },
-    orderBy: { at: "asc" },
-    take: limit,
-  });
-  if (!pending.length) return { ok: true as const, sent: 0, failed: 0 };
+  /* This module runs TWO overlapping drainers by design — a fire-and-forget
+     flush right after every order (flushSoon) and a cron sweep — and
+     nothing used to claim a batch before appending it. If both land within
+     the same few hundred ms (an order accepted right as the cron fires),
+     both fetch the same unsent rows, both append them to the Sheet, and
+     both mark them sent — every row in the overlap gets written twice into
+     the owner's Sheet.
 
-  const byKind = new Map<string, typeof pending>();
-  for (const p of pending) {
-    const list = byKind.get(p.kind) ?? [];
-    list.push(p);
-    byKind.set(p.kind, list);
-  }
-
+     SELECT ... FOR UPDATE SKIP LOCKED claims a batch, and the row lock has
+     to stay held through the external appendSheet call for the claim to
+     mean anything — so the whole append-and-mark cycle for THIS kind's
+     rows runs inside the one transaction that holds the lock, not after it
+     ends. A concurrent flush's own SELECT ... SKIP LOCKED simply skips
+     whatever's still locked here and gets a smaller (or empty) batch of
+     its own, instead of re-processing the same rows. */
   let sent = 0, failed = 0;
-  for (const [kind, rows] of byKind) {
-    const tab = TAB[kind] || "Events";
-    const res = await appendSheet(
-      tab,
-      rows.map((r) => r.payload as unknown as (string | number)[]),
-      HEADER[kind],
-    );
-    const ids = rows.map((r) => r.id);
+  const table = Prisma.raw(`${dbSchemaPrefix}"SheetOutbox"`);
+  await db.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id FROM ${table}
+      WHERE "sentAt" IS NULL AND attempts < ${MAX_ATTEMPTS}
+      ORDER BY at ASC LIMIT ${limit}
+      FOR UPDATE SKIP LOCKED
+    `;
+    if (!locked.length) return;
+    const pending = await tx.sheetOutbox.findMany({ where: { id: { in: locked.map((r) => r.id) } }, orderBy: { at: "asc" } });
 
-    if (res.ok) {
-      /* Marked sent only AFTER Google accepted them. The other order — mark
-         then send — loses rows silently whenever a send fails, which is the
-         one outcome an outbox exists to prevent. */
-      await db.sheetOutbox.updateMany({ where: { id: { in: ids } }, data: { sentAt: new Date() } });
-      sent += rows.length;
-    } else {
-      await db.sheetOutbox.updateMany({
-        where: { id: { in: ids } },
-        data: { attempts: { increment: 1 }, lastError: res.error.slice(0, 300) },
-      });
-      failed += rows.length;
-      console.error(`[sheets] append to ${tab} failed: ${res.error}`);
+    const byKind = new Map<string, typeof pending>();
+    for (const p of pending) {
+      const list = byKind.get(p.kind) ?? [];
+      list.push(p);
+      byKind.set(p.kind, list);
     }
-  }
+
+    for (const [kind, rows] of byKind) {
+      const tab = TAB[kind] || "Events";
+      const res = await appendSheet(
+        tab,
+        rows.map((r) => r.payload as unknown as (string | number)[]),
+        HEADER[kind],
+      );
+      const ids = rows.map((r) => r.id);
+
+      if (res.ok) {
+        /* Marked sent only AFTER Google accepted them. The other order — mark
+           then send — loses rows silently whenever a send fails, which is the
+           one outcome an outbox exists to prevent. */
+        await tx.sheetOutbox.updateMany({ where: { id: { in: ids } }, data: { sentAt: new Date() } });
+        sent += rows.length;
+      } else {
+        await tx.sheetOutbox.updateMany({
+          where: { id: { in: ids } },
+          data: { attempts: { increment: 1 }, lastError: res.error.slice(0, 300) },
+        });
+        failed += rows.length;
+        console.error(`[sheets] append to ${tab} failed: ${res.error}`);
+      }
+    }
+  }, { timeout: 30_000 }); // holds the lock through real Google API calls, not just a DB round trip
+
   return { ok: true as const, sent, failed };
 }
 

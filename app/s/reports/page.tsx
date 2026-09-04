@@ -21,10 +21,10 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
   if (!staff) redirect("/login");
 
   const period = parsePeriod(sp);
-  const r = await computeReport(period);
+  const r = await computeReport(period, staff.collegeId);
   const istDate = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
   const dayClose = await db.dayClose.findUnique({ where: { date: istDate } });
-  const staffList = await db.staff.findMany();
+  const staffList = await db.staff.findMany(staff.collegeId ? { where: { collegeId: staff.collegeId } } : undefined);
   const byId = (id: string) => staffList.find((x) => x.id === id)?.name || id;
   const N = (x: unknown) => Number(x || 0);
 

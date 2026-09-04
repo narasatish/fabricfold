@@ -19,7 +19,7 @@
 import ExcelJS from "exceljs";
 import { db } from "@/lib/db";
 import { rosterSoon } from "@/lib/sheets-sync";
-import { requireStaff, AuthError } from "@/lib/auth";
+import { requireStaff, assertSameCollege, AuthError } from "@/lib/auth";
 import { parseBagCode, BAG_LETTER, type Tier } from "@/lib/bagcode";
 
 /* Mirrors the private helpers in lib/actions/subscription.ts — they live in a
@@ -81,6 +81,11 @@ export async function POST(req: Request) {
   if (!(file instanceof File)) return Response.json({ ok: false, error: "Attach the .xlsx file" }, { status: 400 });
   if (file.size > 5 * 1024 * 1024) return Response.json({ ok: false, error: "File too large — 5 MB max" }, { status: 400 });
 
+  try {
+    assertSameCollege(staff, collegeId);
+  } catch (e) {
+    return Response.json({ ok: false, error: (e as Error).message }, { status: 401 });
+  }
   const college = await db.college.findUnique({ where: { id: collegeId } });
   if (!college || !college.active) return Response.json({ ok: false, error: "Pick a campus" }, { status: 400 });
 

@@ -133,7 +133,17 @@ export async function grantFreeReservice(complaintId: string) {
   const r = await redoOrder(c.orderId);
   if (!r.ok || !r.id) return { ok: false as const, error: r.error || "Couldn't create the re-service order" };
 
-  await db.complaint.update({ where: { id: complaintId }, data: { redoOrderId: r.id } });
+  /* Claim the complaint atomically before recording the redo — the check
+     above ran before redoOrder(), so two concurrent clicks (or a retried
+     request) could both pass it and both create a free re-service order,
+     with the second write just overwriting the first's redoOrderId and
+     losing any trace that a second one was ever given away. Scoping the
+     update to redoOrderId still null means only the first caller's write
+     actually lands; the loser can't silently give away a second one. */
+  const claimed = await db.complaint.updateMany({ where: { id: complaintId, redoOrderId: null }, data: { redoOrderId: r.id } });
+  if (claimed.count === 0) {
+    return { ok: false as const, error: "A free re-service was already given for this complaint — this one wasn't linked; check the order queue" };
+  }
   await db.complaintMessage.create({
     data: { complaintId, from: "staff", by: st.id, text: `Free re-service raised — order #${r.id.slice(-4)}, at no charge.` },
   });

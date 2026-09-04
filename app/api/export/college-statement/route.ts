@@ -2,7 +2,7 @@
    college administration: orders, revenue by service, payment split, GST.
    Admin+ only. /api/export/college-statement?collegeId=…&m=YYYY-MM */
 import { db } from "@/lib/db";
-import { requireStaff } from "@/lib/auth";
+import { requireStaff, assertSameCollege } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -10,8 +10,9 @@ const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFol
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
 
 export async function GET(req: Request) {
+  let staff;
   try {
-    await requireStaff(3);
+    staff = await requireStaff(3);
   } catch {
     return new Response("unauthorized", { status: 401 });
   }
@@ -22,6 +23,11 @@ export async function GET(req: Request) {
   if (!y || !mo) return new Response("bad month", { status: 400 });
   const from = new Date(y, mo - 1, 1), to = new Date(y, mo, 1);
 
+  try {
+    assertSameCollege(staff, collegeId);
+  } catch {
+    return new Response("unauthorized", { status: 401 });
+  }
   const college = await db.college.findUnique({ where: { id: collegeId } });
   if (!college) return new Response("college not found", { status: 404 });
 

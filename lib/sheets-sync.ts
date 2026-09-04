@@ -222,7 +222,10 @@ export async function runSheetsSync() {
       where: { staffId: s.id, date: { startsWith: m } },
       orderBy: { date: "desc" }, select: { date: true },
     });
-    staffRows.push([s.name, "+91 " + s.phone, ROLE[s.role] || String(s.role), s.active ? "yes" : "removed", att.length, att[0]?.date || "—"]);
+    /* Leading apostrophe forces literal text — Sheets' USER_ENTERED input
+       mode otherwise reads a value starting with "+" as an attempted
+       formula and shows #ERROR! instead of the phone number. */
+    staffRows.push([s.name, "'+91 " + s.phone, ROLE[s.role] || String(s.role), s.active ? "yes" : "removed", att.length, att[0]?.date || "—"]);
   }
   staffRows.push([], ["DAY CLOSE — cash counted vs expected"], ["Date", "Expected", "Counted", "Variance", "Note"]);
   const closes = await db.dayClose.findMany({ orderBy: { date: "desc" }, take: 30 });
@@ -278,7 +281,7 @@ export async function writeStudentsTab() {
     rows.push([
       st.bags[0]?.code || st.id,
       st.name,
-      "+91 " + st.phone,
+      "'+91 " + st.phone, // leading apostrophe — see staffRows note above
       st.kind === "faculty" ? "Faculty" : "Student",
       st.college?.name || "—",
       st.subscription?.active ? st.subscription.plan : "—",

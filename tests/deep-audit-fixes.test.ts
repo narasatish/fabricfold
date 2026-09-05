@@ -249,8 +249,18 @@ describe("three more concurrency/state bugs found by a deep hand-traced re-audit
     }
   });
 
-  it("subscription.ts's own row locks are schema-qualified too (the same raw-SQL gap fixed elsewhere tonight, missed here until now)", () => {
-    expect((subs.match(/SELECT id FROM \$\{Prisma\.raw\(`\$\{dbSchemaPrefix\}"Subscription"`\)\} WHERE "studentId" = \$\{studentId\} FOR UPDATE/g) || []).length).toBe(4);
+  it("subscription.ts's row locks that protect an ALWAYS-existing row (adjustCycleUsage, upgradeSubscription) are schema-qualified", () => {
+    // Down from 4 to 2 as of 2026-09-05: assignSubscription and
+    // sellCyclePack were switched to a Postgres advisory lock instead of a
+    // row lock, because both protect a student's FIRST subscription/pack —
+    // a row that doesn't exist yet, which a SELECT ... FOR UPDATE cannot
+    // lock. adjustCycleUsage and upgradeSubscription both require an
+    // existing subscription as a precondition, so their row lock is safe
+    // and stays as-is. See docs/claude-playbook.md for the bug this closes.
+    expect((subs.match(/SELECT id FROM \$\{Prisma\.raw\(`\$\{dbSchemaPrefix\}"Subscription"`\)\} WHERE "studentId" = \$\{studentId\} FOR UPDATE/g) || []).length).toBe(2);
+  });
+  it("assignSubscription and sellCyclePack use an advisory lock instead, since a first-time student has no row to lock", () => {
+    expect((subs.match(/SELECT pg_advisory_xact_lock\(hashtext\(\$\{`subscription\|\$\{studentId\}`\}\)\)/g) || []).length).toBe(2);
   });
 });
 

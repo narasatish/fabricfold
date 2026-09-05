@@ -155,6 +155,61 @@ rest of the codebase; the test documents the intended behavior rather than
 proving the old code was exploitable under the exact conditions tried here.
 Full suite: 793/793.
 
+## CRITICAL, found by systematic re-check 2026-09-05: assignSubscription and sellCyclePack could double-charge a student's FIRST plan/pack
+
+Immediately after finding and fixing the identical bug in issueBag (below),
+this session grepped EVERY `FOR UPDATE` lock in `lib/` for the same flaw —
+a `SELECT ... FOR UPDATE` on a WHERE clause that could legitimately match
+zero rows — rather than assuming issueBag was the only instance. It wasn't.
+
+Both `assignSubscription` and `sellCyclePack` in `lib/actions/subscription.ts`
+locked with `SELECT id FROM "Subscription" WHERE "studentId" = X FOR
+UPDATE` before writing a student's Subscription row. For a student's
+FIRST-EVER plan or cycle pack, there is no Subscription row yet — the WHERE
+clause matches zero rows, and the lock holds nothing. Worse, both
+functions' own comments described exactly this scenario while getting the
+conclusion backwards: `assignSubscription`'s comment said "two concurrent
+assigns for a student with no plan yet would both pass it" (correctly
+describing the race) right above a lock that couldn't stop it;
+`sellCyclePack`'s comment claimed "a row that doesn't exist yet... has
+nothing to lock — fine, since there's nothing to race against either" —
+which is simply wrong. Two concurrent first-ever purchases both read "no
+existing subscription," both compute a fresh one-purchase `buckets` array,
+and BOTH STILL CHARGE THE STUDENT (a Payment row for assignSubscription, a
+cash/credit charge for sellCyclePack) regardless of which one's upsert
+becomes the create vs. the update — and the upsert's update branch
+overwrites the other's buckets entirely, so one purchase's cycles are
+silently discarded while the student is billed for both. This is a live,
+real double-charge/lost-cycles bug in core plan-purchasing money paths.
+
+Fixed both with a Postgres advisory lock keyed on `studentId` (same
+technique as the `issueBag`, slot-booking, and payslip fixes) — works
+whether or not the Subscription row exists yet. Verified with a new
+behavioral test (`tests/subscription-first-time-race-behavioral.test.ts`):
+confirmed genuine by reverting both locks back to the row-lock version and
+re-running — `sellCyclePack`'s test failed exactly as predicted (5 cycles
+landed instead of 5+7=12, one purchase's cycles silently discarded).
+`assignSubscription`'s test happened to still pass on that one revert run
+(same intermittent-reproduction pattern as other short-critical-section
+races this session), but the code-level reasoning is identical and the fix
+is the same pattern already proven necessary by `sellCyclePack`'s
+confirmed failure and `issueBag`'s confirmed failure. Full suite: 806/806.
+
+**This is the same root-cause bug, now confirmed in three independent
+places** (issueBag, assignSubscription, sellCyclePack) — a plain row lock
+cannot protect a resource that doesn't exist yet; only an advisory lock
+(or locking a DIFFERENT row that's guaranteed to already exist, like the
+Student row) can. Every other `FOR UPDATE` lock in the codebase was
+checked against this exact criterion (does the locked row's existence
+depend on the very write being raced?) as part of this same pass:
+`auth.ts`'s Student lock (locks the caller's own already-existing row —
+safe), `orders.ts`'s Order/Subscription locks in acceptOrder/walkInOrder/
+refundOrder/restoreCycleFor (all lock a row already confirmed to exist by
+a preceding null-check on the same object — safe),
+`subscription.ts`'s `adjustCycleUsage`/`upgradeSubscription` locks (both
+require an existing active subscription as a precondition — safe). None of
+the others share this flaw.
+
 ## CORRECTION 2026-09-05: issueBag's lock had a SECOND, deeper bug the first fix missed
 
 The earlier entry in this file ("issueBag's row lock was never schema-

@@ -41,15 +41,22 @@ describe("collectOrder can't double-collect under concurrency", () => {
 describe("subscription writes are locked against concurrent top-ups/assigns/upgrades", () => {
   const subs = read("lib/actions/subscription.ts");
 
-  it("sellCyclePack locks the row and re-reads buckets fresh, not the pre-transaction snapshot", () => {
-    const body = subs.slice(subs.indexOf("export async function sellCyclePack"), subs.indexOf("export async function sellCyclePack") + 2500);
-    expect(body).toMatch(/await tx\.\$executeRaw`SELECT id FROM \$\{Prisma\.raw\(`\$\{dbSchemaPrefix\}"Subscription"`\)\} WHERE "studentId" = \$\{studentId\} FOR UPDATE`/);
+  it("sellCyclePack locks (by advisory lock, not a row lock — a first-ever pack has no row to lock) and re-reads buckets fresh", () => {
+    // CORRECTED 2026-09-05: a SELECT ... FOR UPDATE row lock cannot protect a
+    // row that doesn't exist yet (a student's first-ever cycle pack), so this
+    // was switched to a Postgres advisory lock keyed on studentId — see
+    // docs/claude-playbook.md for the bug this closes.
+    const body = subs.slice(subs.indexOf("export async function sellCyclePack"), subs.indexOf("export async function sellCyclePack") + 3500);
+    expect(body).toMatch(/await tx\.\$executeRaw`SELECT pg_advisory_xact_lock\(hashtext\(\$\{`subscription\|\$\{studentId\}`\}\)\)`/);
     expect(body).toMatch(/const existing = await tx\.subscription\.findUnique\(\{ where: \{ studentId \} \}\)/);
   });
 
-  it("assignSubscription locks the row and re-checks 'already active' fresh, not the pre-transaction guard alone", () => {
+  it("assignSubscription locks (by advisory lock, not a row lock — a first-ever plan has no row to lock) and re-checks 'already active' fresh", () => {
+    // CORRECTED 2026-09-05: same class of bug as sellCyclePack above — a
+    // student's FIRST plan has no Subscription row yet, so a row lock was a
+    // no-op for exactly the case its own comment described.
     const body = subs.slice(subs.indexOf("export async function assignSubscription"), subs.indexOf("export async function upgradeSubscription"));
-    expect(body).toMatch(/await tx\.\$executeRaw`SELECT id FROM \$\{Prisma\.raw\(`\$\{dbSchemaPrefix\}"Subscription"`\)\} WHERE "studentId" = \$\{studentId\} FOR UPDATE`/);
+    expect(body).toMatch(/await tx\.\$executeRaw`SELECT pg_advisory_xact_lock\(hashtext\(\$\{`subscription\|\$\{studentId\}`\}\)\)`/);
     expect(body).toMatch(/if \(fresh\?\.active\) throw new Error\("This student already has an active plan"\)/);
     expect(body).toMatch(/catch \(e\) \{[\s\S]*?return \{ ok: false as const, error: \(e as Error\)\.message \};/);
   });

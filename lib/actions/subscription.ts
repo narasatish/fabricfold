@@ -209,8 +209,17 @@ export async function assignSubscription(studentId: string, planId: string, meth
       /* Locked, then re-checked — the `stu.subscription?.active` guard above
          ran before this transaction started, so two concurrent assigns for a
          student with no plan yet would both pass it and both charge a
-         Payment row for the same plan. */
-      await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Subscription"`)} WHERE "studentId" = ${studentId} FOR UPDATE`;
+         Payment row for the same plan.
+
+         Found 2026-09-05: a `SELECT ... FOR UPDATE` row lock is exactly
+         useless for this — "a student with no plan yet" means there is NO
+         Subscription row to match the WHERE clause, so the lock held
+         nothing and the race this comment describes was still wide open.
+         (Same root-cause bug independently found and fixed in issueBag's
+         "first bag" case and sellCyclePack's "first pack" case — see
+         docs/claude-playbook.md.) A Postgres advisory lock keyed on
+         studentId works whether or not the row exists yet. */
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`subscription|${studentId}`}))`;
       const fresh = await tx.subscription.findUnique({ where: { studentId } });
       if (fresh?.active) throw new Error("This student already has an active plan");
       await tx.subscription.upsert({
@@ -456,11 +465,24 @@ export async function sellCyclePack(
        retried request) would still both compute from the same snapshot, and
        the second write overwrites the first's bucket array instead of
        adding to it — the student pays twice but only one top-up's cycles
-       land. The row lock forces the second transaction to wait for the
-       first to commit, then see its result. A row that doesn't exist yet
-       (first-ever pack for this student) has nothing to lock — fine, since
-       there's nothing to race against either. */
-    await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Subscription"`)} WHERE "studentId" = ${studentId} FOR UPDATE`;
+       land.
+
+       CORRECTION 2026-09-05: this comment used to claim "a row that doesn't
+       exist yet (first-ever pack for this student) has nothing to lock —
+       fine, since there's nothing to race against either." That reasoning
+       was wrong, and it described exactly the bug it was dismissing: two
+       concurrent FIRST-ever packs both read `existing = null`, both compute
+       a fresh one-pack `buckets` array, and both still run their credit
+       decrement / payment.create afterward — the student is charged twice
+       (or double-decremented in credits) while the upsert's create-then-
+       update sequence leaves only ONE pack's cycles in the final row,
+       silently discarding the other purchase's cycles. A plain row lock
+       cannot prevent this when the row it would lock doesn't exist yet
+       (same class of bug independently found in issueBag's "first bag"
+       case and assignSubscription's "first plan" case — see
+       docs/claude-playbook.md). Switched to a Postgres advisory lock keyed
+       on studentId, which works whether or not the row exists. */
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`subscription|${studentId}`}))`;
     const existing = await tx.subscription.findUnique({ where: { studentId } });
     const buckets: Bucket[] = ((existing?.buckets as unknown as Bucket[] | null) ?? []).map((b) => ({ ...b }));
     const idx = buckets.findIndex((b) => b.service === input.service);

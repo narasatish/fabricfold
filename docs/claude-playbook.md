@@ -122,6 +122,18 @@ missing ownership check):**
 - Light-theme `--muted`/`--faint` text failed WCAG AA contrast (4.05:1 and
   2.47:1 against a 4.5:1 requirement) — darkened to 5.2:1+/4.2:1+.
 
+## Known edge case (not a leak, opposite risk)
+
+`Complaint.collegeId` has `@default("")` in the schema. The new
+campus-scoping filters (`app/s/page.tsx`, `app/s/complaints/page.tsx`) do
+`where: { collegeId: staff.collegeId }`, which will never match a row whose
+`collegeId` is still the empty-string default. Any such legacy row would
+silently vanish from a scoped staffer's complaint list — not a cross-campus
+leak (the opposite: legitimate same-campus data going invisible). One query
+answers whether this is live: `SELECT count(*) FROM "Complaint" WHERE
+"collegeId" = '';`. If non-zero, backfill those rows' real `collegeId` from
+their student's campus.
+
 ## Pending / needs a human check
 
 - **Payslip duplicate-check** — before adding `@@unique([staffId, month])`

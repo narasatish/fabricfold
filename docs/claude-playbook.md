@@ -155,6 +155,90 @@ rest of the codebase; the test documents the intended behavior rather than
 proving the old code was exploitable under the exact conditions tried here.
 Full suite: 793/793.
 
+## CORRECTION 2026-09-05: issueBag's lock had a SECOND, deeper bug the first fix missed
+
+The earlier entry in this file ("issueBag's row lock was never schema-
+qualified") turned out to be only half the story, and the caveat in it
+undersold a real problem rather than correctly identifying it. In a full
+`npm test` run — hours after that fix shipped — `tests/bag-race-
+behavioral.test.ts` FAILED for real: two concurrent `issueBag` calls for
+the same (brand-new) student both succeeded, leaving two active bags. Not
+a flaky infra hiccup — a genuine, reproducible defect in the fixed code.
+
+Root cause: `SELECT ... FOR UPDATE` only locks the rows a WHERE clause
+actually MATCHES. The lock was `WHERE "studentId" = X AND status =
+'active'` — for a student's FIRST-EVER bag, there is no existing row with
+`status = 'active'` yet, so the query matches zero rows, and locking zero
+rows locks nothing. The schema-qualification fix was real and necessary,
+but it was fixing the WRONG half of the bug — even correctly qualified,
+locking a row that doesn't exist yet provides no serialization at all. Two
+counters issuing a FIRST bag to the same student at the same instant had
+(and, before this correction, still had) nothing stopping them.
+
+Fixed for real with a Postgres advisory lock keyed on `studentId`
+(`pg_advisory_xact_lock(hashtext('bag-issue|' + studentId))`) — same
+technique as the slot-booking and payslip fixes, and for the same
+underlying reason: none of these three have a physical row guaranteed to
+exist for a plain row lock to attach to (a fresh slot, a fresh payslip
+month, a fresh student's first bag). Re-ran the behavioral test 3
+consecutive times with the advisory-lock fix and got 3 clean passes, versus
+a confirmed real failure with the row-lock version.
+
+**Lesson, the one that actually matters here**: "reverting the fix and
+re-running the test still passed" is NOT the same evidence as "the fix is
+correct" — it only proves the test didn't catch a problem on that
+occasion. The earlier playbook entry drew the wrong conclusion from a
+true observation (the revert-test passed) because it didn't consider that
+the ORIGINAL bug being tested for might have a different root cause than
+the one just fixed. When a caveated "couldn't reliably reproduce" test
+later fails for real, on the FIXED code, in an unrelated full-suite run —
+that is a five-alarm signal to stop and re-derive the bug from scratch,
+not to shrug it off as the same known flakiness. This is exactly what
+happened here, and it very nearly got missed a second time.
+
+## RESOLVED 2026-09-05: createPayslip's double-pay race was live and unprotected in production
+
+Re-reading the existing "Payslip duplicates" note in this file (the DB-level
+`@@unique([staffId, month])` constraint was verified safe against
+production data but never successfully applied — `prisma db push` refuses
+any new unique constraint on a non-empty table, and `--accept-data-loss`
+correctly stays off-limits for a session to add unilaterally) surfaced its
+real consequence: `createPayslip`'s comment claimed "@@unique([staffId,
+month]) is the actual guard," but that constraint DOESN'T EXIST in
+production. The `P2002` catch around it had nothing to ever actually catch.
+Two concurrent payslip submissions for the same staff+month — a
+double-tap, or a retried request — could both silently succeed, posting two
+Payslip rows and, if `postExpense` was set, two "Salaries" Expense entries,
+genuinely double-paying someone. This was a live, real, currently-open gap
+in production money handling, not a hypothetical.
+
+Fixed at the APPLICATION level, no schema migration required: a Postgres
+advisory lock (`pg_advisory_xact_lock(hashtext('payslip|staffId|month'))`,
+same technique as the slot-booking overbooking fix) taken inside the
+transaction, followed by an explicit `tx.payslip.findFirst` duplicate check
+before creating the new row. This closes the race regardless of whether the
+DB constraint is ever successfully applied, and doesn't preclude adding it
+later — the two are complementary, not alternatives.
+
+Verified with a new behavioral test
+(`tests/payslip-race-behavioral.test.ts`) that explicitly confirms its own
+test schema has NO unique index on `(staffId, month)` (so a pass can't be
+credited to a DB backstop by accident), then fires two concurrent
+`createPayslip` calls for the same staff+month and confirms exactly one
+succeeds. Caveat, checked rather than assumed: reverting just the
+advisory-lock line and re-running still passed — the THIRD race this
+session that doesn't reliably force itself open against this particular
+remote test DB's latency (see the bag-lock and phone-race entries above).
+The fix is still correct; full suite: 803/803.
+
+**Lesson**: a comment describing a safety mechanism ("X is the actual
+guard") needs to be checked against what's REALLY in the database, not
+trusted at face value — this file's own earlier entry had already
+documented that the constraint wasn't applied, but the comment in the
+actual guard code hadn't been updated to reflect that, so the gap sat
+un-remediated even though the information needed to catch it was already
+written down one file over.
+
 ## RESOLVED 2026-09-05: updateStudentPhone had the same unhandled-P2002 gap registerStudent was already fixed for
 
 Minor but real: `registerStudent` already catches `P2002` on the phone

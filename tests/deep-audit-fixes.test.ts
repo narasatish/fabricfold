@@ -473,10 +473,21 @@ describe("createPayslip can't double-pay a staff member for the same month", () 
   // `prisma db push` refuses it categorically without --accept-data-loss,
   // and that flag isn't ours to add without the owner's explicit hand on
   // it. See the note in prisma/schema.prisma for the exact SQL to run.
-  it("createPayslip catches the collision and returns a friendly error", () => {
+  // Since the DB constraint doesn't exist, the old P2002-only catch had
+  // NOTHING to actually catch in production — fixed 2026-09-05 with an
+  // application-level Postgres advisory lock (same technique as the
+  // slot-booking overbooking fix) plus an explicit findFirst check inside
+  // the lock, closing the race without needing the blocked migration.
+  it("locks on (staffId, month) and checks for an existing payslip before creating one", () => {
     const src = read("lib/actions/admin.ts");
     const fn = src.slice(src.indexOf("export async function createPayslip"));
-    expect(fn).toMatch(/if \(\(e as \{ code\?: string \}\)\.code === "P2002"\) return \{ ok: false as const, error: `\$\{target\.name\} already has a payslip for \$\{input\.month\}` \};/);
+    expect(fn).toMatch(/SELECT pg_advisory_xact_lock\(hashtext\(\$\{`payslip\|\$\{input\.staffId\}\|\$\{input\.month\}`\}\)\)/);
+    expect(fn).toMatch(/if \(await tx\.payslip\.findFirst\(\{ where: \{ staffId: input\.staffId, month: input\.month \} \}\)\)/);
+  });
+  it("still catches a real P2002 too, in case the DB constraint is ever added", () => {
+    const src = read("lib/actions/admin.ts");
+    const fn = src.slice(src.indexOf("export async function createPayslip"));
+    expect(fn).toMatch(/"DUPLICATE_PAYSLIP" \|\| \(e as \{ code\?: string \}\)\.code === "P2002"/);
   });
 });
 

@@ -14,8 +14,23 @@
      run it, so DIRECT_URL is preferred when present.
 
    Skips silently when no database is configured (e.g. a preview build without
-   credentials) rather than failing the build for the wrong reason. */
+   credentials) rather than failing the build for the wrong reason.
+
+   On Render/Vercel these vars are already real process env vars by the time
+   the build runs, so this worked in production without needing dotenv. But
+   this script is invoked directly (`node scripts/deploy-migrate.mjs`), not
+   through Next.js's own env loading — so a LOCAL `npm run build` never had
+   .env's values available here at all, and this step silently no-opped on
+   every local build with zero indication anything was skipped. Its sibling
+   script in the same pipeline, ensure-guards.mjs, already self-loads dotenv
+   as a fallback for exactly this reason; this one never got the same
+   treatment, so the most important step in a pre-deploy build check — did
+   the schema actually sync — was quietly doing nothing locally the whole
+   time, a false-confidence trap for anyone treating a local `npm run build`
+   as a real deploy verification. */
 import { execSync } from "node:child_process";
+
+try { (await import("dotenv")).config(); } catch { /* not installed: fine on Render/Vercel */ }
 
 const url = process.env.DIRECT_URL || process.env.DATABASE_URL || "";
 

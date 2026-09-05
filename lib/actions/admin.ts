@@ -427,6 +427,26 @@ export async function createPayslip(input: { staffId: string; month: string; bas
   let slip;
   try {
     slip = await db.$transaction(async (tx) => {
+      /* The comment this replaced claimed "@@unique([staffId, month]) is the
+         actual guard" — but per docs/claude-playbook.md ("Payslip
+         duplicates"), that DB-level constraint was never successfully
+         applied to production: `prisma db push` categorically refuses ANY
+         new unique constraint on a non-empty table, and applying
+         `--accept-data-loss` to force it past that check is deliberately
+         not something a session does unilaterally. So in production today
+         there is NO constraint for the P2002 catch below to ever actually
+         catch — two concurrent payslip submissions for the same staff+month
+         would both silently succeed, double-paying someone. Closed here at
+         the application level instead, with the same Postgres advisory-lock
+         technique used for the slot-booking overbooking fix (lib/slot-
+         capacity.ts): no schema migration needed, and it doesn't preclude
+         adding the real constraint later if the owner ever runs the ALTER
+         TABLE directly. */
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`payslip|${input.staffId}|${input.month}`}))`;
+      if (await tx.payslip.findFirst({ where: { staffId: input.staffId, month: input.month } })) {
+        throw Object.assign(new Error(`${target.name} already has a payslip for ${input.month}`), { code: "DUPLICATE_PAYSLIP" });
+      }
+
       const seq = await tx.fySequence.upsert({
         where: { kind_fyTag: { kind: "payslip", fyTag: ym } },
         create: { kind: "payslip", fyTag: ym, value: 1 },
@@ -440,14 +460,14 @@ export async function createPayslip(input: { staffId: string; month: string; bas
         });
         expenseId = ex.id;
       }
-      // @@unique([staffId, month]) is the actual guard — a retried/double-tapped
-      // submission for the same staff+month must not silently double-pay them.
       return tx.payslip.create({
         data: { number, staffId: input.staffId, month: input.month, basic: input.basic, allowances: input.allowances, deductions: input.deductions, net, expenseId },
       });
     });
   } catch (e) {
-    if ((e as { code?: string }).code === "P2002") return { ok: false as const, error: `${target.name} already has a payslip for ${input.month}` };
+    if ((e as { code?: string }).code === "DUPLICATE_PAYSLIP" || (e as { code?: string }).code === "P2002") {
+      return { ok: false as const, error: `${target.name} already has a payslip for ${input.month}` };
+    }
     throw e;
   }
 

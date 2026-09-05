@@ -12,10 +12,36 @@ import { pushNotif, audit } from "../notify";
 import { notifyOwner } from "../mail";
 import { syncBagToPlan } from "./bags";
 import { CYCLE_RATES } from "../money";
+import { featureOn } from "../features";
 import { enqueueSheetEvent, flushSoon, istStamp } from "../sheet-events";
 import { rosterSoon } from "../sheets-sync";
 
 const rid = (n: number) => { let s = ""; for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10); return s; };
+
+/* lib/money.ts's collegeUsesCycleBasedPricing already encodes the rule: a
+   college with its own item-rates override (College.rates non-null, e.g.
+   BVRIT) bills every garment per piece and is NEVER cycle-based — that rule
+   is enforced for individual orders (the cycle stepper is hidden, see
+   cycle-model.test.ts's "walk-in: cycle stepper" case) but was never applied
+   to the BULK actions that sell cycles in advance: assignSubscription,
+   upgradeSubscription, activateSubscription, and sellCyclePack all ran
+   unconditionally regardless of the college's rates override, so a per-piece
+   campus like BVRIT could still have a 34-cycle Wash & Fold plan or a raw
+   cycle pack sold to a student — money paid for something that per-order
+   pricing would then never actually consume by the cycle. Also gated on the
+   admin-facing "subscriptions" feature flag (features.ts / AdminClient.tsx),
+   which existed in the toggle UI but, like the rates-override case, nothing
+   server-side ever actually read. */
+async function requireCyclesEnabled(collegeId: string) {
+  const college = await db.college.findUniqueOrThrow({ where: { id: collegeId }, select: { features: true, rates: true } });
+  if (college.rates != null) {
+    return "This campus bills per piece (its own item rates are set) — cycle-based plans and packs aren't available here.";
+  }
+  if (!featureOn(college.features, "subscriptions")) {
+    return "Cycle-based plans and packs are disabled for this campus.";
+  }
+  return null;
+}
 
 type PlanBucket = { service: string; cycles: number; kgPerCycle: number };
 
@@ -99,6 +125,8 @@ export async function activateSubscription(studentId: string, method: "cash" | "
   const st = await requireStaff(2); // Manager+ only
   const stu = await db.student.findUniqueOrThrow({ where: { id: studentId }, include: { subscription: { include: { planRef: true } } } });
   assertSameCollege(st, stu.collegeId);
+  const gateErr = await requireCyclesEnabled(stu.collegeId);
+  if (gateErr) return { ok: false as const, error: gateErr };
   if (!stu.subscription) return { ok: false as const, error: "No pending subscription request" };
 
   if (method === "cash") {
@@ -146,6 +174,8 @@ export async function assignSubscription(studentId: string, planId: string, meth
   const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: true } });
   if (!stu) return { ok: false as const, error: "Student not found" };
   assertSameCollege(st, stu.collegeId);
+  const gateErr = await requireCyclesEnabled(stu.collegeId);
+  if (gateErr) return { ok: false as const, error: gateErr };
   if (stu.subscription?.active) return { ok: false as const, error: "This student already has an active plan" };
 
   const plan = await db.plan.findUnique({ where: { id: planId } });
@@ -222,6 +252,8 @@ export async function upgradeSubscription(studentId: string, planId: string, met
   });
   if (!stu) return { ok: false as const, error: "Student not found" };
   assertSameCollege(st, stu.collegeId);
+  const gateErr = await requireCyclesEnabled(stu.collegeId);
+  if (gateErr) return { ok: false as const, error: gateErr };
   const cur = stu.subscription;
   if (!cur || !cur.active) return { ok: false as const, error: "This student has no active plan to change" };
   if (cur.expiresAt && cur.expiresAt.getTime() < Date.now()) {
@@ -391,6 +423,8 @@ export async function sellCyclePack(
   const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: true } });
   if (!stu) return { ok: false as const, error: "Student not found" };
   assertSameCollege(st, stu.collegeId);
+  const gateErr = await requireCyclesEnabled(stu.collegeId);
+  if (gateErr) return { ok: false as const, error: gateErr };
 
   const price = cycles * rate;
   const label = input.service === "washFold" ? "Wash & Fold" : "Wash & Iron";

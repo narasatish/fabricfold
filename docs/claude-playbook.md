@@ -12,27 +12,76 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
-## TOP PRIORITY OPEN ITEM (start here next session)
+## RESOLVED 2026-09-05: refundOrder's over-refund cap had a real NULL-poisoning bug
 
-`tests/refund-race-behavioral.test.ts` — a genuine behavioral test (not a
-source-regex check) for `refundOrder`'s over-refund cap — is currently
-`.skip`ped because it FAILS, including in a purely SEQUENTIAL scenario (two
-plain sequential `await refundOrder(...)` calls, no concurrency involved):
-after a first ₹300 refund fully consumes a ₹300 order, a second ₹1 refund
-attempt still succeeds when it should be refused. This means one of two
-things, and it has NOT been determined which:
-1. `refundOrder`'s cap logic (`lib/actions/orders.ts`, the `refundableNow`/
-   `stillRefundable` checks added earlier tonight) has a real bug that every
-   existing source-regex test was structurally unable to catch, or
-2. The new test file's harness (session mocking, schema wiring, or the
-   `mkPaidOrder` helper) has a bug of its own, unrelated to the real fix.
-Do not assume either direction. First step: run just this file
-(`npx vitest run tests/refund-race-behavioral.test.ts`, un-skip it first)
-and add temporary `console.log`s of `o.total`, `o.refundAmount`, and the
-transaction's `fresh.total`/`fresh.refundAmount` inside `refundOrder` to see
-which value is wrong. Only then decide whether the fix or the test needs
-changing. This is the single most important thing this app doesn't yet know
-about itself — refunds are real money.
+`tests/refund-race-behavioral.test.ts` is now un-skipped and passing (both
+cases, including the purely sequential one). Root cause found: it was NOT a
+test-harness bug — `refundOrder`'s cap logic in `lib/actions/orders.ts` had a
+genuine defect.
+
+`Order.refundAmount` is `Decimal?` in `prisma/schema.prisma` with **no DB
+default**, so a fresh order's `refundAmount` is SQL `NULL`. The write at the
+end of the transaction used `refundAmount: { increment: amount }`, which
+Prisma compiles to `refundAmount = refundAmount + amount`. In Postgres,
+`NULL + 300` evaluates to `NULL`, not `300` — so after the FIRST refund on
+any order, the column silently stayed `NULL` in the database even though the
+in-memory `o.refundAmount` the caller had looked stale-consistent. The next
+call's fresh, lock-protected read (`fresh.refundAmount`) came back `null`,
+fell through `Number(fresh.refundAmount || 0)` to `0`, and the cap check
+recomputed `stillRefundable` as the FULL order total again — silently
+re-opening an already-fully-refunded order to further refunds, no
+concurrency required to trigger it.
+
+Fixed by computing the new value explicitly off the fresh transactional read
+instead of relying on SQL `increment` on a nullable column:
+`refundAmount: Number(fresh.refundAmount || 0) + amount`. This closes the
+bug regardless of whether the column ever gets a DB-level default.
+
+**Lesson — generalizes beyond this one field**: `{ increment: n }` (and
+`{ decrement }`/`{ multiply }`/`{ divide }`) on any nullable numeric/Decimal
+Prisma column is unsafe if that column can legitimately be `NULL` for a live
+row — Postgres arithmetic on `NULL` always produces `NULL`, and Prisma does
+not coalesce it. Either give the column a DB-level `@default(0)` (a schema
+migration, same `prisma db push` friction as the Payslip unique-constraint
+item below) or, safer without a migration, always compute the new value from
+a freshly-read row and write it explicitly, as done here. Checked 2026-09-05: every other `{ increment: ... }` usage in `lib/actions/*.ts`
+(`sessionEpoch`, `credits`, `cyclesUsed`, `lifetimePieces`, `attempts`,
+`value`) targets a non-nullable column with `@default(0)` in
+`prisma/schema.prisma` — `refundAmount` (`Decimal?`, no default) was the only
+one exposed to this class of bug. Re-run this grep before adding any new
+`{ increment/decrement/multiply/divide }` on a nullable numeric column.
+
+## RESOLVED 2026-09-05: per-piece colleges (BVRIT) could still be sold cycle plans/packs
+
+`lib/money.ts`'s `collegeUsesCycleBasedPricing` already encoded the rule that
+a college with its own item-rates override (`College.rates` non-null — e.g.
+BVRIT, which bills every garment per piece) is never cycle-based. That rule
+was enforced for individual orders (the cycle stepper hides itself — see
+`cycle-model.test.ts`'s "walk-in: cycle stepper" case), but the four
+bulk actions that sell cycles in ADVANCE — `assignSubscription`,
+`upgradeSubscription`, `activateSubscription`, `sellCyclePack` in
+`lib/actions/subscription.ts` — ran unconditionally regardless of the
+college's rates override. A Manager could still sell a per-piece campus a
+34-cycle Wash & Fold plan or a raw cycle pack, for a student OR faculty —
+money paid for cycles that per-order pricing would then never actually
+consume, since every order there is billed per garment instead.
+
+Separately, the "subscriptions" feature flag (`lib/features.ts`,
+`AdminClient.tsx`'s toggle list) has existed since `features.ts` was written
+but nothing outside that admin toggle UI ever read it — the exact class of
+bug `features.ts`'s own header comment warns about (a flag live in the
+screen, inert on the server).
+
+Fixed with one shared gate, `requireCyclesEnabled(collegeId)` in
+`lib/actions/subscription.ts`, called from all four functions right after
+their existing `assertSameCollege` check: refuses with a clear error if
+`College.rates` is set OR the `subscriptions` feature flag is off. Verified
+with a real behavioral test (`tests/cycle-gate-behavioral.test.ts` — calls
+`sellCyclePack`/`assignSubscription` for real against a real test DB, not a
+source-regex check) confirming a per-piece college is refused and a
+cycle-based one still succeeds. The staff UI (`CustomerClient.tsx`) already
+surfaces `r.error` via toast for all three call sites, so no UI change was
+needed for the refusal to be visible.
 
 ## The single most important rule in this codebase
 

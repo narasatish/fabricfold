@@ -168,9 +168,21 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       excessCharge = excessWeightCharge(input.weightKg, undefined, { waived: !!input.waiveExcess, cycles: cyclesCount });
     }
     if (input.useCycle) {
-      const sub = o.student.subscription;
-      const blocked = subscriptionBlocker(sub);
-      if (blocked || !sub) throw new Error(blocked || "No active subscription");
+      const preSub = o.student.subscription;
+      const blocked = subscriptionBlocker(preSub);
+      if (blocked || !preSub) throw new Error(blocked || "No active subscription");
+      /* Locked, then re-read fresh — same pattern as every other subscription
+         writer in this file (restoreCycleFor, assignSubscription,
+         sellCyclePack). Without the lock, two orders burning cycles off the
+         same subscription at once (two counters, or a walk-in racing an app
+         order) would both read the same "before" buckets snapshot, both pass
+         the capacity check, and the second write's whole-array overwrite
+         would silently stomp the first order's bucket update — cyclesUsed
+         (an atomic increment) stays numerically right, but the per-service
+         bucket it's supposed to explain drifts from it, and a plan could be
+         over-drawn past its real remaining cycles. */
+      await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Subscription"`)} WHERE id = ${preSub.id} FOR UPDATE`;
+      const sub = await tx.subscription.findUniqueOrThrow({ where: { id: preSub.id } });
       type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
       const buckets = (sub.buckets as unknown as Bucket[] | null) || null;
       if (buckets && buckets.length) {
@@ -239,7 +251,9 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       "received",
     ]);
     return updated;
-    });
+    }, { timeout: 15_000 }); // was the default 5s — the new SELECT...FOR UPDATE lock on a
+    // busy subscription can legitimately queue behind another accept/walk-in, and 5s was
+    // already tight for this transaction's normal run of sequential awaited queries.
   } catch (e) {
     return { ok: false as const, error: (e as Error).message };
   }
@@ -311,9 +325,15 @@ export async function walkInOrder(
         excessCharge = excessWeightCharge(input.weightKg, undefined, { waived: !!input.waiveExcess, cycles: cyclesCount });
       }
       if (input.useCycle) {
-        const sub = stu.subscription;
-        const blocked = subscriptionBlocker(sub);
-        if (blocked || !sub) throw new Error(blocked || "No active subscription");
+        const preSub = stu.subscription;
+        const blocked = subscriptionBlocker(preSub);
+        if (blocked || !preSub) throw new Error(blocked || "No active subscription");
+        // Locked, then re-read fresh — same race as acceptOrder's equivalent
+        // path: without the lock, a walk-in racing an app order (or two
+        // counters) on the same subscription would silently lose one's
+        // bucket update to the other's stale whole-array overwrite.
+        await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Subscription"`)} WHERE id = ${preSub.id} FOR UPDATE`;
+        const sub = await tx.subscription.findUniqueOrThrow({ where: { id: preSub.id } });
         type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
         const buckets = (sub.buckets as unknown as Bucket[] | null) || null;
         if (buckets && buckets.length) {
@@ -375,7 +395,7 @@ export async function walkInOrder(
         "received (walk-in)",
       ]);
       return o;
-    });
+    }, { timeout: 15_000 }); // see acceptOrder's identical comment — the Subscription lock can queue
   } catch (e) {
     /* Two replays racing each other: the lookup above found nothing for both,
        then the index rejected the loser. The order exists, so this is success. */

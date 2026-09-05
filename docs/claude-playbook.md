@@ -83,6 +83,48 @@ cycle-based one still succeeds. The staff UI (`CustomerClient.tsx`) already
 surfaces `r.error` via toast for all three call sites, so no UI change was
 needed for the refusal to be visible.
 
+## RESOLVED 2026-09-05: plan-cycle consumption could lose a bucket update to a race
+
+Deep-audit pass found a real, previously-unfixed instance of the exact race
+`restoreCycleFor`'s own comment warns about, at the actual cycle-CONSUMPTION
+site rather than restoration/assignment: `acceptOrder` and `walkInOrder`
+(`lib/actions/orders.ts`) burn a subscription's plan cycles by reading
+`sub.buckets`, mutating one bucket's `used` count in memory, and writing the
+WHOLE buckets array back — with no `SELECT ... FOR UPDATE` lock beforehand,
+unlike every other subscription writer in this codebase
+(`restoreCycleFor`, `assignSubscription`, `upgradeSubscription`,
+`sellCyclePack`, all already locked). Two orders burning cycles off the same
+subscription at once (two counters, or a walk-in racing an app order) could
+both read the same "before" buckets snapshot, both pass the capacity check,
+and the second whole-array write would silently stomp the first order's
+bucket update — `cyclesUsed` (a separate atomic `increment`) stays
+numerically right, but the per-service bucket it's supposed to explain
+drifts from it, and worse, a bucket could be over-drawn past its real
+remaining cycles since the capacity check itself raced on stale data.
+
+Fixed by locking the Subscription row and re-reading fresh before the
+capacity check, in both functions — same pattern as the four writers that
+already did this correctly. Also bumped both transactions' timeout from
+Prisma's default 5s to 15s (`{ timeout: 15_000 }`): the new lock can now
+legitimately make one of two racing transactions queue behind the other,
+and 5s was already tight for a transaction that runs this many sequential
+awaited queries.
+
+Verified with a new real behavioral test
+(`tests/cycle-consume-race-behavioral.test.ts`) that actually fires two
+concurrent `walkInOrder` calls against a real test DB and checks that
+`cyclesUsed` and the bucket's `used` always agree, and that a bucket can't
+be over-drawn past capacity under concurrency. Full suite: 791/791.
+
+**Lesson — generalizes**: any code that does "read a JSON/array column,
+mutate part of it in memory, write the whole thing back" inside a
+transaction needs the SAME row locked and re-read immediately before that
+mutation, every single time it's done — a rule established once for
+`restoreCycleFor` isn't automatically inherited by a sibling function
+elsewhere in the file that does the identical thing to the identical table.
+Grep `buckets\[idx\]` / `.buckets as unknown as` across `lib/actions/*.ts`
+before trusting a new write path to `Subscription.buckets`.
+
 ## The single most important rule in this codebase
 
 **Campus (college) isolation must never break.** FabricFold serves multiple

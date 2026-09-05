@@ -236,8 +236,17 @@ describe("three more concurrency/state bugs found by a deep hand-traced re-audit
   });
 
   it("walkInOrder creates one CycleUse row per cycle consumed, matching acceptOrder, not one row per order", () => {
-    const fn = orders.slice(orders.indexOf("export async function walkInOrder"), orders.indexOf("export async function walkInOrder") + 6000);
+    const fn = orders.slice(orders.indexOf("export async function walkInOrder"), orders.indexOf("export async function walkInOrder") + 7000);
     expect(fn).toMatch(/tx\.cycleUse\.createMany\(\{ data: Array\.from\(\{ length: cyclesCount \}, \(\) => \(\{ subscriptionId: stu\.subscription!\.id, orderId: o\.id \}\)\) \}\)/);
+  });
+
+  it("acceptOrder and walkInOrder lock the subscription and re-read it fresh before burning a plan cycle (2026-09-05 audit)", () => {
+    const acceptFn = orders.slice(orders.indexOf("export async function acceptOrder"), orders.indexOf("export async function walkInOrder"));
+    const walkInFn = orders.slice(orders.indexOf("export async function walkInOrder"), orders.indexOf("export async function walkInOrder") + 7000);
+    for (const fn of [acceptFn, walkInFn]) {
+      expect(fn).toMatch(/SELECT id FROM \$\{Prisma\.raw\(`\$\{dbSchemaPrefix\}"Subscription"`\)\} WHERE id = \$\{preSub\.id\} FOR UPDATE/);
+      expect(fn).toMatch(/const sub = await tx\.subscription\.findUniqueOrThrow\(\{ where: \{ id: preSub\.id \} \}\)/);
+    }
   });
 
   it("subscription.ts's own row locks are schema-qualified too (the same raw-SQL gap fixed elsewhere tonight, missed here until now)", () => {

@@ -62,6 +62,15 @@ beforeAll(async () => {
 
   await db.staff.create({ data: { id: "staffpp", phone: "9000000098", name: "PP Manager", role: 2, collegeId: "perpiece" } });
   await db.staff.create({ data: { id: "staffcb", phone: "9000000097", name: "CB Manager", role: 2, collegeId: "cyclebased" } });
+
+  // A college literally named BVRIT, but with DEFAULTS everywhere else
+  // (rates: null, features.subscriptions left unset/true) — the exact
+  // "live database misconfigured" scenario the name-based backstop exists
+  // for, since this session cannot directly confirm BVRIT's real production
+  // rates/features values.
+  await db.college.create({ data: { id: "bvrit", name: "BVRIT", features: {} } });
+  await db.student.create({ data: { id: "777777", phone: "9999900007", name: "BVRIT Student", collegeId: "bvrit", credits: 0 } });
+  await db.staff.create({ data: { id: "staffbvrit", phone: "9000000094", name: "BVRIT Manager", role: 2, collegeId: "bvrit" } });
 }, 300_000);
 
 async function loginAs(staffId: string) {
@@ -92,5 +101,19 @@ describe("bulk cycle-selling actions respect a college's per-piece rates overrid
     const r = await sub.assignSubscription("222222", plan.id, "cash");
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/bills per piece/);
+  });
+
+  it("BVRIT is refused by name alone, even with rates: null and features.subscriptions unset (default true) — the owner's rule holds even if BVRIT's live rates/features are ever misconfigured", async () => {
+    await loginAs("staffbvrit");
+    const packResult = await sub.sellCyclePack("777777", { service: "washFold", cycles: 10, method: "cash" });
+    expect(packResult.ok).toBe(false);
+    if (!packResult.ok) expect(packResult.error).toMatch(/BVRIT bills per piece/);
+
+    const plan = await db.plan.create({
+      data: { collegeId: "bvrit", name: "Bronze", price: 5000, buckets: [{ service: "washFold", cycles: 20, kgPerCycle: 7 }] },
+    });
+    const assignResult = await sub.assignSubscription("777777", plan.id, "cash");
+    expect(assignResult.ok).toBe(false);
+    if (!assignResult.ok) expect(assignResult.error).toMatch(/BVRIT bills per piece/);
   });
 });

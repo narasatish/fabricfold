@@ -155,6 +155,41 @@ rest of the codebase; the test documents the intended behavior rather than
 proving the old code was exploitable under the exact conditions tried here.
 Full suite: 793/793.
 
+## OPEN ITEM: this session cannot directly verify BVRIT's live rates/features
+
+The owner repeated, explicitly, twice: BVRIT is never sold cycles — no
+subscription plans, no cycle packs — for students or staff, full stop. The
+code-level gate added earlier today (`requireCyclesEnabled` in
+`lib/actions/subscription.ts`) enforces this via `College.rates != null`
+(BVRIT should have its own per-piece item rates set) or the `subscriptions`
+feature flag — but this session has **no way to directly query or confirm
+BVRIT's actual live production values for either column**: production's
+real database is Render's own Postgres (`fabricfold-db`, per `render.yaml`'s
+`fromDatabase` binding — see "Infrastructure reality" below), and this
+session has no Render API key or DB credential for it. Every `DATABASE_URL`
+found in `.env`/`.env.local` points at the old Sydney Supabase project (dev
+schemas `ff_uidev` etc.), not production.
+
+Because of that gap, `requireCyclesEnabled` was hardened with an
+unconditional name check — `college.name.trim().toUpperCase() === "BVRIT"`
+refuses immediately, before the rates/features check ever runs — so the
+owner's rule holds even if BVRIT's `rates`/`features.subscriptions` turn out
+to be unset or wrong in production. Verified with a behavioral test
+(`tests/cycle-gate-behavioral.test.ts`'s BVRIT case) that deliberately
+leaves `rates: null` and `features: {}` (default `subscriptions: true`) and
+confirms the refusal still happens by name alone.
+
+**Still genuinely open**: nobody has confirmed what BVRIT's `rates` and
+`features` columns actually hold in the live database right now. The name
+check is a safety net, not a substitute for knowing the real state — if the
+owner ever renames the college in the Admin UI, the name check silently
+stops applying and only the rates-override check remains. Next session with
+Render dashboard/API access (or the owner checking the Admin → College
+settings screen directly) should run
+`SELECT name, rates, features FROM "College" WHERE name ILIKE '%bvrit%';`
+against the REAL Render database and confirm `rates` is actually set,
+closing this out for real rather than by name-matching alone.
+
 ## The single most important rule in this codebase
 
 **Campus (college) isolation must never break.** FabricFold serves multiple

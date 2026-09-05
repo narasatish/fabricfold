@@ -33,7 +33,23 @@ const rid = (n: number) => { let s = ""; for (let i = 0; i < n; i++) s += Math.f
    which existed in the toggle UI but, like the rates-override case, nothing
    server-side ever actually read. */
 async function requireCyclesEnabled(collegeId: string) {
-  const college = await db.college.findUniqueOrThrow({ where: { id: collegeId }, select: { features: true, rates: true } });
+  const college = await db.college.findUniqueOrThrow({ where: { id: collegeId }, select: { name: true, features: true, rates: true } });
+  /* Owner's explicit, repeated instruction (Sep 2026): BVRIT is never sold
+     cycles — plans or packs — for students OR staff, full stop. The
+     rates-override check below is the general rule for any per-piece
+     campus, and should already cover BVRIT once its `rates` column is set
+     in the live database — but this session has no way to directly confirm
+     that column's live production value (no Render DB credentials
+     available here; the local .env points at the old Sydney/dev Supabase
+     project, not production — see docs/claude-playbook.md's "Infrastructure
+     reality" section on why that distinction matters). Matching on name is
+     a deliberate belt-and-suspenders backstop so the rule holds even if
+     BVRIT's `rates`/`features.subscriptions` ever end up unset or wrong in
+     production — it does not replace the general check below, which still
+     protects every OTHER per-piece campus. */
+  if (college.name.trim().toUpperCase() === "BVRIT") {
+    return "BVRIT bills per piece — cycle-based plans and packs are never sold here, for students or staff.";
+  }
   if (college.rates != null) {
     return "This campus bills per piece (its own item rates are set) — cycle-based plans and packs aren't available here.";
   }

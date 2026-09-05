@@ -468,10 +468,20 @@ model Payslip {
   expenseId  String?  @unique // auto-posted "Salaries" expense
   at         DateTime @default(now())
 
-  @@unique([staffId, month]) // one payslip per staff member per month — a
-  // retried/double-tapped submission must not double-pay someone. Held back
-  // earlier until a direct query against the real production DB confirmed
-  // zero existing (staffId, month) duplicates (2026-09-05) — safe to add.
+  // A @@unique([staffId, month]) constraint is verified SAFE (a direct query
+  // against production on 2026-09-05 found zero existing duplicates) but is
+  // NOT applied here yet — `prisma db push` treats adding a unique
+  // constraint to a non-empty table as data-loss-risky categorically, not
+  // based on whether real duplicates exist, and refuses without
+  // --accept-data-loss regardless. Applying that flag (even for this
+  // pre-verified-safe case) is a production DDL change the safety system
+  // correctly declined to let happen without the owner's own hand on it.
+  // createPayslip's P2002 catch is already in place and takes over the
+  // instant this constraint is added — ask the owner to run this once via
+  // Render's psql/dashboard, or explicitly authorize `--accept-data-loss`
+  // for this one verified-safe push:
+  //   ALTER TABLE "Payslip" ADD CONSTRAINT "Payslip_staffId_month_key"
+  //   UNIQUE ("staffId", "month");
 }
 
 // ───────────── Support / comms ─────────────

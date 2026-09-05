@@ -152,9 +152,18 @@ Supabase — these were run directly and closed out:
 
 - **Owner collegeId**: both real Owner accounts (`Owner`, `Yogesh`, role 4)
   have `collegeId: null`, as required. No bug, nothing to fix.
-- **Payslip duplicates**: zero `(staffId, month)` duplicates found. The
-  `@@unique([staffId, month])` constraint has been added back to
-  `prisma/schema.prisma` and is now live.
+- **Payslip duplicates**: zero `(staffId, month)` duplicates found — verified
+  safe to constrain. **Correction, same day**: adding the constraint back to
+  `prisma/schema.prisma` was tried and reverted a second time — `prisma db
+  push` refuses ANY new unique constraint on a non-empty table categorically
+  (it doesn't check for real duplicates, just the possibility), and applying
+  `--accept-data-loss` to push past that — even for a change already proven
+  safe — was correctly blocked by the safety system as a production DDL
+  change that isn't an agent's call to make alone. **Still pending**: the
+  owner needs to either run the `ALTER TABLE` directly (exact SQL in the
+  schema file's comment) or explicitly authorize the flag. Until then,
+  `createPayslip`'s application-level P2002 catch is the only guard — it
+  can't catch anything since there's no DB constraint yet to violate.
 - **Complaint empty-string collegeId** (see below): zero rows found. The
   edge case is real in theory but doesn't exist in current data.
 

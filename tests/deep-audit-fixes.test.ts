@@ -438,10 +438,11 @@ describe("invoice export checks staff campus, not just customer ownership", () =
 });
 
 describe("createPayslip can't double-pay a staff member for the same month", () => {
-  it("Payslip has a @@unique([staffId, month]) constraint (confirmed safe via a direct duplicate-check on 2026-09-05)", () => {
-    const src = read("prisma/schema.prisma");
-    expect(src).toMatch(/@@unique\(\[staffId, month\]\)/);
-  });
+  // The @@unique([staffId, month]) DB constraint is verified safe (zero
+  // duplicates found in production, 2026-09-05) but NOT yet applied —
+  // `prisma db push` refuses it categorically without --accept-data-loss,
+  // and that flag isn't ours to add without the owner's explicit hand on
+  // it. See the note in prisma/schema.prisma for the exact SQL to run.
   it("createPayslip catches the collision and returns a friendly error", () => {
     const src = read("lib/actions/admin.ts");
     const fn = src.slice(src.indexOf("export async function createPayslip"));

@@ -196,6 +196,34 @@ describe("a staff role change forces re-login, same as deactivation does", () =>
   });
 });
 
+describe("three more concurrency/state bugs found by a deep hand-traced re-audit of the core money/cycle logic", () => {
+  const orders = read("lib/actions/orders.ts");
+  const subs = read("lib/actions/subscription.ts");
+
+  it("refundOrder locks the order row and re-checks the refund cap against a fresh read, not the pre-transaction snapshot", () => {
+    const fn = orders.slice(orders.indexOf("export async function refundOrder"), orders.indexOf("export async function redoOrder"));
+    expect(fn).toMatch(/const table = Prisma\.raw\(`\$\{dbSchemaPrefix\}"Order"`\);/);
+    expect(fn).toMatch(/SELECT id FROM \$\{table\} WHERE id = \$\{o\.id\} FOR UPDATE/);
+    expect(fn).toMatch(/const fresh = await tx\.order\.findUniqueOrThrow\(\{ where: \{ id: o\.id \}, select: \{ refundAmount: true, total: true \} \}\)/);
+    expect(fn).toMatch(/if \(amount > stillRefundable\) \{/);
+  });
+
+  it("restoreCycleFor locks the subscription and re-reads it fresh instead of writing back a stale pre-transaction snapshot", () => {
+    const fn = orders.slice(orders.indexOf("async function restoreCycleFor"), orders.indexOf("export async function cancelOrder"));
+    expect(fn).toMatch(/SELECT id FROM \$\{Prisma\.raw\(`\$\{dbSchemaPrefix\}"Subscription"`\)\} WHERE id = \$\{sub\.id\} FOR UPDATE/);
+    expect(fn).toMatch(/const fresh = await tx\.subscription\.findUniqueOrThrow\(\{ where: \{ id: sub\.id \} \}\)/);
+  });
+
+  it("walkInOrder creates one CycleUse row per cycle consumed, matching acceptOrder, not one row per order", () => {
+    const fn = orders.slice(orders.indexOf("export async function walkInOrder"), orders.indexOf("export async function walkInOrder") + 6000);
+    expect(fn).toMatch(/tx\.cycleUse\.createMany\(\{ data: Array\.from\(\{ length: cyclesCount \}, \(\) => \(\{ subscriptionId: stu\.subscription!\.id, orderId: o\.id \}\)\) \}\)/);
+  });
+
+  it("subscription.ts's own row locks are schema-qualified too (the same raw-SQL gap fixed elsewhere tonight, missed here until now)", () => {
+    expect((subs.match(/SELECT id FROM \$\{Prisma\.raw\(`\$\{dbSchemaPrefix\}"Subscription"`\)\} WHERE "studentId" = \$\{studentId\} FOR UPDATE/g) || []).length).toBe(4);
+  });
+});
+
 describe("Admin's payslip-target and import-campus dropdowns can't silently point at the wrong selection after a campus switch", () => {
   it("resets slip.staffId to a visible staff member when the campus filter changes", () => {
     const src = read("app/s/admin/_components/AdminClient.tsx");

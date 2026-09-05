@@ -43,20 +43,20 @@ describe("subscription writes are locked against concurrent top-ups/assigns/upgr
 
   it("sellCyclePack locks the row and re-reads buckets fresh, not the pre-transaction snapshot", () => {
     const body = subs.slice(subs.indexOf("export async function sellCyclePack"), subs.indexOf("export async function sellCyclePack") + 2500);
-    expect(body).toMatch(/await tx\.\$executeRaw`SELECT id FROM "Subscription" WHERE "studentId" = \$\{studentId\} FOR UPDATE`/);
+    expect(body).toMatch(/await tx\.\$executeRaw`SELECT id FROM \$\{Prisma\.raw\(`\$\{dbSchemaPrefix\}"Subscription"`\)\} WHERE "studentId" = \$\{studentId\} FOR UPDATE`/);
     expect(body).toMatch(/const existing = await tx\.subscription\.findUnique\(\{ where: \{ studentId \} \}\)/);
   });
 
   it("assignSubscription locks the row and re-checks 'already active' fresh, not the pre-transaction guard alone", () => {
     const body = subs.slice(subs.indexOf("export async function assignSubscription"), subs.indexOf("export async function upgradeSubscription"));
-    expect(body).toMatch(/await tx\.\$executeRaw`SELECT id FROM "Subscription" WHERE "studentId" = \$\{studentId\} FOR UPDATE`/);
+    expect(body).toMatch(/await tx\.\$executeRaw`SELECT id FROM \$\{Prisma\.raw\(`\$\{dbSchemaPrefix\}"Subscription"`\)\} WHERE "studentId" = \$\{studentId\} FOR UPDATE`/);
     expect(body).toMatch(/if \(fresh\?\.active\) throw new Error\("This student already has an active plan"\)/);
     expect(body).toMatch(/catch \(e\) \{[\s\S]*?return \{ ok: false as const, error: \(e as Error\)\.message \};/);
   });
 
   it("upgradeSubscription locks the row and rebuilds buckets from a fresh read, not `cur` fetched before the transaction", () => {
     const body = subs.slice(subs.indexOf("export async function upgradeSubscription"), subs.indexOf("export async function cancelSubscription"));
-    expect(body).toMatch(/await tx\.\$executeRaw`SELECT id FROM "Subscription" WHERE "studentId" = \$\{studentId\} FOR UPDATE`/);
+    expect(body).toMatch(/await tx\.\$executeRaw`SELECT id FROM \$\{Prisma\.raw\(`\$\{dbSchemaPrefix\}"Subscription"`\)\} WHERE "studentId" = \$\{studentId\} FOR UPDATE`/);
     expect(body).toMatch(/const fresh = await tx\.subscription\.findUniqueOrThrow\(\{ where: \{ studentId \} \}\)/);
     // the bucket rebuild must read from `fresh`, not the outer `cur`
     expect(body).toMatch(/const oldBuckets = \(fresh\.buckets as unknown as Used\[\] \| null\) \|\| \[\]/);
@@ -70,11 +70,19 @@ describe("refundOrder can't refund more than was actually billed", () => {
     // A staff typo (₹5000 instead of ₹500 on a ₹500 order) used to go
     // through with no server-side check at all — refundAmount only ever
     // accumulated, nothing ever compared it back against the total.
-    expect(rfn).toMatch(/const alreadyRefunded = Number\(o\.refundAmount \|\| 0\)/);
-    expect(rfn).toMatch(/const refundable = Number\(o\.total\) - alreadyRefunded/);
-    expect(rfn).toMatch(/if \(amount > refundable\)/);
+    expect(rfn).toMatch(/const refundableNow = \(refunded: number\) => Number\(o\.total\) - refunded/);
+    expect(rfn).toMatch(/if \(amount > refundableNow\(Number\(o\.refundAmount \|\| 0\)\)\)/);
   });
   it("refuses cleanly once the order has been refunded in full, rather than going negative", () => {
     expect(rfn).toMatch(/This order has already been fully refunded/);
+  });
+  it("re-checks the cap against a FRESH, locked read inside the transaction too — not just the pre-transaction snapshot", () => {
+    // Found by a deep hand-traced re-audit (Sep 2026): the pre-check alone is
+    // a TOCTOU gap — two near-simultaneous refunds could both pass it before
+    // either commits. This is the same race class collectOrder was fixed for
+    // above, applied to refundOrder.
+    expect(rfn).toMatch(/SELECT id FROM \$\{table\} WHERE id = \$\{o\.id\} FOR UPDATE/);
+    expect(rfn).toMatch(/const stillRefundable = Number\(fresh\.total\) - Number\(fresh\.refundAmount \|\| 0\)/);
+    expect(rfn).toMatch(/if \(amount > stillRefundable\) \{/);
   });
 });

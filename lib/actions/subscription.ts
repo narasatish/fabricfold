@@ -4,7 +4,8 @@
    "buckets" (e.g. 20 Wash&Fold + 14 Wash&Iron). Students see and request only
    their college's plans; Manager+ activates (cash OTP / UPI) or assigns
    directly. Cycle consumption per-bucket happens in acceptOrder. */
-import { db } from "../db";
+import { db, dbSchemaPrefix } from "../db";
+import { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff, assertSameCollege } from "../auth";
 import { publish } from "../realtime";
 import { pushNotif, audit } from "../notify";
@@ -45,7 +46,7 @@ export async function adjustCycleUsage(studentId: string, updates: { service: st
   // a cycle consumed by an in-flight order between the read above and this
   // write would otherwise be silently overwritten by this stale snapshot.
   const changed = await db.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT id FROM "Subscription" WHERE "studentId" = ${studentId} FOR UPDATE`;
+    await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Subscription"`)} WHERE "studentId" = ${studentId} FOR UPDATE`;
     const fresh = await tx.subscription.findUniqueOrThrow({ where: { studentId } });
     const buckets = (fresh.buckets as unknown as Bucket[] | null) ?? [];
     const newBuckets = buckets.map((b) => {
@@ -163,7 +164,7 @@ export async function assignSubscription(studentId: string, planId: string, meth
          ran before this transaction started, so two concurrent assigns for a
          student with no plan yet would both pass it and both charge a
          Payment row for the same plan. */
-      await tx.$executeRaw`SELECT id FROM "Subscription" WHERE "studentId" = ${studentId} FOR UPDATE`;
+      await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Subscription"`)} WHERE "studentId" = ${studentId} FOR UPDATE`;
       const fresh = await tx.subscription.findUnique({ where: { studentId } });
       if (fresh?.active) throw new Error("This student already has an active plan");
       await tx.subscription.upsert({
@@ -249,7 +250,7 @@ export async function upgradeSubscription(studentId: string, planId: string, met
        and could commit in the gap) would otherwise get silently overwritten
        by this update's stale usedByService snapshot, understating what the
        student has actually used. */
-    await tx.$executeRaw`SELECT id FROM "Subscription" WHERE "studentId" = ${studentId} FOR UPDATE`;
+    await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Subscription"`)} WHERE "studentId" = ${studentId} FOR UPDATE`;
     const fresh = await tx.subscription.findUniqueOrThrow({ where: { studentId } });
 
     // Rebuild buckets on the new plan, carrying the old usage across.
@@ -409,7 +410,7 @@ export async function sellCyclePack(
        first to commit, then see its result. A row that doesn't exist yet
        (first-ever pack for this student) has nothing to lock — fine, since
        there's nothing to race against either. */
-    await tx.$executeRaw`SELECT id FROM "Subscription" WHERE "studentId" = ${studentId} FOR UPDATE`;
+    await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Subscription"`)} WHERE "studentId" = ${studentId} FOR UPDATE`;
     const existing = await tx.subscription.findUnique({ where: { studentId } });
     const buckets: Bucket[] = ((existing?.buckets as unknown as Bucket[] | null) ?? []).map((b) => ({ ...b }));
     const idx = buckets.findIndex((b) => b.service === input.service);

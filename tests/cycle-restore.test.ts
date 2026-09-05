@@ -46,11 +46,21 @@ describe("cancelling an order returns the cycle", () => {
 
   it("decrements the subscription's used-cycle count", () => {
     // N-cycle orders (Sep 2026) restore N, clamped so nothing goes negative
-    expect(restore).toMatch(/decrement: Math\.min\(n, sub\.cyclesUsed\)/);
+    expect(restore).toMatch(/decrement: Math\.min\(n, fresh\.cyclesUsed\)/);
   });
 
   it("never drives cyclesUsed below zero", () => {
-    expect(restore).toMatch(/sub\.cyclesUsed\s*>\s*0/);
+    expect(restore).toMatch(/fresh\.cyclesUsed\s*>\s*0/);
+  });
+
+  it("locks the subscription row and re-reads it fresh before restoring — not the pre-transaction snapshot passed in by the caller", () => {
+    // Found by a deep hand-traced re-audit (Sep 2026): cancelOrder/refundOrder
+    // both fetch `student.subscription` OUTSIDE their transaction and pass
+    // that stale object in; writing `buckets` back as a whole-array overwrite
+    // from it would silently stomp any cycle consumed/restored by a
+    // different concurrent order in the gap.
+    expect(restore).toMatch(/SELECT id FROM \$\{Prisma\.raw\(`\$\{dbSchemaPrefix\}"Subscription"`\)\} WHERE id = \$\{sub\.id\} FOR UPDATE/);
+    expect(restore).toMatch(/const fresh = await tx\.subscription\.findUniqueOrThrow\(\{ where: \{ id: sub\.id \} \}\)/);
   });
 
   it("gives the cycle back to the bucket for THAT service, not just the total", () => {

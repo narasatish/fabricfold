@@ -2,10 +2,10 @@
 /* Order lifecycle — business rules ported EXACTLY from the prototype.
    Every mutation: validate role -> write (transaction) -> audit where the
    prototype does -> realtime broadcast -> notification. */
-import { db } from "../db";
+import { db, dbSchemaPrefix } from "../db";
 import { featureOn, serviceOn } from "../features";
 import { enqueueSheetEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
-import type { Prisma } from "../generated/prisma/client";
+import { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff, requireStaffPerm, assertSameCollege } from "../auth";
 import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, expressFlatFee, collegeExpressFee, isCycleService, collegeUsesCycleBasedPricing, resolveCollegeRates } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
@@ -355,7 +355,12 @@ export async function walkInOrder(
           tags: { create: tags },
         },
       });
-      if (usedCycle) await tx.cycleUse.create({ data: { subscriptionId: stu.subscription!.id, orderId: o.id } });
+      // One row per cycle actually consumed, not one row per order — a
+      // multi-cycle walk-in was creating a single CycleUse row regardless of
+      // cyclesCount while used/cyclesUsed advanced by the full count, so any
+      // reconciliation counting CycleUse rows undercounted (acceptOrder's
+      // equivalent path, line 189, already did this correctly).
+      if (usedCycle) await tx.cycleUse.createMany({ data: Array.from({ length: cyclesCount }, () => ({ subscriptionId: stu.subscription!.id, orderId: o.id })) });
       await enqueueSheetEvent(tx, "order", [
         istStamp(),
         "#" + o.id.slice(-6),
@@ -641,21 +646,40 @@ export async function refundOrder(orderId: string, amount: number, via: "upi" | 
   // instead of ₹500) went through silently. Cap at the order total minus
   // whatever's already been refunded, same idea as payInner clamping
   // creditApplied to the order total.
-  const alreadyRefunded = Number(o.refundAmount || 0);
-  const refundable = Number(o.total) - alreadyRefunded;
-  if (amount > refundable) {
-    return { ok: false, error: refundable > 0 ? `Only ₹${refundable} left to refund on this order` : "This order has already been fully refunded" };
+  const refundableNow = (refunded: number) => Number(o.total) - refunded;
+  if (amount > refundableNow(Number(o.refundAmount || 0))) {
+    const r = refundableNow(Number(o.refundAmount || 0));
+    return { ok: false, error: r > 0 ? `Only ₹${r} left to refund on this order` : "This order has already been fully refunded" };
   }
 
-  await db.$transaction(async (tx) => {
-    await tx.payment.create({
-      data: { method: "refund", refundVia: via, amount: -amount, orderId: o.id, collegeId: o.collegeId, studentId: o.studentId, note: "Refund" + (reason ? " — " + reason : "") },
+  try {
+    await db.$transaction(async (tx) => {
+      /* The pre-check above reads refundAmount OUTSIDE the transaction — on
+         its own that's a TOCTOU gap identical to the one payCore's own
+         comment warns about for double-payment: two near-simultaneous
+         refunds (two staff, or a double-tap) could both read the same
+         "before" refundAmount, both pass the cap check, and both commit,
+         over-refunding the order. Lock the row, re-check against a FRESH
+         read, and only then write — the same pattern already used for every
+         other money-moving transition in this file. */
+      const table = Prisma.raw(`${dbSchemaPrefix}"Order"`);
+      await tx.$executeRaw`SELECT id FROM ${table} WHERE id = ${o.id} FOR UPDATE`;
+      const fresh = await tx.order.findUniqueOrThrow({ where: { id: o.id }, select: { refundAmount: true, total: true } });
+      const stillRefundable = Number(fresh.total) - Number(fresh.refundAmount || 0);
+      if (amount > stillRefundable) {
+        throw new Error(stillRefundable > 0 ? `Only ₹${stillRefundable} left to refund on this order` : "This order has already been fully refunded");
+      }
+      await tx.payment.create({
+        data: { method: "refund", refundVia: via, amount: -amount, orderId: o.id, collegeId: o.collegeId, studentId: o.studentId, note: "Refund" + (reason ? " — " + reason : "") },
+      });
+      if (via === "credit") await tx.student.update({ where: { id: o.studentId }, data: { credits: { increment: amount } } });
+      if (o.invoice) await createCreditNote(tx, o.invoice, amount, reason, st.id, via);
+      await tx.order.update({ where: { id: o.id }, data: { refunded: true, refundAmount: { increment: amount } } });
+      if (restoreCycle) await restoreCycleFor(tx, o, o.student.subscription);
     });
-    if (via === "credit") await tx.student.update({ where: { id: o.studentId }, data: { credits: { increment: amount } } });
-    if (o.invoice) await createCreditNote(tx, o.invoice, amount, reason, st.id, via);
-    await tx.order.update({ where: { id: o.id }, data: { refunded: true, refundAmount: { increment: amount } } });
-    if (restoreCycle) await restoreCycleFor(tx, o, o.student.subscription);
-  });
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
 
   await pushNotif(o.studentId, via === "credit" ? `₹${amount} refunded to your store credits.${reason ? " " + reason : ""}` : `₹${amount} refunded via ${via.toUpperCase()}.${reason ? " " + reason : ""}`, "status");
   await audit("Refund", `#${o.id.slice(-4)} ₹${amount} via ${via}${restoreCycle ? " + cycle returned" : ""}${reason ? " — " + reason : ""}`, st.id);
@@ -739,14 +763,24 @@ async function restoreCycleFor(
   sub: { id: string; cyclesUsed: number; buckets: unknown } | null,
 ) {
   if (!ord.usedCycle || !sub) return false;
+  /* `sub` arrives as a snapshot fetched BEFORE this transaction started (both
+     callers include it via `student: { include: { subscription: true } }`
+     outside the tx). Writing `buckets` back as a whole-array overwrite from
+     that stale snapshot would silently stomp any cycle consumed/restored by
+     a DIFFERENT concurrent order in the gap between that read and this
+     write — cyclesUsed (a relative `decrement`) stays correct, but the
+     per-service bucket does not. Lock the row and re-read it fresh, same
+     pattern as every other subscription writer in this codebase. */
+  await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Subscription"`)} WHERE id = ${sub.id} FOR UPDATE`;
+  const fresh = await tx.subscription.findUniqueOrThrow({ where: { id: sub.id } });
   /* Restore exactly what the order burned — a 2-cycle order gives 2 back.
      Clamped to what is actually recorded as used, so a legacy row can never
      drive a balance negative. */
   const n = Math.max(1, Math.floor(ord.cyclesCount ?? 1));
   type Bucket = { service: string; cycles: number; used: number; kgPerCycle: number };
-  const buckets = (sub.buckets as unknown as Bucket[] | null) || null;
+  const buckets = (fresh.buckets as unknown as Bucket[] | null) || null;
   const data: { cyclesUsed?: { decrement: number }; buckets?: Bucket[] } = {};
-  if (sub.cyclesUsed > 0) data.cyclesUsed = { decrement: Math.min(n, sub.cyclesUsed) };
+  if (fresh.cyclesUsed > 0) data.cyclesUsed = { decrement: Math.min(n, fresh.cyclesUsed) };
   if (buckets && buckets.length) {
     const idx = buckets.findIndex((b) => b.service === ord.service && b.used > 0);
     if (idx >= 0) {
@@ -754,7 +788,7 @@ async function restoreCycleFor(
       data.buckets = buckets;
     }
   }
-  if (Object.keys(data).length) await tx.subscription.update({ where: { id: sub.id }, data });
+  if (Object.keys(data).length) await tx.subscription.update({ where: { id: fresh.id }, data });
   await tx.cycleUse.deleteMany({ where: { orderId: ord.id } });
   await tx.order.update({ where: { id: ord.id }, data: { usedCycle: false } });
   return true;

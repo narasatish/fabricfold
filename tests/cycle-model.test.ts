@@ -82,7 +82,7 @@ describe("as counter staff", () => {
     expect(orders).toMatch(/const n = Math\.max\(1, Math\.floor\(ord\.cyclesCount \?\? 1\)\)/);
   });
   it("a restore can never drive a balance negative", () => {
-    expect(orders).toMatch(/Math\.min\(n, sub\.cyclesUsed\)/);
+    expect(orders).toMatch(/Math\.min\(n, fresh\.cyclesUsed\)/);
     expect(orders).toMatch(/Math\.max\(0, buckets\[idx\]\.used - n\)/);
   });
   it("GST is forced OFF for cycle services at every entry point", () => {

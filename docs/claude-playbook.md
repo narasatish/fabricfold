@@ -155,6 +155,31 @@ rest of the codebase; the test documents the intended behavior rather than
 proving the old code was exploitable under the exact conditions tried here.
 Full suite: 793/793.
 
+## Reviewed 2026-09-05, no new issues found (so a future pass doesn't redo this)
+
+Deep-audit pass specifically checked these for the same bug classes fixed
+elsewhere this session (missing signature/ownership checks, TOCTOU races,
+missing idempotency) and found them already correctly hardened:
+- `app/api/razorpay/webhook/route.ts` — timing-safe signature check, re-reads
+  fresh inside the transaction, P2002 unique-index backstop on `gatewayRef`
+  answers 200 on a genuine duplicate delivery (so Razorpay stops retrying).
+- `app/api/whatsapp/webhook/route.ts` — timing-safe signature check (both
+  GET handshake and POST delivery), atomic `updateMany({ where: { status:
+  "pending" } })` so a Meta retry can't double-resolve a `WaVerify` row.
+- `lib/actions/wa-login.ts` (`checkWhatsAppLogin`) — claim cookie compared
+  via hash + `timingSafeEqual`, atomic `updateMany({ where: { status:
+  "verified" } })` claim so two simultaneous polls can't both mint a session.
+- `lib/actions/complaints.ts` — ownership checks present on every path,
+  `grantFreeReservice` already atomically claims the complaint before
+  linking a redo order (documented tradeoff: the LOSER of that race still
+  creates a real redo order, just an unlinked one, visible in the order
+  queue rather than a doubly-lost complaint link — accepted, not a bug).
+- `lib/offline-queue.ts` / `components/offline.tsx` — `enqueueIntake`
+  generates an `idemKey` internally even when the caller omits one (the
+  offline no-network path in `CustomerClient.tsx` relies on exactly this),
+  so the server-side dedup in `walkInOrder` always has something to key on
+  even for a queued intake that never got an explicit key from the caller.
+
 ## RESOLVED 2026-09-05: passcode lockout could be bypassed by concurrent guesses
 
 Deep-audit pass on `lib/actions/auth.ts` (auth/OTP flows, not yet checked

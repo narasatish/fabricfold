@@ -155,6 +155,28 @@ rest of the codebase; the test documents the intended behavior rather than
 proving the old code was exploitable under the exact conditions tried here.
 Full suite: 793/793.
 
+## CRITICAL, found immediately after the above: activateSubscription had NO lock at all
+
+While auditing every subscription writer against the "does this lock a row
+that might not exist yet" criterion, `activateSubscription` turned out to
+have a different, simpler problem: it had no lock whatsoever — not a
+mis-targeted one, none. `stu.subscription` was checked outside the
+transaction (fine, since a pending Subscription row is a real precondition
+here and IS guaranteed to exist first), but the transaction itself just
+updated the row and created a Payment with no re-check and no lock at all.
+Two concurrent activation clicks (a double-tap, or two Managers) for the
+same pending request would both pass the outer check and both reach the
+transaction — both update the row (harmless) AND both create a Payment,
+charging the student twice for one plan activation.
+
+Fixed with a plain row lock (safe here, unlike assignSubscription/
+sellCyclePack, because the Subscription row is guaranteed to already exist
+before this transaction starts) plus a fresh re-check that refuses if
+`active` is already true. Verified with a third case added to the same
+behavioral test file: reverted the lock and reran — confirmed genuine,
+both concurrent calls returned `ok: true` and two Payment rows were
+created. Full suite: 807/807.
+
 ## CRITICAL, found by systematic re-check 2026-09-05: assignSubscription and sellCyclePack could double-charge a student's FIRST plan/pack
 
 Immediately after finding and fixing the identical bug in issueBag (below),

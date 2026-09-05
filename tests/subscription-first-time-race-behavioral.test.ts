@@ -115,4 +115,26 @@ describe("a student's FIRST subscription/pack can't be double-charged by a concu
     expect(bucket.cycles).toBe(12);
     expect(subRow.cyclesTotal).toBe(12);
   });
+
+  it("activateSubscription: two concurrent activation clicks for the same pending request — exactly one payment lands", async () => {
+    await db.student.create({ data: { id: "333303", phone: "9999903303", name: "Pending Activate", collegeId: "col1", credits: 0 } });
+    // A pending (inactive) subscription request, the state activateSubscription expects.
+    await db.subscription.create({
+      data: {
+        studentId: "333303", active: false, plan: "Bronze", cyclesTotal: 20, cyclesUsed: 0, kgPerCycle: 7,
+        buckets: [{ service: "washFold", cycles: 20, used: 0, kgPerCycle: 7 }],
+      },
+    });
+
+    const [r1, r2] = await Promise.all([
+      sub.activateSubscription("333303", "upi"),
+      sub.activateSubscription("333303", "upi"),
+    ]);
+    const results = [r1, r2];
+    expect(results.filter((r) => r.ok).length).toBe(1);
+    expect(results.filter((r) => !r.ok).length).toBe(1);
+
+    const payments = await db.payment.count({ where: { studentId: "333303", note: { contains: "Subscription" } } });
+    expect(payments).toBe(1);
+  });
 });

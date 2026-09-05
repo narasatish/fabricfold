@@ -161,13 +161,32 @@ export async function activateSubscription(studentId: string, method: "cash" | "
         return p.price + (gstOn ? Math.round(p.price * Number(cfg.gstPct) / 100) : 0);
       })();
 
-  await db.$transaction(async (tx) => {
-    await tx.subscription.update({
-      where: { studentId },
-      data: { active: true, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesUsed: 0 },
+  try {
+    await db.$transaction(async (tx) => {
+      /* Found 2026-09-05: this transaction had NO lock at all, unlike every
+         other subscription-money writer in this file. `stu.subscription` was
+         checked outside the transaction, so two concurrent activation clicks
+         (a double-tap, or two Managers at once) for the same pending request
+         would both pass it and both reach here — both would update the row
+         (harmless on its own) AND both would create a Payment row, charging
+         the student twice for one activation. A row lock is safe here (unlike
+         assignSubscription/sellCyclePack above): activateSubscription's own
+         precondition guarantees the Subscription row already exists before
+         this transaction ever starts, so there's no "lock a row that doesn't
+         exist yet" flaw to worry about — just re-read fresh and refuse if it's
+         already active. */
+      await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Subscription"`)} WHERE "studentId" = ${studentId} FOR UPDATE`;
+      const fresh = await tx.subscription.findUniqueOrThrow({ where: { studentId } });
+      if (fresh.active) throw new Error("This plan is already active");
+      await tx.subscription.update({
+        where: { studentId },
+        data: { active: true, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesUsed: 0 },
+      });
+      await tx.payment.create({ data: { method, amount: gross, collegeId: stu.collegeId, studentId, note: `Subscription: ${stu.subscription!.plan}` } });
     });
-    await tx.payment.create({ data: { method, amount: gross, collegeId: stu.collegeId, studentId, note: `Subscription: ${stu.subscription!.plan}` } });
-  });
+  } catch (e) {
+    return { ok: false as const, error: (e as Error).message };
+  }
 
   // Third path that turns a plan on, so it allocates the code too.
   const bag = await syncBagToPlan(studentId);

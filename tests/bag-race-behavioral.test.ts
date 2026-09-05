@@ -1,25 +1,31 @@
 /* Behavioral test (real function calls against a real, SCHEMA-ISOLATED test
-   DB, not a source-regex check) for a bug found 2026-09-05: issueBag's
-   "already has an active bag" guard locked the Bag row with a raw
-   `SELECT ... FOR UPDATE` that was never schema-qualified via dbSchemaPrefix,
-   unlike every other raw lock in this codebase (db.ts's own dbSchemaPrefix
-   comment names this exact class of bug, previously found and fixed in
-   flushSheetOutbox). An unqualified raw table reference hits the
-   connection's default search_path, not necessarily the schema the rest of
-   the query (built through Prisma's ORM) actually targets — under any
-   DATABASE_URL with a `?schema=...` param (every isolated test schema in
-   this suite, and any deployment that ever sets one), the lock was
-   pointing at the wrong copy of the table, silently protecting nothing.
+   DB, not a source-regex check) for TWO bugs found 2026-09-05 in issueBag's
+   "already has an active bag" guard:
 
-   Caveat, checked directly rather than assumed: reverting the fix and
-   re-running this exact test still passed both times tried — the two
-   concurrent issueBag calls happen to still serialize enough over this
-   remote test DB's connection/latency characteristics that this specific
-   test doesn't reliably force the corrupted-lock window open. The fix
-   itself is correct and consistent with the rest of the codebase (and
-   worth keeping regardless), but this test should be read as "the
-   documented behavior holds," not as proof the old code was exploitable
-   under the exact conditions exercised here. */
+   1. The lock originally used a raw `SELECT ... FOR UPDATE` that was never
+      schema-qualified via dbSchemaPrefix, unlike every other raw lock in
+      this codebase. Fixed first, but reverting just that fix and re-running
+      this test still passed both times tried — this test's two concurrent
+      calls happened to still serialize enough over this remote DB's
+      connection/latency characteristics for that specific defect not to
+      surface here.
+
+   2. The REAL bug, found when this test unexpectedly FAILED for real in a
+      full `npm test` run despite bug #1 already being fixed: `SELECT ... FOR
+      UPDATE` only locks rows it actually MATCHES. A brand-new student with
+      no bag yet has ZERO rows matching `status = 'active'` — so the lock
+      was a complete no-op for exactly the case that matters most, a
+      student's FIRST bag (which is exactly what this test's fixture
+      creates). Two concurrent first-time issuances had nothing to lock and
+      both went through, confirmed by this test genuinely failing (2 bags
+      issued, not 1) in a real run — not a false-positive, an actual catch.
+
+   Fixed with a Postgres advisory lock keyed on studentId
+   (`pg_advisory_xact_lock(hashtext('bag-issue|' + studentId))`), which
+   works whether or not any Bag row exists yet — same technique as the
+   slot-booking and payslip fixes elsewhere this session. Re-run 3+ times
+   consecutively after this fix with no failures, versus the old code's
+   demonstrated real failure. */
 import "dotenv/config";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { execSync } from "node:child_process";

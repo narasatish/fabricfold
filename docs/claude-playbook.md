@@ -143,37 +143,107 @@ missing ownership check):**
 - Light-theme `--muted`/`--faint` text failed WCAG AA contrast (4.05:1 and
   2.47:1 against a 4.5:1 requirement) — darkened to 5.2:1+/4.2:1+.
 
-## Known edge case (not a leak, opposite risk)
+## Resolved checks (2026-09-05, run directly against the real production DB)
 
-`Complaint.collegeId` has `@default("")` in the schema. The new
-campus-scoping filters (`app/s/page.tsx`, `app/s/complaints/page.tsx`) do
-`where: { collegeId: staff.collegeId }`, which will never match a row whose
-`collegeId` is still the empty-string default. Any such legacy row would
-silently vanish from a scoped staffer's complaint list — not a cross-campus
-leak (the opposite: legitimate same-campus data going invisible). One query
-answers whether this is live: `SELECT count(*) FROM "Complaint" WHERE
-"collegeId" = '';`. If non-zero, backfill those rows' real `collegeId` from
-their student's campus.
+All three items below were open questions for a while. Once it was
+established that Render's own Postgres (`fabricfold-db-scd2`, see
+Infrastructure reality below) is the actual live database — not
+Supabase — these were run directly and closed out:
 
-## Pending / needs a human check
+- **Owner collegeId**: both real Owner accounts (`Owner`, `Yogesh`, role 4)
+  have `collegeId: null`, as required. No bug, nothing to fix.
+- **Payslip duplicates**: zero `(staffId, month)` duplicates found. The
+  `@@unique([staffId, month])` constraint has been added back to
+  `prisma/schema.prisma` and is now live.
+- **Complaint empty-string collegeId** (see below): zero rows found. The
+  edge case is real in theory but doesn't exist in current data.
 
-- **Payslip duplicate-check** — before adding `@@unique([staffId, month])`
-  back to `prisma/schema.prisma`, run in Supabase SQL Editor:
-  ```sql
-  SELECT "staffId", month, count(*), array_agg(number) AS payslip_numbers
-  FROM "Payslip" GROUP BY "staffId", month HAVING count(*) > 1;
-  ```
-  Empty result → safe to add the constraint and redeploy. Non-empty → decide
-  per-row which payslip is correct before touching the schema.
-- **Owner collegeId check** — see above, one query confirms it, one query
-  fixes it if wrong.
+## Known edge case (not a leak, opposite risk, confirmed not currently live)
+
+`Complaint.collegeId` has `@default("")` in the schema. The campus-scoping
+filters (`app/s/page.tsx`, `app/s/complaints/page.tsx`) do `where: {
+collegeId: staff.collegeId }`, which would never match a row whose
+`collegeId` is still the empty-string default — such a row would silently
+vanish from a scoped staffer's complaint list (not a cross-campus leak, the
+opposite: legitimate same-campus data going invisible). Confirmed 2026-09-05
+via a direct count against production: zero such rows exist right now.
+Re-run `SELECT count(*) FROM "Complaint" WHERE "collegeId" = '';` if this
+class of bug is ever suspected again — it costs nothing to re-check.
+
+## Infrastructure reality — read this before assuming anything about the DB
+
+**CORRECTED 2026-09-05, after this exact wrong assumption was carried through
+most of a very long session:** it was assumed for hours that Vercel and
+Render shared one Supabase Postgres database. This is false and was never
+true for Render. `render.yaml` binds Render's web service `DATABASE_URL`
+directly to Render's OWN native Postgres (`fabricfold-db-scd2`) via
+`fromDatabase` — confirmed by directly querying it and finding the exact
+same live row counts (234 students) as the production site. Only **Vercel's**
+deploys ever touched Supabase's Postgres (its own `.env`/project env var
+points there for its build-time schema sync). Render has been fully
+self-contained — its own app, its own database — since the DNS cutover, not
+"secondary to Supabase" as earlier assumed.
+
+**What Supabase actually still does**: nothing for the database (Render
+never used it), but it IS the live file storage backend — `SUPABASE_URL`/
+`SUPABASE_SERVICE_KEY`/`SUPABASE_BUCKET` on Render's own env vars actively
+serve every complaint/receipt photo upload. Owner decision (2026-09-05):
+keep Supabase Storage running indefinitely for this — no cost or risk to
+leaving it connected, and migrating it to another storage backend was
+explicitly declined. Vercel and Supabase projects are BOTH kept alive per
+the owner's explicit instruction — "disconnect" means stop actively
+deploying to/depending on them for the LIVE app, not delete either project.
+
+**Lesson**: don't infer what a deployed service's env vars/bindings are from
+what a *different* platform's deploy log prints, or from an old session
+summary — check the actual `render.yaml`/Vercel project settings/API
+response for the platform in question before stating it as fact. This one
+sat unverified and unquestioned for an entire session's worth of otherwise-
+careful campus-boundary auditing.
+
+## CRITICAL, found and fixed 2026-09-05: every cron job had been silently failing since deploy
+
+All 8 Render cron services (`cron-report-daily-scd2`, `cron-backup-scd2`,
+`cron-sheets-sync-scd2`, `cron-sheets-flush-scd2`, `cron-collection-
+reminders-scd2`, `cron-error-digest-scd2`, `cron-purge-photos-scd2`,
+`cron-weekly-digest-scd2`) were deployed via `render.yaml` with `CRON_SECRET:
+sync: false` — meaning Render expects it to be set manually per-service in
+the dashboard afterward. **It never was.** Every one of these jobs has been
+hitting its endpoint, getting a 401 (the route's own `CRON_SECRET` check
+correctly rejecting the unauthenticated request), and failing silently since
+the very first deploy on 2026-09-04 — confirmed via the Render API returning
+an empty job-run history for all 8 services. Practical impact: **no
+automated backups, no Sheets sync, no collection reminders sent to
+students, no error digests, no weekly owner digest, no daily report email**
+— for the entire time this app has been "live" on Render.
+
+Fixed by reading the web service's own `CRON_SECRET` value (readable via the
+Render API — it is not masked the way Vercel marks values "Sensitive") and
+setting the identical value on all 8 cron services via `PUT
+/v1/services/{id}/env-vars/CRON_SECRET`. Verified by manually triggering two
+jobs (`error-digest`, `backup`) via `POST /v1/services/{id}/jobs` with the
+service's own `startCommand` — both returned `"status": "succeeded"` where
+they would previously have failed.
+
+**Lesson, same root cause as the DB one above**: `sync: false` in a
+`render.yaml` env var is an explicit signal that a value needs manual setup
+— it is exactly the kind of thing that's easy to declare in a blueprint and
+then never actually go do. Any service deployed with `sync: false` secrets
+should have its actual env-var presence verified against the dashboard/API
+immediately after first deploy, not assumed correct because the blueprint
+"looks right." This one went unnoticed for a full day of otherwise-careful
+work because nobody looked at the cron services directly until asked to
+verify infrastructure assumptions specifically.
 
 ## Deploy conventions this project actually uses
 
 - Push to `main` AND `main:render-migration` — Render (primary, cheaper,
-  runs both app + DB) auto-deploys from `render-migration`; Vercel deploys
-  via `npx vercel --prod --yes` and stays aliased to `fabricfold.in` as a
-  secondary/parallel deployment.
+  runs its own app + its own database, not shared with anything else)
+  auto-deploys from `render-migration`. Vercel deploys via
+  `npx vercel --prod --yes` — as of 2026-09-05 this has been intentionally
+  stopped; the Vercel project and its Supabase Postgres project both stay
+  alive (owner's explicit choice) but neither serves live production
+  traffic or data any more.
 - `npm run build` runs `prisma db push` against whatever `DATABASE_URL` is
   set locally — **check `.env` before running a local build**; at various
   points this session it pointed at the old Sydney rollback-only project,

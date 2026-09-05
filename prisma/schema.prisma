@@ -468,13 +468,10 @@ model Payslip {
   expenseId  String?  @unique // auto-posted "Salaries" expense
   at         DateTime @default(now())
 
-  // A @@unique([staffId, month]) constraint is intentionally NOT here yet —
-  // `prisma db push` refused to add it because production may already have
-  // duplicate (staffId, month) rows, and forcing --accept-data-loss on real
-  // payroll data without checking first is not a call to make unilaterally.
-  // createPayslip's P2002 catch is already in place and will start enforcing
-  // this the moment the constraint is added back, once the duplicate check
-  // (see the SQL shared with the owner) comes back clean or is resolved.
+  @@unique([staffId, month]) // one payslip per staff member per month — a
+  // retried/double-tapped submission must not double-pay someone. Held back
+  // earlier until a direct query against the real production DB confirmed
+  // zero existing (staffId, month) duplicates (2026-09-05) — safe to add.
 }
 
 // ───────────── Support / comms ─────────────

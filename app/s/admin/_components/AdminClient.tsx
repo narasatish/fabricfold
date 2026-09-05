@@ -1,7 +1,7 @@
 "use client";
 /* Admin hub — rates & GST, plan, payment details, colleges + feature flags,
    staff roles, payroll, report settings. All wired to server actions. */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { featureOn, type FeatureKey } from "@/lib/features";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
@@ -87,9 +87,30 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   const [colEdit, setColEdit] = useState<{ id?: string; name: string; address: string; closedWeekday: number | null }>({ name: "", address: "", closedWeekday: null });
   const [stEdit, setStEdit] = useState<{ id?: string; name: string; phone: string; role: number; active?: boolean; perms: Record<string, boolean> }>({ name: "", phone: "", role: 1, perms: {} });
   const [impCollege, setImpCollege] = useState(colleges.find((c) => c.active)?.id || colleges[0]?.id || "");
+  // Same staleness class as slip.staffId above — the dropdown option list is
+  // now scoped to visibleColleges, so the previously-selected campus can
+  // silently fall outside it once the switch changes.
+  useEffect(() => {
+    if (!visibleColleges.some((c) => c.id === impCollege)) {
+      setImpCollege(visibleColleges.find((c) => c.active)?.id || visibleColleges[0]?.id || "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campus]);
   const [impBusy, setImpBusy] = useState(false);
   const [impResult, setImpResult] = useState<null | { added: string[]; skipped: string[]; problems: string[]; warnings: string[] }>(null);
   const [slip, setSlip] = useState({ staffId: staff[0]?.id || "", month: new Date().toISOString().slice(0, 7), basic: 0, allowances: 0, deductions: 0, postExpense: true });
+  // The dropdown below is scoped to visibleStaff, but slip.staffId was only
+  // ever seeded once from the FULL staff list at mount — switching campus
+  // (or the dropdown just falling back to its first option because the
+  // stale id isn't in the filtered list) left the selection visibly showing
+  // one person while state still held another. Keep it in sync with the
+  // currently-visible staff whenever the campus filter changes.
+  useEffect(() => {
+    if (!visibleStaff.some((x) => x.id === slip.staffId)) {
+      setSlip((s) => ({ ...s, staffId: visibleStaff[0]?.id || "" }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campus]);
   const emptySlot = (collegeId: string) => ({ id: undefined as string | undefined, collegeId, weekday: 1, startMin: 540, endMin: 660, capacity: 15 });
   const [slotEdit, setSlotEdit] = useState<ReturnType<typeof emptySlot>>(emptySlot(colleges[0]?.id || ""));
 
@@ -330,7 +351,7 @@ Students already registered there keep their records and can be restored with th
         <div className="field mt10">
           <label>Campus</label>
           <select className="input" value={impCollege} onChange={(e) => setImpCollege(e.target.value)}>
-            {colleges.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {visibleColleges.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
         <input

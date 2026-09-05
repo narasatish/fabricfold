@@ -196,6 +196,18 @@ describe("a staff role change forces re-login, same as deactivation does", () =>
   });
 });
 
+describe("Admin's payslip-target and import-campus dropdowns can't silently point at the wrong selection after a campus switch", () => {
+  it("resets slip.staffId to a visible staff member when the campus filter changes", () => {
+    const src = read("app/s/admin/_components/AdminClient.tsx");
+    expect(src).toMatch(/if \(!visibleStaff\.some\(\(x\) => x\.id === slip\.staffId\)\) \{\s*\n\s*setSlip\(\(s\) => \(\{ \.\.\.s, staffId: visibleStaff\[0\]\?\.id \|\| "" \}\)\);/);
+  });
+  it("resets impCollege to a visible college when the campus filter changes", () => {
+    const src = read("app/s/admin/_components/AdminClient.tsx");
+    expect(src).toMatch(/if \(!visibleColleges\.some\(\(c\) => c\.id === impCollege\)\) \{/);
+    expect(src).toMatch(/<select className="input" value=\{impCollege\} onChange=\{\(e\) => setImpCollege\(e\.target\.value\)\}>\s*\n\s*\{visibleColleges\.filter/);
+  });
+});
+
 describe("Owner can narrow the Admin page to one campus at a time, not just see both stacked", () => {
   it("AdminClient derives visible* lists from a campus switch instead of rendering the raw props directly", () => {
     const src = read("app/s/admin/_components/AdminClient.tsx");
@@ -398,10 +410,10 @@ describe("invoice export checks staff campus, not just customer ownership", () =
 });
 
 describe("createPayslip can't double-pay a staff member for the same month", () => {
-  // The @@unique([staffId, month]) DB constraint is added in a follow-up
-  // commit once a production duplicate-check clears — see the note in
-  // prisma/schema.prisma. The application-level guard is tested here now so
-  // it's already in place and correct the moment that constraint lands.
+  it("Payslip has a @@unique([staffId, month]) constraint (confirmed safe via a direct duplicate-check on 2026-09-05)", () => {
+    const src = read("prisma/schema.prisma");
+    expect(src).toMatch(/@@unique\(\[staffId, month\]\)/);
+  });
   it("createPayslip catches the collision and returns a friendly error", () => {
     const src = read("lib/actions/admin.ts");
     const fn = src.slice(src.indexOf("export async function createPayslip"));

@@ -18,6 +18,15 @@ const OTP_TTL = 5 * 60_000;
 const OTP_MAX_PER_NUMBER_HOUR = 5;
 const OTP_MAX_PER_IP_HOUR = 15; // a shared hostel wifi may carry several students
 
+/* loginWithPasscode's pwFailedAttempts lockout (fixed 2026-09-05) only caps
+   guesses against ONE account. Nothing stopped an attacker from spreading
+   guesses across MANY different phone numbers instead — a few tries per
+   number, never enough to trip any single account's 5-attempt lock, but
+   still a live brute-force path against a 4-character-minimum passcode.
+   Same per-IP cap shape as requestOtp's, applied to the whole endpoint
+   rather than one account. */
+const PASSCODE_MAX_PER_IP_HOUR = 20;
+
 /* Deliver the login code. Channels, first configured one wins:
    0. WhatsApp (free per-conversation on Meta's auth pricing tier for India
       as of 2026) — Meta Cloud API with an APPROVED AUTHENTICATION template.
@@ -455,6 +464,17 @@ export async function hasPasscode(phone: string) {
 export async function loginWithPasscode(phone: string, passcode: string) {
   const p = phone.replace(/\D/g, "").slice(-10);
   if (p.length !== 10) return { ok: false as const, error: "Enter a valid 10-digit mobile number" };
+
+  // Per-IP cap across ALL numbers — the per-account lockout below only
+  // stops guesses against one phone number, not an attacker spreading
+  // guesses across many.
+  const ip = await requestIp();
+  if (ip !== "unknown") {
+    const lim = await rateLimit(`passcode:ip:${ip}`, PASSCODE_MAX_PER_IP_HOUR, 3600);
+    if (!lim.allowed) {
+      return { ok: false as const, error: `Too many attempts from this device. Try again in ${Math.ceil(lim.retryAfterSec / 60)} minutes.` };
+    }
+  }
 
   const stu = await db.student.findUnique({ where: { phone: p } });
 

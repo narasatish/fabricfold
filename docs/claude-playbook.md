@@ -155,6 +155,29 @@ rest of the codebase; the test documents the intended behavior rather than
 proving the old code was exploitable under the exact conditions tried here.
 Full suite: 793/793.
 
+## RESOLVED 2026-09-05: loginWithPasscode had no IP-based rate limit at all
+
+Follow-up to the passcode lockout fix earlier the same day: that fix closed
+the per-ACCOUNT brute-force bypass, but auditing `requestOtp`'s rate-limit
+usage as a comparison point turned up that `loginWithPasscode` never called
+`rateLimit()`/`requestIp()` at all — only `requestOtp` did. The per-account
+`pwFailedAttempts` lockout stops an attacker hammering ONE phone number,
+but does nothing against an attacker spreading guesses across MANY
+different numbers (a few tries per account, never enough to trip any
+single account's 5-attempt lock) — still a live brute-force path against a
+passcode as short as 4 characters (`MIN_PASSCODE`).
+
+Fixed with the same per-IP cap shape `requestOtp` already has
+(`PASSCODE_MAX_PER_IP_HOUR = 20`, via the existing `rateLimit()` helper —
+already atomic/race-safe per its own history in this file's audit log).
+Verified with a new behavioral test
+(`tests/passcode-ip-ratelimit-behavioral.test.ts`) that creates 25 distinct
+student accounts and fires one wrong guess against each from the same IP —
+confirms the first 20 go through to a real "incorrect passcode" response
+and the last 5 are refused by the IP cap. Confirmed genuine by removing
+the new check and re-running: 0 of 25 were capped without it, versus 5 of
+25 with it. Full suite: 808/808.
+
 ## CRITICAL, found immediately after the above: activateSubscription had NO lock at all
 
 While auditing every subscription writer against the "does this lock a row

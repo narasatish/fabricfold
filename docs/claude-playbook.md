@@ -155,6 +155,31 @@ rest of the codebase; the test documents the intended behavior rather than
 proving the old code was exploitable under the exact conditions tried here.
 Full suite: 793/793.
 
+## RESOLVED 2026-09-05: updateStudentPhone had the same unhandled-P2002 gap registerStudent was already fixed for
+
+Minor but real: `registerStudent` already catches `P2002` on the phone
+unique-constraint race (documented in its own comment), but
+`updateStudentPhone` — same shape, same table, same unique column — never
+got the same treatment. Two concurrent phone-change requests landing on the
+same new number would both pass the pre-check `existing` lookup, and the
+second write would throw an unhandled Prisma error (a raw 500) instead of
+the friendly "This number is already registered to another student"
+message the sequential case gives. Lower severity than the other fixes
+this session — the DB constraint still prevents any actual duplicate phone,
+this only affects how the LOSING request's error looks — but it's the same
+gap-not-inherited-by-a-sibling-function pattern found repeatedly this
+session (issueBag's lock, cancelOrder vs collectOrder). Fixed by wrapping
+the write in the same try/catch pattern.
+
+Caveat, checked rather than assumed: the new behavioral test
+(`tests/update-phone-race-behavioral.test.ts`) still PASSED with the fix
+temporarily removed — same finding as `tests/bag-race-behavioral.test.ts`
+earlier this session. This particular critical section (one `findUnique`,
+then the write) is too short for this remote test DB's connection/latency
+characteristics to reliably force two `Promise.all`-fired calls into an
+actual race. The fix is still correct; the test documents intended
+behavior rather than proving exploitability under these exact conditions.
+
 ## RESOLVED 2026-09-05: drop-off slots could be overbooked past capacity
 
 Deep-audit pass on `lib/slot-capacity.ts` found `assertSlotBookable` was a

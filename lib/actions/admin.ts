@@ -63,7 +63,18 @@ export async function updateStudentPhone(studentId: string, newPhone: string) {
   const stu = await db.student.findUnique({ where: { id: studentId } });
   if (!stu) return { ok: false as const, error: "Student not found" };
   assertSameCollege(st, stu.collegeId);
-  await db.student.update({ where: { id: studentId }, data: { phone } });
+  try {
+    await db.student.update({ where: { id: studentId }, data: { phone } });
+  } catch (e) {
+    // Same TOCTOU registerStudent already guards against: the `existing`
+    // check above ran before this write, so two concurrent phone-change
+    // requests landing on the same new number both pass it, and the second
+    // write hits the unique constraint on `phone` and would otherwise throw
+    // unhandled — a raw 500 instead of the friendly message the sequential
+    // case already gives.
+    if ((e as { code?: string }).code === "P2002") return { ok: false as const, error: "This number is already registered to another student" };
+    throw e;
+  }
   await audit("Student phone changed", `${stu.name} (${stu.id}) · +91 ${stu.phone} -> +91 ${phone}`, st.id);
   rosterSoon();
   return { ok: true as const };

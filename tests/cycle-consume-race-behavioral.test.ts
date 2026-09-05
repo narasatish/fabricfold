@@ -131,3 +131,36 @@ describe("plan-cycle consumption can't be lost to a race between two orders", ()
     expect(sub.cyclesUsed).toBe(3);
   });
 });
+
+describe("cancelOrder can't double-restore the same order's cycles under concurrency", () => {
+  it("two concurrent cancelOrder calls on the same order only restore its cycles once", async () => {
+    await mkStudentWithPlan("888888", "9999900008", 10);
+    // Burn 4 cycles for real first, via walkInOrder, so cyclesUsed/bucket.used
+    // start at a genuine 4 — then cancel that exact order twice at once.
+    const placed = await orders.walkInOrder("888888", { service: "washFold", items: [], cycles: 4, weightKg: 5, useCycle: true });
+    expect(placed.ok).toBe(true);
+    if (!placed.ok) return;
+
+    const before = await db.subscription.findUniqueOrThrow({ where: { studentId: "888888" } });
+    expect(before.cyclesUsed).toBe(4);
+
+    const [r1, r2] = await Promise.all([
+      orders.cancelOrder(placed.id),
+      orders.cancelOrder(placed.id),
+    ]);
+    const results = [r1, r2];
+    expect(results.filter((r) => r.ok).length).toBe(1);
+    expect(results.filter((r) => !r.ok).length).toBe(1);
+
+    const after = await db.subscription.findUniqueOrThrow({ where: { studentId: "888888" } });
+    // The bug this test targets would let the second, slower-to-lock cancel
+    // re-read the ALREADY-restored balance and restore the same 4 cycles a
+    // second time — cyclesUsed going negative-adjacent (0 - 4 clamped, or
+    // worse, an over-restore past what was ever actually used). Correct
+    // behavior: exactly the 4 burned cycles come back, once.
+    expect(after.cyclesUsed).toBe(0);
+    const buckets = after.buckets as unknown as { service: string; used: number }[];
+    const bucket = buckets.find((b) => b.service === "washFold")!;
+    expect(bucket.used).toBe(0);
+  });
+});

@@ -155,6 +155,43 @@ rest of the codebase; the test documents the intended behavior rather than
 proving the old code was exploitable under the exact conditions tried here.
 Full suite: 793/793.
 
+## RESOLVED 2026-09-05: cancelOrder could double-restore plan cycles under concurrency
+
+Deep-audit pass comparing every order-lifecycle transition against
+`collectOrder`'s own documented atomic-update pattern found one that never
+got it: `cancelOrder` checked `ord.status` for "cancelled"/"collected"
+BEFORE its transaction started, then wrote `tx.order.update({ where: { id },
+data: { status: "cancelled", ... } })` with no status guard at all —
+unconditional, unlike `collectOrder`'s `updateMany({ where: { id, status:
+"ready" }, ... })` + affected-count check.
+
+Two concurrent cancels on the same order (a double-tap, or a retried
+offline action) both pass the pre-check, both reach the transaction, and
+both call `restoreCycleFor`. The first commits its cycle restore normally.
+The second — which only acquires the Subscription row lock after the first
+releases it — then reads the ALREADY-restored fresh balance and restores
+the exact same cycles into it a SECOND time: the student gets double-
+credited cycles for cancelling one order once. This is real money/cycle
+leakage, the same class of bug as everything else fixed this session, just
+inverted (double-credit instead of double-charge or lost-update).
+
+Fixed the same way `collectOrder` already does it: `updateMany({ where: {
+id, status: { notIn: ["cancelled", "collected"] } }, ... })`, check
+`.count === 0` and refuse before ever calling `restoreCycleFor` — so only
+the transaction that actually wins the status transition gets to restore
+cycles. (`updateMany` doesn't support the nested `timeline: { create: ... }`
+write `tx.order.update` used, so the `OrderEvent` row is now created as its
+own `tx.orderEvent.create` call, same pattern `collectOrder` already uses.)
+
+Verified two ways: (1) a new behavioral test
+(`tests/cycle-consume-race-behavioral.test.ts`'s cancelOrder case) that
+actually burns 4 real cycles via `walkInOrder`, fires two concurrent
+`cancelOrder` calls on that exact order, and confirms exactly one succeeds
+and exactly 4 cycles come back, not 8; (2) checked rather than assumed —
+reverted the fix and reran the same test, which failed exactly as
+predicted (both calls returned `ok: true`), confirming this wasn't a
+false-positive test. Full suite: 797/797.
+
 ## CRITICAL, found and fixed 2026-09-05: the Audit log page leaked every campus to every Admin
 
 Deep-audit pass checking for other instances of the Sep-5 "server component

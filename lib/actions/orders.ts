@@ -829,11 +829,34 @@ export async function cancelOrder(orderId: string): Promise<ActionResult> {
   if (ord.status === "cancelled") return { ok: false as const, error: "This order is already cancelled" };
   if (ord.status === "collected") return { ok: false as const, error: "This order has already been collected" };
 
-  await db.$transaction(async (tx) => {
-    await tx.order.update({ where: { id: ord.id }, data: { status: "cancelled", cancelledAt: new Date(), timeline: { create: { status: "cancelled" } } } });
-    // Cancelling means the wash never happened, so the cycle always goes back.
-    await restoreCycleFor(tx, ord, ord.student.subscription);
-  });
+  try {
+    await db.$transaction(async (tx) => {
+      /* The status checks above ran BEFORE this transaction started and the
+         write below was a plain `update` with no status guard — same shape
+         as collectOrder's own documented double-tap bug, fixed there but
+         missed here. Two concurrent cancels on the same order (a double-tap,
+         or a retried offline action) would both pass the pre-check, both
+         reach here, and both call restoreCycleFor: the first commits its
+         cycle restore, and the SECOND — which locks the subscription only
+         after the first releases it — re-reads the ALREADY-restored fresh
+         balance and restores the exact same cycles into it a second time,
+         double-crediting the student for cancelling one order once. Scoping
+         the update to the pre-cancellation states and checking the affected
+         count, the same way collectOrder scopes to status: "ready", makes
+         the transition atomic: only the first call's update actually
+         matches a row, so only it proceeds to restoreCycleFor. */
+      const updated = await tx.order.updateMany({
+        where: { id: ord.id, status: { notIn: ["cancelled", "collected"] } },
+        data: { status: "cancelled", cancelledAt: new Date() },
+      });
+      if (updated.count === 0) throw new Error(ord.status === "collected" ? "This order has already been collected" : "This order is already cancelled");
+      await tx.orderEvent.create({ data: { orderId: ord.id, status: "cancelled" } });
+      // Cancelling means the wash never happened, so the cycle always goes back.
+      await restoreCycleFor(tx, ord, ord.student.subscription);
+    });
+  } catch (e) {
+    return { ok: false as const, error: (e as Error).message };
+  }
   await db.otp.deleteMany({ where: { purpose: "pickup", refId: ord.id } });
   await pushNotif(ord.studentId, `Your order #${ord.id.slice(-4)} was cancelled.`, "status");
   await audit("Cancel order", `#${ord.id.slice(-4)}`, st.id);

@@ -155,6 +155,50 @@ rest of the codebase; the test documents the intended behavior rather than
 proving the old code was exploitable under the exact conditions tried here.
 Full suite: 793/793.
 
+## CRITICAL, found and fixed 2026-09-05: the Audit log page leaked every campus to every Admin
+
+Deep-audit pass checking for other instances of the Sep-5 "server component
+queries the DB directly, no campus check" blind spot (the one that already
+produced the customer/order detail page CRITICAL earlier today) found one
+more, in `app/s/audit/page.tsx`: `db.auditLog.findMany({ orderBy: { at:
+"desc" } })` with **no filter at all**, shown to any staff `role >= 3`
+(Admin+), not just Owner. `AuditLog` has no `collegeId` column — it only
+ever recorded a raw actor id (`by`) — so there was structurally no way to
+scope it, and nobody had. A campus-scoped Admin at one college could open
+`/s/audit` and read the complete refund/cancellation/cash-compensation/
+admin-action history of every OTHER college too. `app/s/reports/page.tsx`
+links to this page for any `staff.role >= 3`, so this wasn't a dead
+unlinked route — it's reachable from the normal Reports screen.
+
+**The real fix** (add `AuditLog.collegeId`, thread it through the `audit()`
+helper and every one of its dozens of call sites across
+`lib/actions/*.ts`, backfill existing rows) is too large to land safely in
+one sitting — same caution as the Payslip unique-constraint item elsewhere
+in this file: don't rush a schema change under time pressure.
+
+**Interim fix actually shipped**: filter `AuditLog` rows by the ACTING
+STAFF MEMBER's own `collegeId` (looked up via the same `staffRows` list the
+page already fetched to resolve actor names) — the same signal
+`assertSameCollege` uses everywhere else to decide who can act on what. A
+`"sheet"` row (Google Sheet config edits, not tied to any staff id) can't be
+attributed to a campus at all, so it's simply hidden from campus-scoped
+Admins rather than guessed at or leaked to everyone. Owner (`collegeId`
+null) is unaffected — still sees every campus, unfiltered, by design.
+
+This is a real narrowing of what non-Owner Admins can see (they now see
+fewer rows than before, on purpose) — flag it to the owner as a behavior
+change, not just a bug fix, in case any Admin workflow depended on
+cross-campus audit visibility that was never supposed to exist.
+
+Verified with `tests/audit-log-campus-isolation.test.ts` (source-check —
+page.tsx components have no rendering harness in this suite, same
+limitation as every other staff page.tsx test here). **Genuinely
+unverified**: whether an Admin's OWN actions on students transferred from
+another campus, or edge cases around staff who changed colleges, could
+still leak a stray row — the interim fix is staff-identity-based, not
+event-identity-based, and is a stopgap until the real `collegeId` column
+exists.
+
 ## OPEN ITEM: this session cannot directly verify BVRIT's live rates/features
 
 The owner repeated, explicitly, twice: BVRIT is never sold cycles — no

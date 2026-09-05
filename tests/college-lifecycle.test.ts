@@ -93,7 +93,7 @@ describe("the audit log names a person", () => {
        "cmr8n8ffm000fbkbul5y2gbs0". This is the record you reach for after a
        dispute about who cancelled an order. */
     const page = read("app/s/audit/page.tsx");
-    expect(page).toMatch(/staffRows\.find/);
+    expect(page).toMatch(/staffById\.get\(by\)/);
     expect(page).toMatch(/nameOf\(l\.by\)/);
   });
 

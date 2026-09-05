@@ -82,18 +82,6 @@ export async function placeOrder(input: { service: string; items: { label: strin
         });
   if (!items.length) return { ok: false as const, error: usesCycles ? "Pick at least one cycle" : "Add at least one piece" };
 
-  // Drop-off slot is optional; when given, re-validate server-side (existence,
-  // still in the future, and capacity) — never trust the client's pick.
-  let dropSlotAt: Date | null = null, dropSlotEndAt: Date | null = null;
-  if (input.dropSlotAt) {
-    try {
-      dropSlotEndAt = await assertSlotBookable(stu.collegeId, input.dropSlotAt);
-      dropSlotAt = new Date(input.dropSlotAt);
-    } catch (e) {
-      return { ok: false as const, error: (e as Error).message };
-    }
-  }
-
   const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
   /* Express defaults OFF. The old `!== false` meant a college whose map
      lacked the key would have the surcharge applied anyway — a money path
@@ -105,17 +93,35 @@ export async function placeOrder(input: { service: string; items: { label: strin
   const gst = !usesCycles && cfg.gstEnabled ? Math.round((sub + surcharge) * (cfg.gstPct / 100)) : 0;
   const total = sub + surcharge + gst;
 
-  const o = await db.order.create({
-    data: {
-      id: orderCode(), studentId: stu.id, collegeId: stu.collegeId, service: input.service,
-      items, declaredPieces: items.reduce((s, i) => s + i.qty, 0),
-      cyclesCount, noGst: usesCycles,
-      express, surcharge, status: "draft",
-      dropSlotAt, dropSlotEndAt,
-      subtotal: sub, gst, gstPctSnapshot: cfg.gstEnabled ? cfg.gstPct : 0, total,
-      timeline: { create: { status: "placed" } },
-    },
-  });
+  /* Drop-off slot is optional; when given, re-validate server-side (existence,
+     still in the future, and capacity) — never trust the client's pick.
+     assertSlotBookable's own capacity check MUST run in the same transaction
+     as this order's creation, not before it as a separate round trip — two
+     students booking the last seat in a slot would otherwise both pass the
+     stale check before either's insert commits, silently overbooking it. */
+  let o;
+  try {
+    o = await db.$transaction(async (tx) => {
+      let dropSlotAt: Date | null = null, dropSlotEndAt: Date | null = null;
+      if (input.dropSlotAt) {
+        dropSlotEndAt = await assertSlotBookable(tx, stu.collegeId, input.dropSlotAt);
+        dropSlotAt = new Date(input.dropSlotAt);
+      }
+      return tx.order.create({
+        data: {
+          id: orderCode(), studentId: stu.id, collegeId: stu.collegeId, service: input.service,
+          items, declaredPieces: items.reduce((s, i) => s + i.qty, 0),
+          cyclesCount, noGst: usesCycles,
+          express, surcharge, status: "draft",
+          dropSlotAt, dropSlotEndAt,
+          subtotal: sub, gst, gstPctSnapshot: cfg.gstEnabled ? cfg.gstPct : 0, total,
+          timeline: { create: { status: "placed" } },
+        },
+      });
+    });
+  } catch (e) {
+    return { ok: false as const, error: (e as Error).message };
+  }
   bcast(o, "order.created");
   void notifyOwner(
     `New order #${o.id.slice(-4)}${express ? " (EXPRESS)" : ""}`,

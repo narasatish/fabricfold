@@ -155,6 +155,47 @@ rest of the codebase; the test documents the intended behavior rather than
 proving the old code was exploitable under the exact conditions tried here.
 Full suite: 793/793.
 
+## RESOLVED 2026-09-05: drop-off slots could be overbooked past capacity
+
+Deep-audit pass on `lib/slot-capacity.ts` found `assertSlotBookable` was a
+bare `db.order.count` with NO lock, called from `placeOrder`
+(`lib/actions/orders.ts`) as a separate round trip well before `placeOrder`'s
+own `db.order.create` — completely unserialized despite the function's own
+comment claiming "so two students can't take the last seat at once." N
+students booking a slot with exactly one seat left could all read the same
+"before" count, all pass the capacity check, and all create a draft order
+for it, silently exceeding the capacity the whole feature exists to enforce
+(spreading the counter queue across drop-off windows).
+
+Unlike every other race fixed this session, there is no physical row to
+`SELECT ... FOR UPDATE` here: a `SlotWindow` row is a recurring WEEKLY
+TEMPLATE (weekday + startMin + endMin), not a row for one actual
+date+time instance — "this college's 9am Tuesday slot" only exists as a
+computed value (`buildSlots`), never as a row in the database. Fixed with a
+Postgres advisory lock instead — `pg_advisory_xact_lock(hashtext(key))`
+keyed on `collegeId|startAtISO` — taken inside the SAME transaction that
+then creates the order, so the lock only ever protects a caller who commits
+the order in that same transaction (`assertSlotBookable`'s signature now
+requires a `tx` for exactly this reason: calling it outside a transaction
+that also does the insert doesn't close the race). `placeOrder` was
+restructured to wrap the whole slot-check-and-create in one
+`db.$transaction`. Advisory locks auto-release at transaction end (commit
+or rollback), so there's no separate unlock step and no leak on error.
+
+Verified with a new behavioral test
+(`tests/slot-capacity-race-behavioral.test.ts`) that creates a real
+capacity-1 `SlotWindow`, fires two concurrent `placeOrder` calls from two
+different students for that exact slot, and confirms exactly one succeeds.
+Confirmed genuine — not a false-positive test — by temporarily removing
+just the advisory-lock line and re-running: both bookings succeeded,
+overbooking the capacity-1 slot exactly as predicted. Postgres-only fix (a
+sqlite dev fallback has no advisory locks), so the test `describe.skipIf`s
+itself when not running against Postgres. Full suite: 800/800 (Postgres).
+
+Slot booking had **zero test coverage of any kind** before this — not even
+a source-regex check — worth noting since it means this bug had been live,
+unnoticed, since the slot feature shipped.
+
 ## Reviewed 2026-09-05, no new issues found (so a future pass doesn't redo this)
 
 Deep-audit pass specifically checked these for the same bug classes fixed

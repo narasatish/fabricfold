@@ -9,7 +9,8 @@
    Codes are never reused — see lib/bagcode.ts. A lost bag is marked lost and
    the student is issued a NEW code, because the old label is still out there
    on a bag someone may hand in. */
-import { db } from "../db";
+import { db, dbSchemaPrefix } from "../db";
+import { Prisma } from "../generated/prisma/client";
 import { requireStaff, assertSameCollege } from "../auth";
 import { pushNotif, audit } from "../notify";
 import { rosterSoon } from "../sheets-sync";
@@ -74,7 +75,12 @@ export async function issueBag(
            busy counter) both saw no active bag and both proceeded, leaving
            two simultaneously "active" bags and possibly two charges. Locked
            and re-checked here, fresh, before allocating a code. */
-        await tx.$executeRaw`SELECT id FROM "Bag" WHERE "studentId" = ${studentId} AND status = 'active' FOR UPDATE`;
+        // Schema-qualified, like every other raw lock in this codebase (db.ts's
+        // own dbSchemaPrefix comment names this exact class of bug) — an
+        // unqualified raw table reference hits the connection's default
+        // search_path, not necessarily the schema Prisma's ORM calls actually
+        // use, so an unqualified lock here would silently lock nothing.
+        await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Bag"`)} WHERE "studentId" = ${studentId} AND status = 'active' FOR UPDATE`;
         const stillActive = await tx.bag.findFirst({ where: { studentId, status: "active" } });
         if (stillActive) throw new Error("This student already has an active bag — mark it lost or replaced first");
         const code = await allocateBagCode(tx, kind);

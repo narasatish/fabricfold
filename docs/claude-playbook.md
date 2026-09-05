@@ -125,6 +125,36 @@ elsewhere in the file that does the identical thing to the identical table.
 Grep `buckets\[idx\]` / `.buckets as unknown as` across `lib/actions/*.ts`
 before trusting a new write path to `Subscription.buckets`.
 
+## RESOLVED 2026-09-05: issueBag's row lock was never schema-qualified
+
+Deep-audit pass grepped every raw `$executeRaw`/`$queryRaw` in `lib/` against
+`dbSchemaPrefix` usage (the fix already established for `flushSheetOutbox`,
+`rate-limit.ts`, and the refund/subscription locks this same session) and
+found one that was missed: `issueBag`'s "already has an active bag" guard in
+`lib/actions/bags.ts` locked with a bare `SELECT id FROM "Bag" ... FOR
+UPDATE`, no `Prisma.raw(`${dbSchemaPrefix}"Bag"`)` wrapper. Same root cause
+as the earlier documented case: an unqualified raw table reference hits the
+connection's default `search_path`, not necessarily the schema the rest of
+the query (built through Prisma's ORM, which DOES respect `?schema=`) is
+actually reading and writing. Every isolated test schema in this suite, and
+any deployment that ever sets a `?schema=` param, would have had this lock
+silently pointing at the wrong copy of `Bag` — protecting nothing. Today's
+production `DATABASE_URL` has no schema param, so `dbSchemaPrefix` is `""`
+and this had zero live production impact, but it's the same latent
+divergence-between-test-and-prod-behavior class of bug, worth closing
+regardless. Fixed by wrapping it the same way as every other raw lock.
+
+Caveat, checked rather than assumed: a real behavioral test
+(`tests/bag-race-behavioral.test.ts`, two concurrent `issueBag` calls
+against a schema-isolated test DB) still passed even with the bug
+deliberately reintroduced and re-tested — this specific race doesn't
+reliably force itself open under this remote test DB's connection/latency
+characteristics, unlike the refund and cycle races earlier this session
+which reproduced cleanly. The fix is still correct and consistent with the
+rest of the codebase; the test documents the intended behavior rather than
+proving the old code was exploitable under the exact conditions tried here.
+Full suite: 793/793.
+
 ## The single most important rule in this codebase
 
 **Campus (college) isolation must never break.** FabricFold serves multiple

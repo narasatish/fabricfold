@@ -155,6 +155,55 @@ rest of the codebase; the test documents the intended behavior rather than
 proving the old code was exploitable under the exact conditions tried here.
 Full suite: 793/793.
 
+## RESOLVED 2026-09-05: passcode lockout could be bypassed by concurrent guesses
+
+Deep-audit pass on `lib/actions/auth.ts` (auth/OTP flows, not yet checked
+this session) found a real brute-force bypass in `loginWithPasscode`:
+`pwFailedAttempts` — the ONLY defense on passcode sign-in, since unlike
+`requestOtp` there is no `rateLimit()` call anywhere on this path, and a
+passcode can be as short as 4 characters (`MIN_PASSCODE`, a 4-digit numeric
+PIN having only 10,000 combinations) — was read via a plain `findUnique`
+(no lock) and written back with a plain `update`. N concurrent wrong
+guesses all read the SAME base count and all write the SAME "count + 1" —
+the counter never actually accumulates past a single increment no matter
+how many requests land at once. An attacker sending guesses in parallel
+batches instead of one at a time could bypass the 5-attempt lockout
+entirely and brute-force a student's passcode with effectively no rate
+limit.
+
+Fixed with the same lock-and-re-read pattern used for every money-moving
+transaction this session: lock the Student row, re-read `pwFailedAttempts`
+fresh, THEN compute and write the next count — so concurrent guesses
+serialize through the lock and the counter actually reaches
+`MAX_PW_ATTEMPTS` regardless of how many requests arrive at once. Also
+needed `{ maxWait: 15_000, timeout: 15_000 }` on the transaction (Prisma's
+2s/5s defaults were too tight for a burst of guesses queuing on one row,
+same tuning `acceptOrder`/`walkInOrder` already needed earlier this
+session).
+
+Verified two ways: (1) a new behavioral test
+(`tests/passcode-lockout-race-behavioral.test.ts`) firing exactly
+`MAX_PW_ATTEMPTS` concurrent wrong guesses and confirming the account
+actually locks (not fewer concurrent guesses, which correctly does NOT
+lock); (2) checked rather than assumed — reverted the fix and reran, which
+failed exactly as predicted: `pwFailedAttempts` stuck at 1 regardless of
+whether 5 or 4 concurrent guesses were sent, proving the counter really
+was silently not accumulating under concurrency, not a false-positive test.
+
+**Lesson, generalizes**: any per-account "attempts" or "failed tries"
+counter that gates a security control (lockout, rate limit) needs the SAME
+lock-and-re-read discipline as a money balance — a lost-update on an
+attempt counter isn't just a UX inconsistency, it's a way to defeat the
+control entirely via parallelization. Check the OTP `attempts` counter in
+`verifyOtp` too: it currently writes via `{ increment: 1 }` (safe from the
+NULL-poisoning bug since `Otp.attempts` is a non-nullable `Int
+@default(0)`), and Postgres's own atomic `SET x = x + 1` for `increment`
+DOES serialize correctly on concurrent writers to the same row even without
+an explicit app-level lock — so that one is fine. The passcode bug above
+was different specifically because it computed the next value in
+application code (`stu.pwFailedAttempts + 1`) from a stale read instead of
+using `{ increment: 1 }` or a locked re-read.
+
 ## RESOLVED 2026-09-05: cancelOrder could double-restore plan cycles under concurrency
 
 Deep-audit pass comparing every order-lifecycle transition against

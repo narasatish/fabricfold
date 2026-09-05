@@ -2,7 +2,8 @@
 /* Phone-OTP auth. DEV_OTP fallback prints the code to the server console;
    swap `sendSms` for Twilio/MSG91 behind the same interface in production. */
 import crypto from "node:crypto";
-import { db } from "../db";
+import { db, dbSchemaPrefix } from "../db";
+import { Prisma } from "../generated/prisma/client";
 import { createSession, clearSession, requireStudent } from "../auth";
 import { rateLimit, requestIp } from "../rate-limit";
 import {
@@ -473,22 +474,42 @@ export async function loginWithPasscode(phone: string, passcode: string) {
 
   const good = await verifyPasscode((passcode || "").trim(), stu.passwordHash, stu.passwordSalt);
   if (!good) {
-    const attempts = stu.pwFailedAttempts + 1;
-    const lock = attempts >= MAX_PW_ATTEMPTS;
-    await db.student.update({
-      where: { id: stu.id },
-      data: {
-        pwFailedAttempts: lock ? 0 : attempts, // reset the counter when the lock starts
-        pwLockedUntil: lock ? new Date(Date.now() + LOCKOUT_MS) : stu.pwLockedUntil,
-      },
-    });
-    if (lock) {
+    /* This counter is the ONLY brute-force defense on passcode login —
+       unlike requestOtp, there's no rateLimit() call here at all, and a
+       passcode can be as short as 4 characters (MIN_PASSCODE), a 4-digit
+       PIN having only 10,000 combinations if numeric. Reading
+       stu.pwFailedAttempts (fetched before this function's own top-level
+       findUnique, outside any lock) and writing it back with a plain update
+       let concurrent guesses race: N parallel wrong attempts all read the
+       SAME base count, all compute the SAME "attempts + 1", and all write
+       that same value — the counter never actually accumulates past one
+       increment no matter how many requests land at once, so an attacker
+       sending guesses in parallel batches (instead of one at a time) could
+       bypass the 5-attempt lockout entirely and brute-force the passcode
+       with no rate limit at all. Locked and re-read fresh here, same
+       pattern as every money-moving transaction in this codebase — an
+       account's failed-attempt counter deserves the same protection as its
+       balance. */
+    const result = await db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Student"`)} WHERE id = ${stu.id} FOR UPDATE`;
+      const fresh = await tx.student.findUniqueOrThrow({ where: { id: stu.id } });
+      const attempts = fresh.pwFailedAttempts + 1;
+      const lock = attempts >= MAX_PW_ATTEMPTS;
+      await tx.student.update({
+        where: { id: stu.id },
+        data: { pwFailedAttempts: lock ? 0 : attempts, pwLockedUntil: lock ? new Date(Date.now() + LOCKOUT_MS) : fresh.pwLockedUntil },
+      });
+      return { lock, attempts };
+    }, { maxWait: 15_000, timeout: 15_000 }); // a burst of wrong guesses on one account can
+    // legitimately queue several of these locks back to back; Prisma's 2s/5s defaults are
+    // too tight for that, the same tuning acceptOrder/walkInOrder already needed.
+    if (result.lock) {
       return {
         ok: false as const,
         error: `Too many wrong tries — locked for ${Math.round(LOCKOUT_MS / 60_000)} minutes. Use Sign in with OTP instead.`,
       };
     }
-    const left = MAX_PW_ATTEMPTS - attempts;
+    const left = MAX_PW_ATTEMPTS - result.attempts;
     return { ok: false as const, error: `${generic} — ${left} attempt${left === 1 ? "" : "s"} left` };
   }
 

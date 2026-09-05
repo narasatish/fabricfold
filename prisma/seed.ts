@@ -79,7 +79,11 @@ async function main() {
 
   await db.staff.createMany({
     data: [
-      { phone: "8019121966", name: "Owner", role: 4, collegeId: c1.id },
+      // collegeId: null — Owner (role 4) is global by design (assertSameCollege
+      // is a no-op when collegeId is null); seeding a real collegeId here would
+      // make even a fresh dev Owner account behave as campus-scoped, unable to
+      // see the other seeded campus at all.
+      { phone: "8019121966", name: "Owner", role: 4, collegeId: null },
       { phone: "9000000002", name: "Rhea (Admin)", role: 3, collegeId: c1.id },
       { phone: "9000000003", name: "Sanjay (Manager)", role: 2, collegeId: c1.id },
       { phone: "9000000004", name: "Priya (Counter)", role: 1, collegeId: c1.id },

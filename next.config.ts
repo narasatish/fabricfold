@@ -51,6 +51,11 @@ const securityHeaders = [
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https://*.razorpay.com",
       "font-src 'self' data:",
+      // Sentry's browser SDK spins up a Web Worker (from a blob: URL) for
+      // background stack processing; with no worker-src set, that fell back
+      // to script-src, which doesn't allow blob:, and the browser silently
+      // blocked it — confirmed live via a real console CSP violation.
+      "worker-src 'self' blob:",
       "connect-src 'self' https://api.razorpay.com https://lumberjack.razorpay.com",
       "frame-src https://api.razorpay.com https://checkout.razorpay.com",
       "object-src 'none'",

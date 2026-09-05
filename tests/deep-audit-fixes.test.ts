@@ -193,6 +193,13 @@ describe("a staff role change forces re-login, same as deactivation does", () =>
   });
 });
 
+describe("CSP allows the Sentry SDK's blob: worker, found via a live triggered error in the browser", () => {
+  it("worker-src explicitly allows 'self' and blob:", () => {
+    const src = read("next.config.ts");
+    expect(src).toMatch(/"worker-src 'self' blob:"/);
+  });
+});
+
 describe("campus-boundary sweep: server-component pages that build their own queries now scope them too", () => {
   it("customer and order detail pages redirect if the viewing staff's campus doesn't match the record's", () => {
     const cust = read("app/s/customers/[id]/page.tsx");

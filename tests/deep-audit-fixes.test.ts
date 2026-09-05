@@ -193,6 +193,32 @@ describe("a staff role change forces re-login, same as deactivation does", () =>
   });
 });
 
+describe("list-count subtitles track the client-filtered list, not the full server-fetched one", () => {
+  it("StudentsClient's TopBar reads filtered.length, rendered outside .pad (not nested/double-padded)", () => {
+    const src = read("app/s/students/_components/StudentsClient.tsx");
+    expect(src).toMatch(/<TopBar title="Students" sub=\{`\$\{filtered\.length\} total`\} back="\/s" \/>/);
+    // TopBar must come before the .pad div opens, as a sibling — not inside it.
+    const topBarIdx = src.indexOf('<TopBar title="Students"');
+    const padIdx = src.indexOf('<div className="pad">');
+    expect(topBarIdx).toBeGreaterThan(-1);
+    expect(padIdx).toBeGreaterThan(topBarIdx);
+    // The server page must no longer render its own copy (would show the stale count again).
+    const page = read("app/s/students/page.tsx");
+    expect(page).not.toMatch(/<TopBar/);
+  });
+
+  it("OrdersClient's TopBar reads filtered.length, rendered outside .pad, and the server page no longer duplicates it", () => {
+    const src = read("app/c/orders/_components/OrdersClient.tsx");
+    expect(src).toMatch(/<TopBar title="My Orders" sub=\{`\$\{filtered\.length\} total`\} \/>/);
+    const topBarIdx = src.indexOf('<TopBar title="My Orders"');
+    const padIdx = src.indexOf('<div className="pad">');
+    expect(topBarIdx).toBeGreaterThan(-1);
+    expect(padIdx).toBeGreaterThan(topBarIdx);
+    const page = read("app/c/orders/page.tsx");
+    expect(page).not.toMatch(/<TopBar/);
+  });
+});
+
 describe("CSP allows the Sentry SDK's blob: worker, found via a live triggered error in the browser", () => {
   it("worker-src explicitly allows 'self' and blob:", () => {
     const src = read("next.config.ts");

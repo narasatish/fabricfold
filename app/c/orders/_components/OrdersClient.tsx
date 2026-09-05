@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Seg } from "@/components/chrome";
+import { Seg, TopBar } from "@/components/chrome";
 import { Svg } from "@/components/icons";
 import { fmt, dateStr, STATUS_LABEL } from "@/lib/format";
 import Link from "next/link";
@@ -29,6 +29,15 @@ export default function OrdersClient({ orders, rates }: { orders: Order[]; rates
 
   return (
     <>
+      {/* Same class of bug as the staff Students page: a subtitle computed
+          once server-side from the full list goes stale the moment a
+          client-side filter tab changes it. Reads `filtered.length` here
+          instead. Kept OUTSIDE .pad (below) — TopBar manages its own
+          edge-to-edge sticky padding and would double up if nested inside
+          one; the parent page no longer wraps this component in .pad. */}
+      <TopBar title="My Orders" sub={`${filtered.length} total`} />
+
+      <div className="pad">
       <Seg<string>
         options={[
           ["all", "All"],
@@ -49,6 +58,7 @@ export default function OrdersClient({ orders, rates }: { orders: Order[]; rates
             <div>No orders here yet</div>
           </div>
         )}
+      </div>
       </div>
     </>
   );

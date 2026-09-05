@@ -3,6 +3,15 @@
 Read this before SEO, production-debugging, or deploy work. It exists so lessons
 learned don't have to be re-derived from scratch in a future session.
 
+**This file is a living ledger, not a one-time snapshot.** Whenever a real bug is
+found and fixed — not a style nitpick, an actual defect that shipped or could
+have — add it to the audit log below, in enough detail that a future session
+reading only this file (not the git history) understands what went wrong and
+why the fix works. The owner's explicit instruction: mistakes found once must
+never be quietly repeated later. If you're fixing something that rhymes with
+an entry already here, say so out loud and check whether the new instance
+shares the same root cause.
+
 ## The single most important rule in this codebase
 
 **Campus (college) isolation must never break.** FabricFold serves multiple
@@ -115,6 +124,18 @@ missing ownership check):**
 - CSP had no `worker-src`, silently blocking Sentry's Web Worker (found via
   a live browser console check on the deployed site, not from reading code —
   a reminder that some bugs only show up by actually loading the page).
+- `app/s/students/page.tsx`'s "N total" header was computed ONCE server-side
+  from the full (Owner-visible, all-campuses) list and passed as a static
+  string — it never updated when the client-side campus tab changed, so an
+  Owner switching to a campus with zero students still saw the old, larger,
+  all-campus total sitting above a correctly-empty list. Looked exactly like
+  a cross-campus leak (found by the owner testing live) but wasn't one — the
+  actual student list was already right, only the header text was stale.
+  General lesson: **any count/total shown near a client-side filter must be
+  derived from the same filtered state the list uses, not passed down as a
+  server-computed prop that only reflects the unfiltered set.** Fixed by
+  moving the `TopBar` (and its `sub` count) into the client component so it
+  reads `filtered.length` instead of `students.length`.
 
 **Accessibility:**
 - The `Sheet` component (used for every modal/bottom-sheet app-wide) had no

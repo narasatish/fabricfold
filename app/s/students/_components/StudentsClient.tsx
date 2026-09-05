@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
-import { Seg, Sheet, useToast, CampusSwitch, useCampusSwitch } from "@/components/chrome";
+import { Seg, Sheet, TopBar, useToast, CampusSwitch, useCampusSwitch } from "@/components/chrome";
 import { fmt, initials } from "@/lib/format";
 import { bulkRegisterStudents, broadcastNotice } from "@/lib/actions/students";
 
@@ -78,7 +78,17 @@ export default function StudentsClient({ students, colleges, staffRole }: { stud
   };
 
   return (
-    <div className="pad">
+    <>
+      {/* The subtitle used to be `${students.length} total`, computed once on
+          the server from the FULL list — it never changed when a campus tab
+          was tapped, so an Owner switching to a campus with (say) zero
+          students still saw "234 total" above a visibly empty list. Rendered
+          here instead so it tracks the actually-filtered count. Kept OUTSIDE
+          .pad, same as every other TopBar — it manages its own edge-to-edge
+          sticky padding and would double up if nested inside one. */}
+      <TopBar title="Students" sub={`${filtered.length} total`} back="/s" />
+
+      <div className="pad">
       {/* Campus switch — same shared control as Home, same persisted choice,
           so a manager working BVRIT doesn't see St Mary's names mixed in. */}
       <CampusSwitch colleges={colleges} value={campus} onChange={setCampus} />
@@ -198,6 +208,7 @@ export default function StudentsClient({ students, colleges, staffRole }: { stud
           </button>
         </div>
       </Sheet>
-    </div>
+      </div>
+    </>
   );
 }

@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { TopBar } from "@/components/chrome";
 import StudentsClient from "./_components/StudentsClient";
 
 export default async function StaffStudentsPage() {
@@ -46,7 +45,6 @@ export default async function StaffStudentsPage() {
 
   return (
     <div className="screen">
-      <TopBar title="Students" sub={`${students.length} total`} back="/s" />
       <StudentsClient students={students} colleges={colleges} staffRole={staff.role} />
     </div>
   );

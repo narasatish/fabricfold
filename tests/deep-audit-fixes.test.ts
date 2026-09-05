@@ -32,8 +32,11 @@ describe("campus-boundary bypasses closed in API routes", () => {
     expect(src).toMatch(/db\.staff\.findMany\(me\.collegeId \? \{ where: \{ collegeId: me\.collegeId \} \} : undefined\)/);
   });
   it("the Reports screen itself scopes computeReport too — not just its export", () => {
+    // Renamed staff.collegeId -> selectedCollegeId when the Owner per-campus
+    // report switcher was added (an Owner can now pick a campus; a scoped
+    // staffer's own collegeId still wins either way).
     const src = read("app/s/reports/page.tsx");
-    expect(src).toMatch(/computeReport\(period, staff\.collegeId\)/);
+    expect(src).toMatch(/computeReport\(period, selectedCollegeId\)/);
   });
   it("computeReport actually filters every underlying query when a collegeId is given", () => {
     const src = read("lib/report.ts");
@@ -193,6 +196,32 @@ describe("a staff role change forces re-login, same as deactivation does", () =>
   });
 });
 
+describe("Owner can narrow the Admin page to one campus at a time, not just see both stacked", () => {
+  it("AdminClient derives visible* lists from a campus switch instead of rendering the raw props directly", () => {
+    const src = read("app/s/admin/_components/AdminClient.tsx");
+    expect(src).toMatch(/const \[campus, setCampus\] = useCampusSwitch\(colleges\);/);
+    expect(src).toMatch(/const visibleColleges = campus === "all" \? colleges : colleges\.filter\(\(c\) => c\.id === campus\);/);
+    expect(src).toMatch(/const visibleStaff = campus === "all" \? staff : staff\.filter\(\(x\) => x\.collegeId === campus\);/);
+    expect(src).toMatch(/<CampusSwitch colleges=\{colleges\} value=\{campus\} onChange=\{setCampus\} \/>/);
+    // the three per-college sections (colleges&features, plans, slots) must all read the filtered list
+    expect((src.match(/\{visibleColleges\.map\(\(c\) => \(/g) || []).length).toBe(3);
+  });
+});
+
+describe("Owner can view Reports scoped to a single campus, not only company-wide", () => {
+  it("page.tsx threads a selected college through every analytics query, not just computeReport", () => {
+    const src = read("app/s/reports/page.tsx");
+    expect(src).toMatch(/const selectedCollegeId = staff\.collegeId \?\? \(sp\.c && ownerColleges\.some/);
+    expect(src).toMatch(/computeReport\(period, selectedCollegeId\)/);
+    expect((src.match(/selectedCollegeId \? \{ collegeId: selectedCollegeId \}/g) || []).length).toBeGreaterThanOrEqual(2);
+  });
+  it("ReportsControls renders a campus switch for an Owner and preserves it across period changes", () => {
+    const src = read("app/s/reports/_components/ReportsClient.tsx");
+    expect(src).toMatch(/colleges && colleges\.length > 1/);
+    expect(src).toMatch(/const navCollege = \(c: string\) => \{/);
+  });
+});
+
 describe("list-count subtitles track the client-filtered list, not the full server-fetched one", () => {
   it("StudentsClient's TopBar reads filtered.length, rendered outside .pad (not nested/double-padded)", () => {
     const src = read("app/s/students/_components/StudentsClient.tsx");
@@ -269,9 +298,12 @@ describe("campus-boundary sweep: server-component pages that build their own que
   });
 
   it("reports page's analytics widgets (below the already-scoped headline report) are scoped too", () => {
+    // Renamed from staff.collegeId to selectedCollegeId when the Owner
+    // per-campus report switcher was added — same scoping, now also
+    // respects an Owner's chosen campus, not just a scoped staffer's own.
     const src = read("app/s/reports/page.tsx");
-    expect(src).toMatch(/at: \{ gte: new Date\(now - 8 \* weekMs\) \}, \.\.\.\(staff\.collegeId \? \{ collegeId: staff\.collegeId \} : \{\}\)/);
-    expect(src).toMatch(/db\.subscription\.count\(\{ where: \{ active: true, \.\.\.\(staff\.collegeId \? \{ student: \{ collegeId: staff\.collegeId \} \} : \{\}\) \} \}\)/);
+    expect(src).toMatch(/at: \{ gte: new Date\(now - 8 \* weekMs\) \}, \.\.\.\(selectedCollegeId \? \{ collegeId: selectedCollegeId \} : \{\}\)/);
+    expect(src).toMatch(/db\.subscription\.count\(\{ where: \{ active: true, \.\.\.\(selectedCollegeId \? \{ student: \{ collegeId: selectedCollegeId \} \} : \{\}\) \} \}\)/);
   });
 });
 

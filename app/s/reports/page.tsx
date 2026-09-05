@@ -20,11 +20,19 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
   const staff = await db.staff.findUnique({ where: { id: s.staffId } });
   if (!staff) redirect("/login");
 
+  /* A campus-scoped staffer's own campus always wins (computeReport already
+     enforces this). An Owner (collegeId null) previously had NO way to view
+     just one campus's report — company-wide was the only option, with the
+     "properly scoped" comment below only ever applying to non-Owner staff.
+     `?c=<collegeId>` lets an Owner pick one; "all"/absent stays company-wide. */
+  const ownerColleges = staff.collegeId ? [] : await db.college.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } });
+  const selectedCollegeId = staff.collegeId ?? (sp.c && ownerColleges.some((c) => c.id === sp.c) ? sp.c : null);
+
   const period = parsePeriod(sp);
-  const r = await computeReport(period, staff.collegeId);
+  const r = await computeReport(period, selectedCollegeId);
   const istDate = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
   const dayClose = await db.dayClose.findUnique({ where: { date: istDate } });
-  const staffList = await db.staff.findMany(staff.collegeId ? { where: { collegeId: staff.collegeId } } : undefined);
+  const staffList = await db.staff.findMany(selectedCollegeId ? { where: { collegeId: selectedCollegeId } } : undefined);
   const byId = (id: string) => staffList.find((x) => x.id === id)?.name || id;
   const N = (x: unknown) => Number(x || 0);
 
@@ -37,7 +45,7 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
   const now = Date.now();
   const weekMs = 7 * 86_400_000;
   const allPayments = await db.payment.findMany({
-    where: { at: { gte: new Date(now - 8 * weekMs) }, ...(staff.collegeId ? { collegeId: staff.collegeId } : {}) },
+    where: { at: { gte: new Date(now - 8 * weekMs) }, ...(selectedCollegeId ? { collegeId: selectedCollegeId } : {}) },
   });
   const weeks = Array.from({ length: 8 }, (_, i) => {
     const from = now - (8 - i) * weekMs, to = now - (7 - i) * weekMs;
@@ -56,9 +64,9 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
      Prisma aggregates rather than raw SQL on purpose: the money suite still
      has a SQLite fallback, and `count(*) FILTER (...)` is Postgres-only. */
   const [perStudent, payAgg, activeSubs] = await Promise.all([
-    db.order.groupBy({ by: ["studentId"], _count: { _all: true }, where: staff.collegeId ? { collegeId: staff.collegeId } : undefined }),
-    db.order.aggregate({ _sum: { total: true }, where: { usedCycle: false, paid: true, ...(staff.collegeId ? { collegeId: staff.collegeId } : {}) } }),
-    db.subscription.count({ where: { active: true, ...(staff.collegeId ? { student: { collegeId: staff.collegeId } } : {}) } }),
+    db.order.groupBy({ by: ["studentId"], _count: { _all: true }, where: selectedCollegeId ? { collegeId: selectedCollegeId } : undefined }),
+    db.order.aggregate({ _sum: { total: true }, where: { usedCycle: false, paid: true, ...(selectedCollegeId ? { collegeId: selectedCollegeId } : {}) } }),
+    db.subscription.count({ where: { active: true, ...(selectedCollegeId ? { student: { collegeId: selectedCollegeId } } : {}) } }),
   ]);
   const repeatRate = perStudent.length
     ? Math.round((perStudent.filter((g) => g._count._all >= 2).length / perStudent.length) * 100)
@@ -84,7 +92,7 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
           re-ran this page's queries about three times per 20 seconds instead
           of two, and this is the page whose queries are the heaviest. */}
       <div className="pad">
-        <ReportsControls period={period.kind} d={sp.d} m={sp.m} y={sp.y} />
+        <ReportsControls period={period.kind} d={sp.d} m={sp.m} y={sp.y} colleges={ownerColleges} collegeId={selectedCollegeId ?? "all"} />
 
         {/* Collections hero — fixed dark surface in BOTH themes */}
         <div className="card pad mt16" style={{ background: "#10201b", color: "#fff", border: "none" }}>

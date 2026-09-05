@@ -8,19 +8,43 @@ import { submitExpense } from "@/lib/actions/admin";
 import { closeDay } from "@/lib/actions/ops";
 import { fmt } from "@/lib/format";
 
-export default function ReportsControls({ period, d, m, y }: { period: "day" | "week" | "month" | "year" | "all"; d?: string; m?: string; y?: string }) {
+export default function ReportsControls({
+  period, d, m, y, colleges, collegeId,
+}: {
+  period: "day" | "week" | "month" | "year" | "all"; d?: string; m?: string; y?: string;
+  /** Only non-empty for an Owner (collegeId null) — a campus-scoped staffer
+      never gets a choice, computeReport already forces their own campus. */
+  colleges?: { id: string; name: string }[];
+  collegeId?: string; // "all" or a real college id
+}) {
   const router = useRouter();
   const today = new Date().toISOString().slice(0, 10);
   const thisMonth = new Date().toISOString().slice(0, 7);
   const thisYear = String(new Date().getFullYear());
+  const cParam: Record<string, string> = collegeId && collegeId !== "all" ? { c: collegeId } : {};
 
   const nav = (p: string, extra?: Record<string, string>) => {
-    const params = new URLSearchParams({ p, ...(extra || {}) });
+    const params = new URLSearchParams({ p, ...cParam, ...(extra || {}) });
+    router.push(`/s/reports?${params.toString()}`);
+  };
+  const navCollege = (c: string) => {
+    const params = new URLSearchParams({
+      p: period, ...(d ? { d } : {}), ...(m ? { m } : {}), ...(y ? { y } : {}),
+      ...(c !== "all" ? { c } : {}),
+    });
     router.push(`/s/reports?${params.toString()}`);
   };
 
   return (
     <>
+      {colleges && colleges.length > 1 && (
+        <div className="seg" style={{ marginBottom: 10 }}>
+          <button className={!collegeId || collegeId === "all" ? "active" : ""} onClick={() => navCollege("all")}>All</button>
+          {colleges.map((c) => (
+            <button key={c.id} className={collegeId === c.id ? "active" : ""} onClick={() => navCollege(c.id)}>{c.name}</button>
+          ))}
+        </div>
+      )}
       <Seg<"day" | "week" | "month" | "year" | "all">
         options={[["day", "Day"], ["week", "Week"], ["month", "Month"], ["year", "Year"], ["all", "All"]]}
         value={period}

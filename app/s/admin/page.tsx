@@ -75,7 +75,7 @@ export default async function StaffAdminPage() {
           };
         })}
         month={month}
-        payslips={payslips.map((p) => ({ id: p.id, number: p.number, month: p.month, net: N(p.net), staffName: p.staff.name }))}
+        payslips={payslips.map((p) => ({ id: p.id, number: p.number, month: p.month, net: N(p.net), staffName: p.staff.name, collegeId: p.staff.collegeId }))}
         errors={recentErrors.map((e) => ({ id: e.id, kind: e.kind, message: e.message, url: e.url, seen: e.seen, at: e.at.getTime() }))}
         slotWindows={slotWindows.map((w) => ({ id: w.id, collegeId: w.collegeId, weekday: w.weekday, startMin: w.startMin, endMin: w.endMin, capacity: w.capacity, active: w.active }))}
         currentRole={staff.role}

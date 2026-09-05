@@ -6,7 +6,7 @@ import { featureOn, type FeatureKey } from "@/lib/features";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { fmt } from "@/lib/format";
-import { useToast, Sheet, Switch, Seg } from "@/components/chrome";
+import { useToast, Sheet, Switch, Seg, CampusSwitch, useCampusSwitch } from "@/components/chrome";
 import {
   saveRates, savePlan, togglePlan, savePaymentConfig, saveSettings,
   toggleFeature, saveCollege, deleteCollege, setCollegeActive, saveStaff, setStaffActive, createPayslip,
@@ -33,7 +33,7 @@ type Props = {
   };
   colleges: { id: string; name: string; address: string; closedWeekday: number | null; active: boolean; features: Record<string, boolean> }[];
   staff: { id: string; name: string; phone: string; role: number; collegeId: string | null; active: boolean; perms: Record<string, boolean> }[];
-  payslips: { id: string; number: string; month: string; net: number; staffName: string }[];
+  payslips: { id: string; number: string; month: string; net: number; staffName: string; collegeId: string | null }[];
   plans: PlanRow[];
   attendance: { staffId: string; name: string; todayIn: number | null; todayOut: number | null; daysThisMonth: number }[];
   month: string;
@@ -61,6 +61,19 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   const [syncingSheet, setSyncingSheet] = useState(false);
   const router = useRouter();
   const toast = useToast();
+
+  /* Owner sees every campus by design (unlike a campus-scoped Admin, who
+     never gets this data at all — see lib/actions/admin.ts and the page's
+     own queries). But "sees everything" doesn't have to mean "everything is
+     always on screen at once": this switch lets an Owner narrow the WHOLE
+     page — colleges, plans, slots, staff, attendance, payroll — to one
+     campus at a time, the same control already used on Home and Students. */
+  const [campus, setCampus] = useCampusSwitch(colleges);
+  const visibleColleges = campus === "all" ? colleges : colleges.filter((c) => c.id === campus);
+  const visibleStaff = campus === "all" ? staff : staff.filter((x) => x.collegeId === campus);
+  const visibleStaffIds = new Set(visibleStaff.map((x) => x.id));
+  const visibleAttendance = campus === "all" ? attendance : attendance.filter((a) => visibleStaffIds.has(a.staffId));
+  const visiblePayslips = campus === "all" ? payslips : payslips.filter((p) => p.collegeId === campus);
 
   const [sheet, setSheet] = useState<null | "rates" | "plan" | "payment" | "settings" | "college" | "staff" | "payslip" | "slot">(null);
   const [rates, setRates] = useState<Rates>(JSON.parse(JSON.stringify(config.rates)));
@@ -117,6 +130,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
 
   return (
     <div className="pad">
+      <CampusSwitch colleges={colleges} value={campus} onChange={setCampus} />
       {currentRole >= 4 && <TestOtpPanel />}
       {currentRole >= 4 && errors.length > 0 && (
         <>
@@ -183,7 +197,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
 
       {/* Colleges + feature flags */}
       <div className="sec-title mt20">Colleges &amp; features</div>
-      {colleges.map((c) => (
+      {visibleColleges.map((c) => (
         /* Removed campuses stay listed, dimmed. Hiding them is what made
            removal irreversible: the only screen that can restore one was also
            the screen that stopped showing it. */
@@ -245,7 +259,7 @@ Students already registered there keep their records and can be restored with th
 
       {/* Subscription plans per college */}
       <div className="sec-title mt20">Subscription plans</div>
-      {colleges.map((c) => (
+      {visibleColleges.map((c) => (
         <div key={c.id} className="card pad mt10">
           <div className="between">
             <div className="h-sm">{c.name}</div>
@@ -274,7 +288,7 @@ Students already registered there keep their records and can be restored with th
 
       {/* Drop-off slot windows per college */}
       <div className="sec-title mt20">Drop-off slots</div>
-      {colleges.map((c) => (
+      {visibleColleges.map((c) => (
         <div key={c.id} className="card pad mt10">
           <div className="between">
             <div className="h-sm">{c.name}</div>
@@ -360,7 +374,7 @@ Students already registered there keep their records and can be restored with th
       {/* Staff */}
       <div className="sec-title mt20">Staff roles</div>
       <div className="list">
-        {staff.map((x) => (
+        {visibleStaff.map((x) => (
           /* Removed staff stay listed, dimmed. Hiding them would make it look
              as though the account never existed, when their name is still on
              past payslips and payments — and you need a way back if the wrong
@@ -383,7 +397,7 @@ Students already registered there keep their records and can be restored with th
       {/* Attendance */}
       <div className="sec-title mt20">Attendance · {month}</div>
       <div className="list">
-        {attendance.map((a) => (
+        {visibleAttendance.map((a) => (
           <div key={a.staffId} className="list-item">
             <div className="grow">
               <div className="h-sm">{a.name}</div>
@@ -401,9 +415,9 @@ Students already registered there keep their records and can be restored with th
       <button className="btn ghost" onClick={() => setSheet("payslip")}>
         <Svg name="users" size={17} /> Create payslip
       </button>
-      {payslips.length > 0 && (
+      {visiblePayslips.length > 0 && (
         <div className="list mt12">
-          {payslips.map((p) => (
+          {visiblePayslips.map((p) => (
             <div key={p.id} className="list-item">
               <div className="grow">
                 <div className="h-sm mono">{p.number}</div>
@@ -613,7 +627,7 @@ Students already registered there keep their records and can be restored with th
         <div className="field">
           <label>Staff member</label>
           <select className="input" value={slip.staffId} onChange={(e) => setSlip({ ...slip, staffId: e.target.value })}>
-            {staff.map((x) => <option key={x.id} value={x.id}>{x.name} · {ROLE_NAMES[x.role]}</option>)}
+            {visibleStaff.map((x) => <option key={x.id} value={x.id}>{x.name} · {ROLE_NAMES[x.role]}</option>)}
           </select>
         </div>
         <div className="field"><label>Month</label><input className="input" type="month" value={slip.month} onChange={(e) => setSlip({ ...slip, month: e.target.value })} /></div>

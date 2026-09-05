@@ -89,7 +89,12 @@ export default async function StaffHomePage() {
      on the client rather than a server round-trip per tap. Cheap because the
      college count is small (a handful, not hundreds): grouping in memory
      beats N+1 queries, one per campus. */
-  const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+  /* setHours(0,0,0,0) zeroes out the SERVER's local day, which is UTC on
+     Render — near midnight IST that's the previous IST day, so "today's
+     takings" would silently span the wrong 24 hours while `istDate` above
+     (used for attendance on this same page) correctly says otherwise.
+     `istDate` is already the IST calendar day; anchor the boundary to it. */
+  const startOfDay = new Date(`${istDate}T00:00:00+05:30`);
   const [todayPays, activeSubsRows, newStudentsByCollege] = await Promise.all([
     db.payment.findMany({ where: { at: { gte: startOfDay }, amount: { gt: 0 }, method: { in: ["cash", "upi", "credit"] }, ...scope }, select: { amount: true, collegeId: true } }),
     db.subscription.findMany({ where: { active: true, ...(staff.collegeId ? { student: { collegeId: staff.collegeId } } : {}) }, select: { student: { select: { collegeId: true } } } }),

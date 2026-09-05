@@ -4,29 +4,42 @@ import { db } from "./db";
 
 export type Period = { kind: "day" | "week" | "month" | "year" | "all"; from: Date | null; to: Date | null; label: string };
 
+/* This whole file used to build "today"/date boundaries from bare
+   `new Date()` / `new Date(dateStr + "T00:00:00")` — both resolve in the
+   SERVER's local time, which is UTC on Render/Vercel, not IST. A day-close
+   run (or a manager opening Reports with no date picked) near midnight IST
+   would silently query the wrong 24h window — one that doesn't line up with
+   the IST-keyed Attendance/DayClose rows this same variance figure is meant
+   to reconcile against. An explicit "+05:30" offset makes the parse
+   unambiguous regardless of the server's own timezone. */
+const istDateStr = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+const istBoundary = (dateStr: string) => new Date(`${dateStr}T00:00:00+05:30`);
+
 export function parsePeriod(sp: { p?: string; d?: string; m?: string; y?: string }): Period {
   const kind = (sp.p as Period["kind"]) || "day";
   if (kind === "day") {
-    const d = sp.d ? new Date(sp.d + "T00:00:00") : new Date(new Date().toDateString());
-    return { kind, from: d, to: new Date(d.getTime() + 86_400_000), label: d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) };
+    const d = istBoundary(sp.d || istDateStr());
+    return { kind, from: d, to: new Date(d.getTime() + 86_400_000), label: d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" }) };
   }
   if (kind === "week") {
     // the week (Mon–Sun) containing the given date (?d=), defaulting to today
-    const ref = sp.d ? new Date(sp.d + "T00:00:00") : new Date(new Date().toDateString());
-    const dow = (ref.getDay() + 6) % 7; // 0 = Monday
+    const ref = istBoundary(sp.d || istDateStr());
+    const dow = (ref.getUTCDay() + 6) % 7; // 0 = Monday — getUTCDay is correct here since `ref` is already IST midnight expressed as a UTC instant
     const from = new Date(ref.getTime() - dow * 86_400_000);
     const to = new Date(from.getTime() + 7 * 86_400_000);
-    const f = (x: Date) => x.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+    const f = (x: Date) => x.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" });
     return { kind, from, to, label: `Week ${f(from)} – ${f(new Date(to.getTime() - 86_400_000))}` };
   }
   if (kind === "month") {
-    const [y, m] = (sp.m || new Date().toISOString().slice(0, 7)).split("-").map(Number);
-    const from = new Date(y, m - 1, 1);
-    return { kind, from, to: new Date(y, m, 1), label: from.toLocaleDateString("en-IN", { month: "long", year: "numeric" }) };
+    const [y, m] = (sp.m || istDateStr().slice(0, 7)).split("-").map(Number);
+    const from = istBoundary(`${y}-${String(m).padStart(2, "0")}-01`);
+    const nextY = m === 12 ? y + 1 : y, nextM = m === 12 ? 1 : m + 1;
+    const to = istBoundary(`${nextY}-${String(nextM).padStart(2, "0")}-01`);
+    return { kind, from, to, label: from.toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "Asia/Kolkata" }) };
   }
   if (kind === "year") {
-    const y = Number(sp.y || new Date().getFullYear());
-    return { kind, from: new Date(y, 0, 1), to: new Date(y + 1, 0, 1), label: String(y) };
+    const y = Number(sp.y || istDateStr().slice(0, 4));
+    return { kind, from: istBoundary(`${y}-01-01`), to: istBoundary(`${y + 1}-01-01`), label: String(y) };
   }
   return { kind: "all", from: null, to: null, label: "All time" };
 }

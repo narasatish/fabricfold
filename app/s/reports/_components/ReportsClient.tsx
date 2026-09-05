@@ -18,9 +18,15 @@ export default function ReportsControls({
   collegeId?: string; // "all" or a real college id
 }) {
   const router = useRouter();
-  const today = new Date().toISOString().slice(0, 10);
-  const thisMonth = new Date().toISOString().slice(0, 7);
-  const thisYear = String(new Date().getFullYear());
+  /* toISOString() is UTC and getFullYear() is the DEVICE's timezone — near
+     midnight IST either can pre-fill the picker with the wrong calendar day,
+     which then goes straight to the server as ?d=/?m=/?y= and is taken at
+     face value. Compute the IST day explicitly instead, same shift the
+     server uses. */
+  const istNow = new Date(Date.now() + 5.5 * 3600_000);
+  const today = istNow.toISOString().slice(0, 10);
+  const thisMonth = istNow.toISOString().slice(0, 7);
+  const thisYear = today.slice(0, 4);
   const cParam: Record<string, string> = collegeId && collegeId !== "all" ? { c: collegeId } : {};
 
   const nav = (p: string, extra?: Record<string, string>) => {

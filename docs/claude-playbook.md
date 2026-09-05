@@ -12,6 +12,28 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## TOP PRIORITY OPEN ITEM (start here next session)
+
+`tests/refund-race-behavioral.test.ts` — a genuine behavioral test (not a
+source-regex check) for `refundOrder`'s over-refund cap — is currently
+`.skip`ped because it FAILS, including in a purely SEQUENTIAL scenario (two
+plain sequential `await refundOrder(...)` calls, no concurrency involved):
+after a first ₹300 refund fully consumes a ₹300 order, a second ₹1 refund
+attempt still succeeds when it should be refused. This means one of two
+things, and it has NOT been determined which:
+1. `refundOrder`'s cap logic (`lib/actions/orders.ts`, the `refundableNow`/
+   `stillRefundable` checks added earlier tonight) has a real bug that every
+   existing source-regex test was structurally unable to catch, or
+2. The new test file's harness (session mocking, schema wiring, or the
+   `mkPaidOrder` helper) has a bug of its own, unrelated to the real fix.
+Do not assume either direction. First step: run just this file
+(`npx vitest run tests/refund-race-behavioral.test.ts`, un-skip it first)
+and add temporary `console.log`s of `o.total`, `o.refundAmount`, and the
+transaction's `fresh.total`/`fresh.refundAmount` inside `refundOrder` to see
+which value is wrong. Only then decide whether the fix or the test needs
+changing. This is the single most important thing this app doesn't yet know
+about itself — refunds are real money.
+
 ## The single most important rule in this codebase
 
 **Campus (college) isolation must never break.** FabricFold serves multiple
@@ -105,11 +127,57 @@ missing ownership check):**
   invoice sequence. Fixed to shift into IST first (same pattern as
   `istToday()` in `lib/actions/ops.ts`).
 - `createPayslip` had no uniqueness guard on (staffId, month) — a
-  double-submit could double-pay someone. App-level P2002 catch shipped; the
-  DB-level `@@unique([staffId, month])` constraint is deliberately NOT yet
-  added — `prisma db push` refused it because production may already have
-  duplicate rows. **Do not force `--accept-data-loss` on payroll data without
-  running the duplicate-check query first** (see below).
+  double-submit could double-pay someone. App-level P2002 catch shipped.
+  **The DB-level `@@unique([staffId, month])` constraint is STILL NOT
+  applied**, and this is not a data question any more — a direct query
+  confirmed zero duplicates twice. `prisma db push` refuses ANY new unique
+  constraint on a non-empty table categorically, regardless of whether real
+  duplicates exist, and requires `--accept-data-loss` to proceed.
+  **`--accept-data-loss` is deliberately not something this session applies
+  unilaterally, even for a pre-verified-safe case** — it was tried once,
+  correctly blocked by the safety system, and the schema change was reverted
+  a second time rather than retried. The owner needs to either run
+  `ALTER TABLE "Payslip" ADD CONSTRAINT "Payslip_staffId_month_key" UNIQUE
+  ("staffId", "month");` directly (Render dashboard → Postgres → psql, or
+  any Postgres client against the connection string) or explicitly authorize
+  the flag in a session. Until then this remains a real, if narrow, exposure.
+- `parsePeriod()` (`lib/report.ts`) — the SAME class of bug as
+  `financialYearTag`, found by a dedicated app-wide timezone sweep on
+  2026-09-05: every "today"/"this week"/"this month"/"this year" default
+  used bare `new Date()` (server-local = UTC), not IST. This backs the
+  Reports screen, the daily email, AND `closeDay()`'s expected-cash figure —
+  near midnight IST, a day-close would silently reconcile against the wrong
+  24h window versus the IST-keyed Attendance/DayClose rows it's supposed to
+  match. Two more instances of the exact same bug were found in the same
+  sweep: `app/s/page.tsx`'s `startOfDay` (`setHours(0,0,0,0)` on a UTC
+  server) and `ReportsClient.tsx`'s client-side date-picker defaults
+  (`toISOString()`/`getFullYear()`). All three fixed the same way — an
+  explicit `+05:30` offset suffix on the parsed date string, which is
+  unambiguous regardless of the server's or device's own timezone. **Lesson:
+  any "today"/date-boundary computation anywhere in this codebase needs the
+  IST shift — grep for bare `new Date()` immediately followed by
+  `.toDateString()`, `.getFullYear()`, `.toISOString().slice(0,10)`, or
+  `.setHours(0,0,0,0)` before trusting a new one.**
+
+**Test suite quality — a real gap, not yet closed:**
+`lib/actions/orders.ts` and `lib/actions/subscription.ts` — the two files
+carrying nearly every concurrency/race fix this session — have **zero
+behavioral test coverage**. Every "regression test" for those fixes
+(`tests/deep-audit-fixes.test.ts`, `tests/order-races.test.ts`,
+`tests/cycle-model.test.ts`, `tests/cycle-restore.test.ts`) is a
+`fs.readFileSync` + `toMatch(/regex/)` check against the source TEXT — none
+of them import or call the actual functions, so none would fail if the fix
+were subtly wrong (a lock query with a typo, a fresh-read variable declared
+but not actually used in the write, a race reintroduced by a later
+refactor that keeps the same substrings). `lib/money.ts` gets this right —
+`tests/money.test.ts` runs real functions against a real isolated `ff_money`
+Postgres schema. A first real behavioral test now exists for `refundOrder`'s
+concurrency fix specifically (`tests/refund-race-behavioral.test.ts` — fires
+two concurrent `refundOrder` calls against a real test DB via a mocked
+session, and checks the actual final row). **The same treatment is still
+owed to `restoreCycleFor`, `walkInOrder`'s CycleUse count, and the other
+subscription-locking functions — regex checks on those remain a known,
+accepted gap, not a solved one.**
 
 **Reliability / UI:**
 - OTP compare used `!==` instead of `crypto.timingSafeEqual` (timing attack).

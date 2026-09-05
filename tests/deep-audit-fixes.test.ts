@@ -196,6 +196,27 @@ describe("a staff role change forces re-login, same as deactivation does", () =>
   });
 });
 
+describe("date boundaries are IST, not the server's UTC — the same class as the fixed financialYearTag bug", () => {
+  it("parsePeriod anchors every period to IST midnight via an explicit +05:30 offset", () => {
+    const src = read("lib/report.ts");
+    expect(src).toMatch(/const istDateStr = \(\) => new Date\(Date\.now\(\) \+ 5\.5 \* 3600_000\)\.toISOString\(\)\.slice\(0, 10\)/);
+    expect(src).toMatch(/const istBoundary = \(dateStr: string\) => new Date\(`\$\{dateStr\}T00:00:00\+05:30`\)/);
+    // no bare local-time "today" left anywhere in the period logic
+    expect(src).not.toMatch(/new Date\(new Date\(\)\.toDateString\(\)\)/);
+    expect(src).not.toMatch(/new Date\(\)\.getFullYear\(\)/);
+  });
+  it("the staff home's today-takings boundary is the IST day, not setHours(0,0,0,0) on a UTC server", () => {
+    const src = read("app/s/page.tsx");
+    expect(src).toMatch(/const startOfDay = new Date\(`\$\{istDate\}T00:00:00\+05:30`\)/);
+    expect(src).not.toMatch(/setHours\(0, 0, 0, 0\)/);
+  });
+  it("ReportsClient's date-picker defaults are computed in IST, not the device's timezone", () => {
+    const src = read("app/s/reports/_components/ReportsClient.tsx");
+    expect(src).toMatch(/const istNow = new Date\(Date\.now\(\) \+ 5\.5 \* 3600_000\)/);
+    expect(src).not.toMatch(/String\(new Date\(\)\.getFullYear\(\)\)/);
+  });
+});
+
 describe("three more concurrency/state bugs found by a deep hand-traced re-audit of the core money/cycle logic", () => {
   const orders = read("lib/actions/orders.ts");
   const subs = read("lib/actions/subscription.ts");

@@ -71,17 +71,7 @@ function mkPaidOrder(id: string, total: number) {
   });
 }
 
-// TODO (next session): this new behavioral test is FAILING, including in
-// the purely SEQUENTIAL second case (not just the concurrent one) — meaning
-// either refundOrder's cap logic has a real bug this test correctly caught
-// (the source-regex tests could never have caught it), or this test harness
-// itself has a bug (e.g. a session/schema wiring issue specific to this new
-// file). Do NOT assume either direction — investigate by adding console.log
-// of the actual `o.total`/`o.refundAmount`/`fresh.*` values inside
-// refundOrder during a single run of this file before touching the fix.
-// Left as .skip so it doesn't block CI/deploy while unresolved; this is a
-// real open item, not a discarded one — see docs/claude-playbook.md.
-describe.skip("refundOrder can't be over-refunded by two concurrent calls (real, not source-regex)", () => {
+describe("refundOrder can't be over-refunded by two concurrent calls (real, not source-regex)", () => {
   it("caps total refunds at the order's total even when two refunds race", async () => {
     await mkPaidOrder("RRACE01", 500);
 

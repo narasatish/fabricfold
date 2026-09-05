@@ -674,7 +674,12 @@ export async function refundOrder(orderId: string, amount: number, via: "upi" | 
       });
       if (via === "credit") await tx.student.update({ where: { id: o.studentId }, data: { credits: { increment: amount } } });
       if (o.invoice) await createCreditNote(tx, o.invoice, amount, reason, st.id, via);
-      await tx.order.update({ where: { id: o.id }, data: { refunded: true, refundAmount: { increment: amount } } });
+      // refundAmount is a nullable Decimal column with no DB default — Postgres
+      // computes NULL + amount as NULL, so `{ increment: amount }` silently
+      // no-ops on a fresh order's first refund and the cap never re-engages
+      // on a later call. Compute the new total explicitly off the fresh read.
+      const newRefundAmount = Number(fresh.refundAmount || 0) + amount;
+      await tx.order.update({ where: { id: o.id }, data: { refunded: true, refundAmount: newRefundAmount } });
       if (restoreCycle) await restoreCycleFor(tx, o, o.student.subscription);
     });
   } catch (e) {

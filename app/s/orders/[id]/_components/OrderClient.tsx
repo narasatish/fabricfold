@@ -401,6 +401,14 @@ export default function StaffOrderClient({
   // Handler: cancel
   const handleCancel = async () => {
     if (!confirm("Cancel this order? This cannot be undone.")) return;
+    // Every other mutating action in this file (collect/pay/refund/comp) guards
+    // against a double-tap with actionBusy; this one never got the same
+    // treatment — the server-side race is already closed (cancelOrder's own
+    // atomic status transition), but a second tap before the first request
+    // resolves would still fire a redundant call and surface a confusing
+    // "already cancelled" error instead of just being disabled like its siblings.
+    if (actionBusy) return;
+    setActionBusy(true);
     try {
       const r = await cancelOrder(order.id);
       if (!r.ok) {
@@ -411,6 +419,8 @@ export default function StaffOrderClient({
       router.push("/s");
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setActionBusy(false);
     }
   };
 
@@ -680,7 +690,7 @@ export default function StaffOrderClient({
           </button>
         )}
         {!["collected", "cancelled"].includes(order.status) && (
-          <button className="btn xs sec danger" onClick={handleCancel}>
+          <button className="btn xs sec danger" onClick={handleCancel} disabled={actionBusy}>
             <Svg name="x" size={15} /> Cancel
           </button>
         )}

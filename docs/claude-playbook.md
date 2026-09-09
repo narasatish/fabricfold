@@ -155,6 +155,31 @@ rest of the codebase; the test documents the intended behavior rather than
 proving the old code was exploitable under the exact conditions tried here.
 Full suite: 793/793.
 
+## Reviewed 2026-09-05, client-side pass: PayClient/payments.ts clean, OrderClient's Cancel button fixed
+
+Moved to auditing client-side UI after the server-side surface area was
+exhausted. `app/c/pay/[id]/_components/PayClient.tsx` and
+`lib/actions/payments.ts` (the Razorpay gateway path) were both already
+correctly hardened — busy-guards on every button, timing-safe signature
+verification, ownership re-checked server-side, and settlement goes through
+the already-proven-safe `payCore` (P2002 unique-index backstop). No changes
+needed there.
+
+`app/s/orders/[id]/_components/OrderClient.tsx`'s Cancel button was the one
+real find: every other mutating action in the file (collect/pay/refund/
+compensation) disables itself via a shared `actionBusy` state while its
+request is in flight — Cancel never got the same treatment, despite being
+the newest addition to that pattern. Low severity in practice: the
+server-side race was already closed earlier today (`cancelOrder`'s atomic
+status transition), so a double-tap here would surface a confusing
+"already cancelled" toast rather than actually corrupting anything — but
+it's the same "fix applied to siblings, not to this one" pattern found
+repeatedly this session, worth closing for consistency and defense in
+depth. Fixed by giving `handleCancel` the same guard/try/finally shape as
+every sibling handler. Verified via the existing regex test group ("money-
+moving buttons can't be double-tapped"), extended to check `handleCancel`
+too. Full suite: 810/810.
+
 ## RESOLVED 2026-09-05: the receipt viewer had a silent authorization bypass for orphaned keys
 
 Auditing the upload/view pipeline (`/api/upload/receipt`, `/api/receipt`,

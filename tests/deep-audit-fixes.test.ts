@@ -141,12 +141,18 @@ describe("topUpCredits respects the campus boundary like every other staff actio
 });
 
 describe("money-moving buttons can't be double-tapped, and refund/compensation confirm first", () => {
-  it("OrderClient: collect/pay/refund/compensation all share one busy guard", () => {
+  it("OrderClient: collect/pay/refund/compensation/cancel all share one busy guard", () => {
+    // cancel was the odd one out until 2026-09-05 — every other mutating
+    // action here already guarded against a double-tap with actionBusy, but
+    // handleCancel had no busy tracking and its button had no `disabled` at
+    // all. The server-side race was already closed (cancelOrder's own atomic
+    // status transition), so this was a UX consistency gap, not a money bug.
     const src = read("app/s/orders/[id]/_components/OrderClient.tsx");
     expect(src).toMatch(/const \[actionBusy, setActionBusy\] = useState\(false\)/);
-    expect((src.match(/setActionBusy\(true\)/g) || []).length).toBeGreaterThanOrEqual(5);
+    expect((src.match(/setActionBusy\(true\)/g) || []).length).toBeGreaterThanOrEqual(6);
     expect(src).toMatch(/onClick=\{handleRefund\} disabled=\{actionBusy\}/);
     expect(src).toMatch(/onClick=\{handleCompensation\} disabled=\{actionBusy\}/);
+    expect(src).toMatch(/onClick=\{handleCancel\} disabled=\{actionBusy\}/);
   });
   it("OrderClient: refund and compensation confirm before firing", () => {
     const src = read("app/s/orders/[id]/_components/OrderClient.tsx");

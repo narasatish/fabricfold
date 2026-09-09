@@ -16,13 +16,20 @@ export async function GET(req: Request) {
   const key = new URL(req.url).searchParams.get("key") || "";
   if (!key) return new Response("no key", { status: 400 });
 
+  /* Found 2026-09-05: `if (expense)` skipped the campus check entirely when
+     no Expense row referenced this key — an orphaned upload (the upload
+     step succeeded but the Expense record was never created or was later
+     deleted), or simply a typo'd/guessed key. Since this file's own comment
+     already says receipt keys are "not secret," a key with no matching
+     Expense was servable to ANY staff member at ANY campus with no check at
+     all — exactly the IDOR this route exists to close. Fail closed instead:
+     no matching Expense row means no basis to authorize the view. */
   const expense = await db.expense.findFirst({ where: { receiptKey: key }, select: { collegeId: true } });
-  if (expense) {
-    try {
-      assertSameCollege(staff, expense.collegeId);
-    } catch {
-      return new Response("unauthorized", { status: 401 });
-    }
+  if (!expense) return new Response("not found", { status: 404 });
+  try {
+    assertSameCollege(staff, expense.collegeId);
+  } catch {
+    return new Response("unauthorized", { status: 401 });
   }
 
   if (key.startsWith("local/")) {

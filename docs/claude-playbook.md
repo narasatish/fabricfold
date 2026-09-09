@@ -155,6 +155,37 @@ rest of the codebase; the test documents the intended behavior rather than
 proving the old code was exploitable under the exact conditions tried here.
 Full suite: 793/793.
 
+## RESOLVED 2026-09-05: the receipt viewer had a silent authorization bypass for orphaned keys
+
+Auditing the upload/view pipeline (`/api/upload/receipt`, `/api/receipt`,
+`/api/upload/intake`, `/api/upload/complaint`, `/api/complaint-photo`) for
+IDOR found one real gap: `app/api/receipt/route.ts` checked campus
+ownership as `const expense = await db.expense.findFirst(...); if
+(expense) { assertSameCollege(...) }` — when NO Expense row referenced the
+given key (an orphaned upload: the upload step succeeded but the Expense
+record was never created, was later deleted, or the key was simply
+guessed/typo'd), the `if (expense)` guard was skipped ENTIRELY and the
+route proceeded straight to serving/signing the file for ANY authenticated
+staff member at ANY campus — no check at all. This file's own header
+comment already states receipt keys are "not secret," which is precisely
+why the campus check exists; it just had a hole exactly where an orphaned
+key fell through.
+
+Fixed to fail closed: no matching Expense row now returns 404 immediately,
+never falling through to the storage-signing step. Verified with a new
+behavioral test (`tests/receipt-orphan-key-behavioral.test.ts`) that calls
+the real route handler directly — confirms a legitimate cross-campus key is
+still refused (401, unchanged) and an orphaned key is refused (404, new).
+Confirmed genuine by reverting: the orphaned-key request sailed straight
+past authorization and made a real signed-URL call to Supabase (502 from
+the nonexistent object), proving the bypass was real, not theoretical.
+
+The sibling routes (`/api/complaint-photo`, `/api/upload/*`) were checked
+against the same failure mode and don't share it: `/api/complaint-photo`
+checks ownership by querying whether the key appears on any of the
+requester's own complaint threads (empty result = deny, fails closed by
+construction, no "if found" branch to skip). Full suite: 810/810.
+
 ## RESOLVED 2026-09-05: loginWithPasscode had no IP-based rate limit at all
 
 Follow-up to the passcode lockout fix earlier the same day: that fix closed

@@ -198,13 +198,21 @@ async function runSheetsSyncUnsafe() {
      rather than buried in the app. Student NAMES are included here because
      this sheet is the owner's own operational record; no phone numbers or
      addresses, matching the no-PII-beyond-necessity rule elsewhere. */
-  const complaints = await db.complaint.findMany({
-    orderBy: { at: "desc" },
-    take: 200,
-    include: { student: { select: { name: true } } },
-  });
+  const [complaints, complaintColleges] = await Promise.all([
+    db.complaint.findMany({
+      orderBy: { at: "desc" },
+      take: 200,
+      include: { student: { select: { name: true } } },
+    }),
+    db.college.findMany({ select: { id: true, name: true } }),
+  ]);
+  const collegeNameById = new Map(complaintColleges.map((c) => [c.id, c.name]));
+  // College added here to match Students' "no mix-up between colleges — even
+  // the Sheet" rule (see writeStudentsTab) — this tab has no per-campus split
+  // the way Students does, so the column is what lets the Owner tell the two
+  // campuses apart while scanning one combined list.
   const compRows: (string | number)[][] = [[
-    "Raised", "Student", "Order", "Status", "Issue", "Free re-wash", "Compensation", "Resolved",
+    "Raised", "Student", "College", "Order", "Status", "Issue", "Free re-wash", "Compensation", "Resolved",
   ]];
   for (const c of complaints) {
     const payouts = await db.compensation.findMany({
@@ -215,6 +223,7 @@ async function runSheetsSyncUnsafe() {
     compRows.push([
       c.at.toISOString().slice(0, 10),
       c.student.name,
+      collegeNameById.get(c.collegeId) || "—",
       c.orderId ? "#" + c.orderId.slice(-4) : "—",
       c.status,
       c.text.slice(0, 120),

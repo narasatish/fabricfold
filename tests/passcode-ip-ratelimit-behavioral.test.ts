@@ -47,6 +47,10 @@ beforeAll(async () => {
     if (fs.existsSync(TEST_DB)) fs.rmSync(TEST_DB);
     execSync(`npx prisma db push --url "file:${TEST_DB}"`, { cwd: path.resolve(__dirname, ".."), stdio: "ignore" });
   }
+  // Clear the globalThis singleton cache so a fresh db client is created
+  // with the test schema, not the old one from a prior import
+  const g = globalThis as unknown as { __ffdb?: unknown };
+  delete g.__ffdb;
   db = (await import("../lib/db")).db;
   authActions = await import("../lib/actions/auth");
   password = await import("../lib/password");

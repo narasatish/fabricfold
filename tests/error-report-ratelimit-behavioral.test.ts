@@ -41,6 +41,10 @@ beforeAll(async () => {
     if (fs.existsSync(TEST_DB)) fs.rmSync(TEST_DB);
     execSync(`npx prisma db push --url "file:${TEST_DB}"`, { cwd: path.resolve(__dirname, ".."), stdio: "ignore" });
   }
+  // Clear the globalThis singleton cache so modules imported next will get
+  // a fresh db client with the test schema, not an old cached one
+  const g = globalThis as unknown as { __ffdb?: unknown };
+  delete g.__ffdb;
   const mod = await import("../app/api/error/route");
   POST = mod.POST;
 }, 300_000);

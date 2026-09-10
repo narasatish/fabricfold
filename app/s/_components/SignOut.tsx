@@ -17,9 +17,18 @@ export default function SignOut() {
   const signOut = async () => {
     if (!confirm("Sign out of the staff app?")) return;
     setLoading(true);
-    await logout();
-    toast("Signed out");
-    router.push("/login");
+    try {
+      await logout();
+      toast("Signed out");
+      router.push("/login");
+    } catch {
+      // The cookie may already be half-cleared server-side even if this
+      // throws — leaving the user stuck on a "logged in" screen that no
+      // longer has a valid session is worse than sending them to /login.
+      router.push("/login");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

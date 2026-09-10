@@ -69,9 +69,9 @@ export default function PayClient({
     setLoading(true);
     try {
       const r = await createGatewayOrder(orderId, applied > 0);
-      if (!r.ok) { setLoading(false); return toast(r.error || "Could not start payment", true); }
+      if (!r.ok) return toast(r.error || "Could not start payment", true);
       const ok = await loadRazorpay();
-      if (!ok || !window.Razorpay) { setLoading(false); return toast("Could not load the payment window", true); }
+      if (!ok || !window.Razorpay) return toast("Could not load the payment window", true);
       const rzp = new window.Razorpay({
         key: r.keyId,
         order_id: r.rzpOrderId,
@@ -104,8 +104,9 @@ export default function PayClient({
       });
       rzp.open();
     } catch (e) {
-      setLoading(false);
       toast(e instanceof Error ? e.message : "Could not start payment", true);
+    } finally {
+      setLoading(false);
     }
   };
 

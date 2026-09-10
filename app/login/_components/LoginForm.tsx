@@ -66,14 +66,19 @@ export default function LoginForm() {
 
   const handleWhatsApp = async () => {
     setLoading(true);
-    const r = await startWhatsAppLogin(mode);
-    setLoading(false);
-    if (!r.ok) { toast(r.error, true); return; }
-    /* Opened BEFORE we start polling, and in the same tick as the tap: a
-       popup opened from an async callback is blocked on iOS Safari. */
-    window.open(r.link, "_blank", "noopener");
-    setWaCode(r.code);
-    setStep("whatsapp");
+    try {
+      const r = await startWhatsAppLogin(mode);
+      if (!r.ok) { toast(r.error, true); return; }
+      /* Opened BEFORE we start polling, and in the same tick as the tap: a
+         popup opened from an async callback is blocked on iOS Safari. */
+      window.open(r.link, "_blank", "noopener");
+      setWaCode(r.code);
+      setStep("whatsapp");
+    } catch (e) {
+      toast((e as Error).message || "Failed to start login", true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   /* Students who have set a passcode go straight to it — no waiting for a
@@ -86,20 +91,30 @@ export default function LoginForm() {
       return;
     }
     setLoading(true);
-    const r = await hasPasscode(phone);
-    setLoading(false);
-    if (r.hasPasscode) { setStep("passcode"); return; }
-    setShowPhone(false);
-    toast("No passcode set for this number yet — tap Continue with WhatsApp", true);
+    try {
+      const r = await hasPasscode(phone);
+      if (r.hasPasscode) { setStep("passcode"); return; }
+      setShowPhone(false);
+      toast("No passcode set for this number yet — tap Continue with WhatsApp", true);
+    } catch (e) {
+      toast((e as Error).message || "Failed to check passcode", true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handlePasscodeLogin = async () => {
     setLoading(true);
-    const r = await loginWithPasscode(phone, passcode);
-    setLoading(false);
-    if (!r.ok) { toast(r.error, true); return; }
-    toast("Signed in");
-    router.push("/c");
+    try {
+      const r = await loginWithPasscode(phone, passcode);
+      if (!r.ok) { toast(r.error, true); return; }
+      toast("Signed in");
+      router.push("/c");
+    } catch (e) {
+      toast((e as Error).message || "Failed to sign in", true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   /* Reachable ONLY from "forgot passcode" now — every other OTP door was
@@ -109,14 +124,19 @@ export default function LoginForm() {
   const handleRequestOtp = async () => {
     setLoading(true);
     setNotRegistered(false);
-    const r = await requestOtp(phone, "customer");
-    setLoading(false);
-    if (!r.ok) {
-      toast(r.error, true);
-      return;
+    try {
+      const r = await requestOtp(phone, "customer");
+      if (!r.ok) {
+        toast(r.error, true);
+        return;
+      }
+      setStep("otp");
+      toast("OTP sent to +91 " + phone.slice(-10));
+    } catch (e) {
+      toast((e as Error).message || "Failed to request OTP", true);
+    } finally {
+      setLoading(false);
     }
-    setStep("otp");
-    toast("OTP sent to +91 " + phone.slice(-10));
   };
 
   const handleVerifyOtp = async () => {
@@ -125,19 +145,24 @@ export default function LoginForm() {
       return;
     }
     setLoading(true);
-    const r = await verifyOtp(phone, otp, "customer");
-    setLoading(false);
+    try {
+      const r = await verifyOtp(phone, otp, "customer");
 
-    if (!r.ok) {
-      if (/isn't registered/i.test(r.error)) {
-        setNotRegistered(true);
+      if (!r.ok) {
+        if (/isn't registered/i.test(r.error)) {
+          setNotRegistered(true);
+          return;
+        }
+        toast(r.error, true);
         return;
       }
-      toast(r.error, true);
-      return;
+      toast("Signed in");
+      router.push("/c");
+    } catch (e) {
+      toast((e as Error).message || "Failed to verify OTP", true);
+    } finally {
+      setLoading(false);
     }
-    toast("Signed in");
-    router.push("/c");
   };
 
   return (

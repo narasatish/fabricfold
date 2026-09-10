@@ -48,15 +48,20 @@ export default function RegisterForm({ collegeId, collegeName }: RegisterFormPro
     }
 
     setLoading(true);
-    const r = await startWhatsAppRegister({ name, collegeId });
-    setLoading(false);
+    try {
+      const r = await startWhatsAppRegister({ name, collegeId });
 
-    if (!r.ok) { toast(r.error, true); return; }
+      if (!r.ok) { toast(r.error, true); return; }
 
-    /* Open WhatsApp BEFORE starting the poll, same as login. */
-    window.open(r.link, "_blank", "noopener");
-    setWaCode(r.code);
-    setStep("whatsapp");
+      /* Open WhatsApp BEFORE starting the poll, same as login. */
+      window.open(r.link, "_blank", "noopener");
+      setWaCode(r.code);
+      setStep("whatsapp");
+    } catch (e) {
+      toast((e as Error).message || "Failed to start registration", true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

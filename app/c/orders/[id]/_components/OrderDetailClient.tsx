@@ -50,6 +50,7 @@ export default function OrderDetailClient({
       router.push("/c/orders");
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
       setLoading(false);
     }
   };

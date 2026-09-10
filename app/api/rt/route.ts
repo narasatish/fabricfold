@@ -1,13 +1,27 @@
 /* SSE realtime stream. Customer subscribes to student:{id};
    staff subscribe to orders:{collegeId} for every active college. */
-import { getSession } from "@/lib/auth";
+import { liveSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { bus, type RtEvent } from "@/lib/realtime";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const s = await getSession();
+  /* Found 2026-09-05: this used bare getSession(), which only checks that
+     the cookie is validly SIGNED — not that the account behind it can still
+     sign in. Every other protected route re-derives active/epoch status
+     from the DATABASE on every request (requireStaff/requireStudent), so a
+     deactivated staff member or a "sign out everywhere" is locked out
+     immediately, mid-session, not whenever their token happens to expire.
+     This route skipped that check entirely: a fired staff member, or a
+     student/staff member who explicitly killed their other sessions after
+     a lost phone, could keep an already-open SSE connection alive and go
+     on receiving live order/payment/complaint events for their campus
+     indefinitely, with no way to revoke it short of the connection
+     dropping on its own. liveSession() is exactly requireStaff/
+     requireStudent's revocation check, wrapped to return null instead of
+     throwing — the fit this route always needed. */
+  const s = await liveSession();
   if (!s) return new Response("unauthorized", { status: 401 });
 
   let channels: string[] = [];

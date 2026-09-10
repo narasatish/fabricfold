@@ -4,10 +4,29 @@
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { notifyOwner } from "@/lib/mail";
+import { rateLimit, requestIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
+/* Found 2026-09-05: this is a public, UNAUTHENTICATED endpoint (client error
+   boundaries report from pages where nobody may be signed in yet, e.g.
+   /login) with no rate limit at all — not even the per-message email dedup
+   below actually stops abuse, since it dedupes on exact message TEXT: an
+   attacker varying the message slightly on every call bypasses it entirely
+   and can trigger unlimited notifyOwner() emails, or just bloat ErrorLog
+   indefinitely. This codebase already treats email/SMS-bombing as a real,
+   named threat (see requestOtp's own rate limiting, and the earlier fix to
+   the rate limiter's own race) — this endpoint never got the same
+   treatment despite being reachable by anyone, signed in or not. */
+const ERROR_MAX_PER_IP_HOUR = 60;
+
 export async function POST(req: Request) {
+  const ip = await requestIp();
+  if (ip !== "unknown") {
+    const lim = await rateLimit(`error-report:ip:${ip}`, ERROR_MAX_PER_IP_HOUR, 3600);
+    if (!lim.allowed) return new Response("too many reports", { status: 429 });
+  }
+
   let body: { message?: string; stack?: string; url?: string; kind?: string };
   try {
     body = await req.json();

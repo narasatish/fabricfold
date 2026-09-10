@@ -472,20 +472,46 @@ export async function advanceStatus(orderId: string, input?: { countedPieces?: n
   let shortBy = 0;
   const counted = input?.countedPieces;
   const intakeCount = o.actualPieces ?? o.declaredPieces;
-  if (next === "ready" && counted !== null && counted !== undefined) {
-    const n = Math.max(0, Math.floor(Number(counted)));
-    shortBy = Math.max(0, intakeCount - n);
-    if (n !== intakeCount) {
-      await db.order.update({ where: { id: o.id }, data: { actualPieces: n } });
-      await audit(
-        shortBy > 0 ? "Piece shortfall at ready" : "Piece count corrected at ready",
-        `#${o.id.slice(-4)} · ${o.student.name} · intake ${intakeCount} → counted ${n}`,
-        st.id,
-      );
-    }
+  const countedN = counted !== null && counted !== undefined ? Math.max(0, Math.floor(Number(counted))) : null;
+  if (next === "ready" && countedN !== null) {
+    shortBy = Math.max(0, intakeCount - countedN);
   }
 
-  await db.order.update({ where: { id: o.id }, data: { status: next, timeline: { create: { status: next } } } });
+  /* Found 2026-09-05: this whole function ran as a sequence of loose,
+     unguarded db.xxx calls — no transaction, no atomic status check —
+     unlike collectOrder and cancelOrder (both already fixed for exactly
+     this shape of bug earlier the same day). Two concurrent calls for the
+     same order (a double-tap, or two staff both advancing it, or
+     advanceStatusBatch racing a single advanceStatus) both read the same
+     starting status, both compute the same `next`, and both write it.
+     Advancing "received"->"processing" twice is merely a duplicate
+     timeline row — but advancing "processing"->"ready" twice is worse: the
+     pickup OTP is deleted and recreated with a FRESH random code on each
+     call, and a pushNotif already went out to the student quoting the
+     FIRST call's now-invalidated code. Scoping the update to the FROM
+     status and checking the affected count, same pattern as
+     collectOrder/cancelOrder, makes only the first call's transition
+     actually happen. */
+  try {
+    await db.$transaction(async (tx) => {
+      const res = await tx.order.updateMany({
+        where: { id: o.id, status: o.status },
+        data: { status: next, ...(countedN !== null && countedN !== intakeCount ? { actualPieces: countedN } : {}) },
+      });
+      if (res.count === 0) throw new Error(`Order is already ${o.status === "received" ? "processing or further along" : "ready or collected"}`);
+      await tx.orderEvent.create({ data: { orderId: o.id, status: next } });
+    });
+  } catch (e) {
+    return { ok: false as const, error: (e as Error).message };
+  }
+
+  if (next === "ready" && countedN !== null && countedN !== intakeCount) {
+    await audit(
+      shortBy > 0 ? "Piece shortfall at ready" : "Piece count corrected at ready",
+      `#${o.id.slice(-4)} · ${o.student.name} · intake ${intakeCount} → counted ${countedN}`,
+      st.id,
+    );
+  }
 
   if (next === "ready") {
     const code = rid(4);

@@ -173,7 +173,7 @@ describe("recount before marking ready", () => {
   });
 
   it("a shortfall can never be negative", () => {
-    expect(adv).toMatch(/Math\.max\(0, intakeCount - n\)/);
+    expect(adv).toMatch(/Math\.max\(0, intakeCount - countedN\)/);
   });
 
   it("tells the student BEFORE they open the bag, not at the counter", () => {

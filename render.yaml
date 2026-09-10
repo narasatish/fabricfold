@@ -128,7 +128,12 @@ services:
     runtime: node
     plan: starter
     region: singapore
-    schedule: "0 21 * * *"
+    # Aggregate tabs (Live/Daily/Plans/Students) are a full rebuild, not an
+    # append — hourly keeps them close to the DB without hammering the
+    # Sheets API. The per-event log tabs (Orders/Payments/Collections) don't
+    # need this: flushSoon() already pushes those within seconds of each
+    # action, and this cron is just their once-daily backstop sweep.
+    schedule: "0 * * * *"
     buildCommand: "echo no build needed"
     startCommand: 'curl -sf -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/sheets/sync"'
     envVars:

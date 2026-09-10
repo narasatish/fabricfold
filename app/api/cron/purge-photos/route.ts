@@ -12,6 +12,7 @@
 import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { Prisma } from "@/lib/generated/prisma/client";
+import { isCronRequest } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -19,8 +20,7 @@ export const maxDuration = 60;
 const PHOTO_RETENTION_DAYS = Number(process.env.PHOTO_RETENTION_DAYS || 30);
 
 async function authorised(req: Request) {
-  const auth = req.headers.get("authorization");
-  if (process.env.CRON_SECRET && auth === `Bearer ${process.env.CRON_SECRET}`) return true;
+  if (isCronRequest(req)) return true;
   const s = await getSession().catch(() => null);
   if (!s || s.mode !== "staff") return false;
   const st = await db.staff.findUnique({ where: { id: s.staffId } });

@@ -7,6 +7,7 @@
    Backups are additive — old snapshots are never overwritten (timestamped). */
 import { db } from "@/lib/db";
 import { requireStaff } from "@/lib/auth";
+import { isCronRequest } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -56,8 +57,7 @@ async function snapshot() {
 }
 
 export async function GET(req: Request) {
-  const auth = req.headers.get("authorization");
-  const isCron = !!process.env.CRON_SECRET && auth === `Bearer ${process.env.CRON_SECRET}`;
+  const isCron = isCronRequest(req);
 
   if (!isCron) {
     // Browser path: Owner only.

@@ -7,13 +7,13 @@
    an uncollected bag is shelf space and a student who has forgotten. */
 import { db } from "@/lib/db";
 import { sendMail } from "@/lib/mail";
+import { isCronRequest } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET(req: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) {
+  if (!isCronRequest(req)) {
     return new Response("unauthorized", { status: 401 });
   }
 

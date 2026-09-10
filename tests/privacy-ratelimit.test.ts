@@ -127,7 +127,12 @@ describe("error alerting", () => {
   });
 
   it("is Owner-only or cron-authenticated", () => {
-    expect(src).toMatch(/CRON_SECRET/);
+    // CRON_SECRET comparison moved into the shared, timing-safe
+    // isCronRequest() helper (lib/cron-auth.ts) on 2026-09-05 — every cron
+    // route used to duplicate a plain-string comparison, unlike this
+    // codebase's webhook routes which already used crypto.timingSafeEqual
+    // for the same kind of secret check.
+    expect(src).toMatch(/isCronRequest\(req\)/);
     expect(src).toMatch(/st\.role >= 4/);
   });
 });

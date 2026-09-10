@@ -89,8 +89,10 @@ describe("uncollected 5+ days", () => {
 
 describe("weekly digest + variance alert", () => {
   it("digest cron exists and is authorised", () => {
+    // Moved to the shared, timing-safe isCronRequest() helper on 2026-09-05
+    // — see docs/claude-playbook.md and tests/cron-auth.test.ts.
     const src = read("app/api/cron/weekly-digest/route.ts");
-    expect(src).toMatch(/Bearer \$\{secret\}/);
+    expect(src).toMatch(/isCronRequest\(req\)/);
     expect(src).toMatch(/UNCOLLECTED 5\+ DAYS/);
   });
   it("is scheduled weekly — Hobby allows at most daily", () => {

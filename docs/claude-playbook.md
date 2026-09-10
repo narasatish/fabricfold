@@ -155,6 +155,68 @@ rest of the codebase; the test documents the intended behavior rather than
 proving the old code was exploitable under the exact conditions tried here.
 Full suite: 793/793.
 
+## RESOLVED 2026-09-05: cron/report routes used plain-string secret comparison, unlike this codebase's own webhook standard
+
+Checked every `CRON_SECRET` comparison site for the same class of gap this
+codebase's webhook routes (Razorpay, WhatsApp) already defend against with
+`crypto.timingSafeEqual`. Found eight: `app/api/cron/collection-reminders`,
+`error-digest`, `purge-photos`, `weekly-digest`, `app/api/backup`,
+`app/api/report/daily`, `app/api/sheets/flush`, and `app/api/sheets/sync`
+all independently duplicated `auth === \`Bearer ${secret}\`` as a plain
+string comparison. The webhook routes' own comments explain exactly why
+this matters even when the timing side-channel is impractical over real
+network jitter: it costs nothing to close, so close it.
+
+Consolidated into one shared helper, `lib/cron-auth.ts`'s `isCronRequest()`
+— `crypto.timingSafeEqual` with a length check first (the same
+"timingSafeEqual throws on a length mismatch" trap every other timing-safe
+check in this codebase documents), returns `false` rather than throwing
+when `CRON_SECRET` isn't configured at all. Applied to all eight route
+files, replacing each one's own duplicated comparison. Centralizing this
+also closes the actual root cause, not just the eight known instances: a
+future cron/report/backup route gets the timing-safe check for free by
+importing the helper, instead of the lesson needing to be re-learned (or
+missed) the ninth time.
+
+Verified with a new unit test suite (`tests/cron-auth.test.ts`) exercising
+the helper directly: accepts the exact token, refuses a wrong one, refuses
+a missing header, refuses headers shorter/longer than expected without
+throwing (the length-mismatch trap), and refuses everything when
+`CRON_SECRET` is unset. Updated two existing regex tests
+(`privacy-ratelimit.test.ts`, `sheet-events.test.ts`) that asserted the old
+literal `CRON_SECRET` string appeared in each route file — it no longer
+does, by design, since the check moved into the shared helper.
+
+## CRITICAL, found immediately after: the SSE realtime stream never re-checked session revocation
+
+While reviewing `app/api/rt/route.ts` (the live order/payment/complaint
+event stream) for the same authorization patterns, found it used bare
+`getSession()` — which only verifies the cookie is validly SIGNED, not that
+the account behind it can still sign in. Every other protected route in
+this codebase re-derives `active`/`sessionEpoch` status from the DATABASE
+on every request via `requireStaff`/`requireStudent`, specifically so a
+deactivated staff member or a "sign out everywhere" takes effect
+immediately, mid-session — this route was the one place that guarantee
+didn't hold. A fired staff member, or someone who killed their other
+sessions after a lost phone, could keep an already-open SSE connection
+alive and continue receiving live order/payment/complaint data for their
+campus indefinitely, with no way to revoke it short of the connection
+dropping on its own (network change, browser close).
+
+Fixed by switching to `liveSession()` — already exists in `lib/auth.ts`
+specifically as "`requireStaff`/`requireStudent`'s revocation check,
+wrapped to return null instead of throwing," built for exactly this shape
+of caller but never applied here.
+
+Verified with a new behavioral test
+(`tests/rt-revocation-behavioral.test.ts`) that calls the real route
+handler: connects successfully while a staff account is active (200),
+deactivates the account, and confirms the SAME cookie is now refused (401)
+— and the same for a `sessionEpoch` bump (the "sign out everywhere"
+mechanism). Confirmed genuine by reverting to `getSession()` and
+re-running: both cases returned 200 (still connectable) instead of 401,
+exactly as predicted. Full suite: 813/813.
+
 ## Reviewed 2026-09-05, client-side pass: PayClient/payments.ts clean, OrderClient's Cancel button fixed
 
 Moved to auditing client-side UI after the server-side surface area was

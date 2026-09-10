@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { dailyEmailReport } from "@/lib/report";
 import { requireStaff } from "@/lib/auth";
 import { sendMail } from "@/lib/mail";
+import { isCronRequest } from "@/lib/cron-auth";
 
 export async function POST() {
   try {
@@ -18,8 +19,7 @@ export async function POST() {
 
 /* Vercel Cron calls GET with the CRON_SECRET Authorization header. */
 export async function GET(req: Request) {
-  const auth = req.headers.get("authorization");
-  if (!process.env.CRON_SECRET || auth !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!isCronRequest(req)) {
     return new Response("unauthorized", { status: 401 });
   }
   return run();

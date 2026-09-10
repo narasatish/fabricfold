@@ -89,6 +89,21 @@ export async function runSheetsSync() {
   if (!sheetsConfigured()) {
     return { ok: false as const, error: "Google Sheets not configured — set GOOGLE_SA_EMAIL, GOOGLE_SA_PRIVATE_KEY, GOOGLE_SHEET_ID" };
   }
+  // Nothing below here may throw uncaught: the Admin "Sync now" button awaits
+  // this with no try/catch of its own, so an unhandled rejection here left
+  // the button stuck on "Syncing…" forever instead of showing an error toast
+  // — found 2026-09-10 when a bad GOOGLE_SA_PRIVATE_KEY (Node rejected the PEM
+  // with "DECODER routines::unsupported") hung the button with no feedback.
+  try {
+    return await runSheetsSyncUnsafe();
+  } catch (e) {
+    const msg = (e as Error).message;
+    console.error("[sheets] sync failed:", msg);
+    return { ok: false as const, error: msg.slice(0, 300) };
+  }
+}
+
+async function runSheetsSyncUnsafe() {
   const stamp = new Date(Date.now() + 5.5 * 3600_000).toISOString().replace("T", " ").slice(0, 16) + " IST";
 
   // 1) Pull any owner edits from the Config tab and apply them (validated + audited).

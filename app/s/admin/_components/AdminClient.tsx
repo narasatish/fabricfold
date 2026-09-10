@@ -205,9 +205,14 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
           disabled={syncingSheet}
           onClick={async () => {
             setSyncingSheet(true);
-            const r = await syncSheetsNow();
-            setSyncingSheet(false);
-            toast(r.ok ? "Google Sheet updated" : (r.error || "Sheet not configured"), !r.ok);
+            try {
+              const r = await syncSheetsNow();
+              toast(r.ok ? "Google Sheet updated" : (r.error || "Sheet not configured"), !r.ok);
+            } catch (e) {
+              toast((e as Error).message || "Sync failed", true);
+            } finally {
+              setSyncingSheet(false);
+            }
           }}
         >
           <div className="icon-tile" style={{ background: "var(--teal-soft)", color: "var(--teal-dark)" }}><Svg name="list" size={20} /></div>

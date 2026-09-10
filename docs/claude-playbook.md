@@ -12,6 +12,30 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11: service-worker cache version not bumped on 20+ client-side deploys
+
+Found during a PWA audit (PART 2 pass 2026-09-11): the `CACHE` constant in
+`public/sw.js` was still `"ff-v33"`, last bumped on 2026-09-04 (`fd10fa7`).
+Between that commit and 2026-09-11's HEAD, 20+ commits touched client-side
+TypeScript/TSX files (LoginForm, PayClient, OrderDetailClient, AdminClient,
+OrdersClient, etc.), all of which get compiled into Next.js bundles served from
+cache. Users who had cached the old bundle would continue using it across these
+deploys instead of fetching the new code — a silent cache-invalidation failure.
+
+**Root cause**: the pattern of "bump cache version on deploy" was established
+in git history (`adb8510`, `1108c5d`: "Bump service-worker cache to ff-v15/v22
+for this deploy") but became a manual discipline that wasn't applied to recent
+deployments. No automation enforces it.
+
+Fixed by bumping to `ff-v34` in `public/sw.js`. The next `npm run build`
+creates new hashes for all bundles, and users will fetch them because the
+service worker's own cache key changed.
+
+**Lesson, same root cause as other discipline gaps this session**: a manual
+deploy checklist step (like "did we bump the cache version?") needs to be
+either (a) automated into the build process, or (b) explicitly called out in
+commit messages + PR description so reviewers catch it. Neither happened here.
+
 ## RESOLVED 2026-09-05: refundOrder's over-refund cap had a real NULL-poisoning bug
 
 `tests/refund-race-behavioral.test.ts` is now un-skipped and passing (both

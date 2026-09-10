@@ -33,6 +33,11 @@ async function storedCode(phone: string) {
 }
 
 beforeAll(async () => {
+  // Clear the globalThis singleton cache so this file's import gets a fresh
+  // db client bound to TEST_URL, not one cached by an earlier test file in
+  // the same worker (same fix as passcode-ip-ratelimit-behavioral.test.ts
+  // and error-report-ratelimit-behavioral.test.ts, commit 207f695).
+  delete (globalThis as unknown as { __ffdb?: unknown }).__ffdb;
   db = (await import("../lib/db")).db;
   await ensureTestSchema(TEST_URL, async () => {
     /* Probe the NEWEST schema addition, not an old table: a probe that checks

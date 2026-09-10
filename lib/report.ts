@@ -164,7 +164,7 @@ export async function dailyEmailReport() {
     computeReport(parsePeriod({ p: "month" })),
   ]);
   const f = (n: number) => "Rs " + n.toLocaleString("en-IN");
-  const todayLabel = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const todayLabel = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
 
   const section = (label: string, r: Awaited<ReturnType<typeof computeReport>>) => [
     label,

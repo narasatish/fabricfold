@@ -12,6 +12,67 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11 (pass 6): timezone bug in daily report email label and payslip month form
+
+Audit pass 6 (deep re-check on fresh ground) found two timezone mismatches on
+the UTC server:
+
+**report.ts line 167 (email subject/cash summary label)**:
+`const todayLabel = new Date().toLocaleDateString(...)` did not specify
+`timeZone: "Asia/Kolkata"`, so at IST day boundaries (UTC 2024-03-31 23:00 is
+IST 2024-04-01 04:30), the label would show the wrong calendar date
+(2024-03-31) while the actual report was already computing IST 2024-04-01.
+Fixed by adding `timeZone: "Asia/Kolkata"` to match the other date displays
+in the same function.
+
+**AdminClient.tsx line 101 (payslip month selector initialization)**:
+`month: new Date().toISOString().slice(0, 7)` initialized the form field to
+the UTC date, not IST — at month boundaries, the form could show the previous
+month while the user intended the current (IST) month. Fixed by using
+`istDateStr(Date.now()).slice(0, 7)` instead, same pattern as report.ts.
+
+Both are display-only (not business logic), and both manifested at IST
+day/month boundaries only — UTC servers are standard cloud practice, so this
+class of bug should be caught during any refresh of date handling. Both fixes
+follow patterns already established elsewhere in the codebase.
+
+## RESOLVED 2026-09-11 (pass 6): verified BVRIT pricing gate and concurrent registration safety
+
+Sixth audit pass systematically checked four high-risk areas:
+
+**1. BVRIT vs St Mary's pricing boundary**: Confirmed all four cycle-sale
+paths (`assignSubscription`, `upgradeSubscription`, `activateSubscription`,
+`sellCyclePack`) call `requireCyclesEnabled` as their first check after
+`assertSameCollege`. The gate enforces three conditions: (a) explicit name
+match on "BVRIT" as a safety net, (b) rate-override check (`college.rates !=
+null`), (c) feature flag check. Verified no alternative cycle-sale paths
+exist (no bulk imports, no admin overrides, no walk-in surcharges). The rule
+is enforced consistently and no side doors found.
+
+**2. Concurrent phone registration**: Both `registerStudent` (staff counter)
+and `checkWhatsAppRegister` (BVRIT self-reg) correctly handle the phone
+unique-constraint race — `registerStudent` wraps the create in a P2002 catch
+(lines 40-45 in admin.ts), `checkWhatsAppRegister` marks the WaVerify row
+"claimed" atomically before creating the account, and reverts on error (lines
+135-139, 196 in wa-register.ts). No duplicate Student rows can be created for
+the same phone.
+
+**3. Timezone/date boundaries**: Deep grep found the two issues above (fixed).
+All other date computations use either `istToday()` or the explicit
+`+5.5h` offset pattern correctly. The reported pattern ("bare `new Date()`
+followed by `.slice(0,10)` without IST offset") appeared in no business-logic
+code paths — only in transaction timestamps (when something happened), which
+are correctly UTC-absolute.
+
+**4. advanceStatus fix (pass 1, commit 0cfee20)**: Independently re-reviewed
+the first agent's fix. The change is correct: moved from loose unguarded db
+calls to a transaction using `updateMany({ where: { id, status: o.status },
+... })` with an affected-count check, identical pattern to `collectOrder` and
+`cancelOrder` (both fixed earlier 2026-09-05). The piece-count update moved
+into the transaction's data object, ensuring atomicity. Behavioral test
+confirms only one concurrent call wins and exactly one pickup OTP exists
+afterward. No logic bugs detected in this fix.
+
 ## RESOLVED 2026-09-11: service-worker cache version not bumped on 20+ client-side deploys
 
 Found during a PWA audit (PART 2 pass 2026-09-11): the `CACHE` constant in

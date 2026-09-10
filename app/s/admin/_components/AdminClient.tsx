@@ -14,7 +14,7 @@ import {
 import { PERM_DEFS } from "@/lib/perms";
 import { markErrorsSeen, syncSheetsNow } from "@/lib/actions/ops";
 import { saveSlotWindow, toggleSlotWindow, deleteSlotWindow } from "@/lib/actions/slots";
-import { hhmm as slotTime } from "@/lib/slots"; // local `hhmm` below formats a timestamp — don't collide
+import { hhmm as slotTime, istDateStr } from "@/lib/slots"; // local `hhmm` below formats a timestamp — don't collide
 import { TestOtpPanel } from "@/components/test-otp-panel";
 import { WEEKDAY_NAMES } from "@/lib/washday";
 
@@ -98,7 +98,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   }, [campus]);
   const [impBusy, setImpBusy] = useState(false);
   const [impResult, setImpResult] = useState<null | { added: string[]; skipped: string[]; problems: string[]; warnings: string[] }>(null);
-  const [slip, setSlip] = useState({ staffId: staff[0]?.id || "", month: new Date().toISOString().slice(0, 7), basic: 0, allowances: 0, deductions: 0, postExpense: true });
+  const [slip, setSlip] = useState({ staffId: staff[0]?.id || "", month: istDateStr(Date.now()).slice(0, 7), basic: 0, allowances: 0, deductions: 0, postExpense: true });
   // The dropdown below is scoped to visibleStaff, but slip.staffId was only
   // ever seeded once from the FULL staff list at mount — switching campus
   // (or the dropdown just falling back to its first option because the

@@ -41,7 +41,13 @@ export async function searchStudents(query: string) {
   /* A campus-scoped staff member (Staff.collegeId set) must never find, let
      alone act on, another campus's student — not even by name/phone/code
      search. Global staff (collegeId null: Owner/Admin) search everywhere. */
-  const where = st.collegeId ? { AND: [{ OR: or }, { collegeId: st.collegeId }] } : { OR: or };
+  // anonymisedAt: null — an erased student has no real name/phone left to
+  // search for anyway, but excluding it outright keeps a stray "Deleted
+  // student" row from ever surfacing in results (same gap fixed the same
+  // way in the Students page and the synced Sheet's Students tab).
+  const where = st.collegeId
+    ? { AND: [{ OR: or }, { collegeId: st.collegeId }, { anonymisedAt: null }] }
+    : { AND: [{ OR: or }, { anonymisedAt: null }] };
 
   const students = await db.student.findMany({
     where,

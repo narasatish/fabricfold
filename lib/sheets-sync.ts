@@ -294,6 +294,15 @@ const STUDENT_HEADER = ["Customer ID", "Name", "Phone", "Type", "College", "Plan
 export async function writeStudentsTab() {
   const [students, colleges] = await Promise.all([
     db.student.findMany({
+      // An erased student (eraseStudentData/eraseMyData) is anonymised, not
+      // deleted — the row stays for accounting, renamed to "Deleted student".
+      // The owner's own operational register should never show that: it's
+      // noise from someone who is gone, not a real name to check off against
+      // a roster. Found 2026-09-05 while cleaning demo data out of a live
+      // sheet — erasing a demo account in Admin anonymised it correctly, but
+      // it kept showing up here forever after, because this query never
+      // excluded anonymised rows.
+      where: { anonymisedAt: null },
       orderBy: { createdAt: "asc" },
       include: {
         college: { select: { id: true, name: true } },

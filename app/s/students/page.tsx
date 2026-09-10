@@ -14,7 +14,12 @@ export default async function StaffStudentsPage() {
   // wallet credit) was already sent to the browser in the RSC payload before
   // that filter ever ran. Scope it at the query itself, the same fix already
   // applied to searchStudents().
-  const scope = staff.collegeId ? { collegeId: staff.collegeId } : {};
+  // anonymisedAt: null — an erased student (eraseStudentData) is anonymised,
+  // not deleted, so the row stays forever for accounting. Excluded here so
+  // the counter's own working roster doesn't fill up with "Deleted student"
+  // entries; same gap found and fixed the same way in the synced Sheet's
+  // Students tab (lib/sheets-sync.ts).
+  const scope = { anonymisedAt: null, ...(staff.collegeId ? { collegeId: staff.collegeId } : {}) };
   const [rows, colleges] = await Promise.all([
     db.student.findMany({
       where: scope,

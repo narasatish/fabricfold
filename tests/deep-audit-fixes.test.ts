@@ -359,7 +359,7 @@ describe("campus-boundary sweep: server-component pages that build their own que
 
   it("students roster page scopes the student list and the college picker", () => {
     const src = read("app/s/students/page.tsx");
-    expect(src).toMatch(/const scope = staff\.collegeId \? \{ collegeId: staff\.collegeId \} : \{\};/);
+    expect(src).toMatch(/const scope = \{ anonymisedAt: null, \.\.\.\(staff\.collegeId \? \{ collegeId: staff\.collegeId \} : \{\}\) \};/);
     expect(src).toMatch(/db\.student\.findMany\(\{\s*\n\s*where: scope,/);
   });
 

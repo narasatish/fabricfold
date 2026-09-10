@@ -80,7 +80,9 @@ describe("the boundary is actually enforced at every server action the audit fou
   it("students.ts: search is filtered by the caller's campus, not just found ids", () => {
     // The worse half of the original bug: a scoped staff member could
     // actively ENUMERATE another campus's students by name/phone/code.
-    expect(students).toMatch(/const where = st\.collegeId \? \{ AND: \[\{ OR: or \}, \{ collegeId: st\.collegeId \}\] \} : \{ OR: or \}/);
+    // 2026-09-05: also excludes anonymised (erased) students — see
+    // docs/claude-playbook.md.
+    expect(students).toMatch(/const where = st\.collegeId\s*\n\s*\? \{ AND: \[\{ OR: or \}, \{ collegeId: st\.collegeId \}, \{ anonymisedAt: null \}\] \}\s*\n\s*: \{ AND: \[\{ OR: or \}, \{ anonymisedAt: null \}\] \};/);
     expect(students).toMatch(/assertSameCollege\(st, collegeId\)/); // bulkRegisterStudents
     expect(students).toMatch(/You can only notify your own campus/); // broadcastNotice
   });

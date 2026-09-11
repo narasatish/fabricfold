@@ -666,6 +666,12 @@ export async function payOrder(orderId: string, method: "upi" | "cash", applyCre
   const stu = await requireStudent();
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
   if (o.studentId !== stu.id) return { ok: false as const, error: "Not your order" };
+  // Same "pay at delivery, not drop-off" rule as createGatewayOrder — this is
+  // the student-facing pay action (credits or a confirmed gateway payment);
+  // recordPay (staff, at the counter) is deliberately NOT restricted here.
+  if (!["ready", "collected"].includes(o.status)) {
+    return { ok: false as const, error: "Payment opens once your order is ready for pickup" };
+  }
   const creditApplied = applyCredits ? Math.min(Number(stu.credits), Number(o.total)) : 0;
   try {
     const updated = await payCore(orderId, method, creditApplied, { gatewayRef: gatewayRef || null });

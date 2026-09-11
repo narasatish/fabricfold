@@ -10,6 +10,7 @@ import { useToast, Sheet, Switch, Seg, CampusSwitch, useCampusSwitch } from "@/c
 import {
   saveRates, savePlan, togglePlan, savePaymentConfig, saveSettings,
   toggleFeature, saveCollege, deleteCollege, setCollegeActive, saveStaff, setStaffActive, createPayslip,
+  saveCollegeRates,
 } from "@/lib/actions/admin";
 import { PERM_DEFS } from "@/lib/perms";
 import { markErrorsSeen, syncSheetsNow } from "@/lib/actions/ops";
@@ -31,7 +32,7 @@ type Props = {
     payment: { upiId: string; payeeName: string; bankName: string; accountName: string; accountNo: string; ifsc: string; gatewayKey: string };
     settings: { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number; gstEnabled?: boolean; garmentTagsEnabled?: boolean };
   };
-  colleges: { id: string; name: string; address: string; closedWeekday: number | null; active: boolean; features: Record<string, boolean> }[];
+  colleges: { id: string; name: string; address: string; closedWeekday: number | null; active: boolean; features: Record<string, boolean>; rates?: Rates }[];
   staff: { id: string; name: string; phone: string; role: number; collegeId: string | null; active: boolean; perms: Record<string, boolean> }[];
   payslips: { id: string; number: string; month: string; net: number; staffName: string; collegeId: string | null }[];
   plans: PlanRow[];
@@ -75,7 +76,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   const visibleAttendance = campus === "all" ? attendance : attendance.filter((a) => visibleStaffIds.has(a.staffId));
   const visiblePayslips = campus === "all" ? payslips : payslips.filter((p) => p.collegeId === campus);
 
-  const [sheet, setSheet] = useState<null | "rates" | "plan" | "payment" | "settings" | "college" | "staff" | "payslip" | "slot">(null);
+  const [sheet, setSheet] = useState<null | "rates" | "plan" | "payment" | "settings" | "college" | "staff" | "payslip" | "slot" | "collegeRates">(null);
   const [rates, setRates] = useState<Rates>(JSON.parse(JSON.stringify(config.rates)));
   const [gst, setGst] = useState(config.gstPct);
   const [gstOn, setGstOn] = useState(config.settings.gstEnabled !== false);
@@ -147,6 +148,31 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   };
   const removeRateItem = (svc: string, i: number) => {
     setRates((r) => ({ ...r, [svc]: { ...r[svc], items: r[svc].items.filter((_, j) => j !== i) } }));
+  };
+
+  /* Per-college rate override editor. Unlike the global editor above, this
+     one does NOT hide washFold/washIron item editing — the entire point of
+     an override is to switch a campus from the global cycle-based default
+     to genuine per-piece pricing (lib/money.ts's collegeUsesCycleBasedPricing
+     returns false the moment College.rates is non-null). Found 2026-09-11:
+     this server action already existed and was fully tested, but had no UI
+     anywhere to actually call it — a campus that should bill per piece
+     (e.g. BVRIT) silently fell back to the cycle-based global default with
+     no way for the Owner to fix it. */
+  const [collegeRatesEdit, setCollegeRatesEdit] = useState<{ collegeId: string; collegeName: string; useOverride: boolean; rates: Rates }>({ collegeId: "", collegeName: "", useOverride: false, rates: {} });
+  const openCollegeRates = (c: { id: string; name: string; rates?: Rates }) => {
+    const seed = c.rates ? JSON.parse(JSON.stringify(c.rates)) as Rates : JSON.parse(JSON.stringify(rates)) as Rates;
+    setCollegeRatesEdit({ collegeId: c.id, collegeName: c.name, useOverride: !!c.rates, rates: seed });
+    setSheet("collegeRates");
+  };
+  const setCollegeRateItem = (svc: string, i: number, name: string, price: number) => {
+    setCollegeRatesEdit((s) => ({ ...s, rates: { ...s.rates, [svc]: { ...s.rates[svc], items: s.rates[svc].items.map((it, j) => (j === i ? ([name, price] as [string, number]) : it)) } } }));
+  };
+  const addCollegeRateItem = (svc: string) => {
+    setCollegeRatesEdit((s) => ({ ...s, rates: { ...s.rates, [svc]: { ...s.rates[svc], items: [...s.rates[svc].items, ["New item", 0] as [string, number]] } } }));
+  };
+  const removeCollegeRateItem = (svc: string, i: number) => {
+    setCollegeRatesEdit((s) => ({ ...s, rates: { ...s.rates, [svc]: { ...s.rates[svc], items: s.rates[svc].items.filter((_, j) => j !== i) } } }));
   };
 
   return (
@@ -241,6 +267,9 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
               <a className="btn xs sec" href={`/api/export/college-statement?collegeId=${c.id}&m=${month}`} target="_blank">Statement</a>
               {currentRole >= 4 && (
                 <>
+                  <button className="btn xs sec" onClick={() => openCollegeRates(c)}>
+                    {c.rates ? "Per-piece rates ✓" : "Per-piece rates"}
+                  </button>
                   <button className="btn xs sec" aria-label="Edit campus" onClick={() => { setColEdit({ id: c.id, name: c.name, address: c.address, closedWeekday: c.closedWeekday }); setSheet("college"); }}><Svg name="edit" size={13} /></button>
                   {c.active ? (
                     colleges.filter((x) => x.active).length > 1 && (
@@ -493,6 +522,44 @@ Students already registered there keep their records and can be restored with th
           <div className="field"><label>GST %</label><input className="input" type="number" value={gst} onChange={(e) => setGst(Number(e.target.value))} /></div>
         )}
         <button disabled={runBusy} className="btn" onClick={() => run(() => saveRates(rates, gst, gstOn), "Rates saved")}>Save rates</button>
+      </Sheet>
+
+      <Sheet open={sheet === "collegeRates"} onClose={() => setSheet(null)}>
+        <div className="h-md" style={{ padding: "0 4px 4px" }}>Per-piece rates — {collegeRatesEdit.collegeName}</div>
+        <div className="muted" style={{ padding: "0 4px 12px", fontSize: 12.5 }}>
+          Off: this campus bills the same way every campus does by default — Wash &amp; Fold / Wash &amp; Iron by the cycle.
+          On: every service below bills per piece for {collegeRatesEdit.collegeName} only, using the prices you set here — no cycles, no weight.
+        </div>
+        <div className="chip-toggle" style={{ marginBottom: 14 }}>
+          <div>
+            <div className="h-sm">Bill this campus per piece</div>
+            <div className="muted" style={{ fontSize: 12 }}>Turning this off clears the override — the campus goes back to cycle-based wash pricing</div>
+          </div>
+          <Switch on={collegeRatesEdit.useOverride} onToggle={() => setCollegeRatesEdit((s) => ({ ...s, useOverride: !s.useOverride }))} />
+        </div>
+        {collegeRatesEdit.useOverride && Object.entries(collegeRatesEdit.rates).map(([svc, r]) => (
+          <div key={svc} className="card pad" style={{ marginBottom: 12 }}>
+            <div className="h-sm" style={{ marginBottom: 8 }}>{r.label}</div>
+            {r.items.map(([name, price], i) => (
+              <div key={i} className="row gap8" style={{ padding: "5px 0", alignItems: "center" }}>
+                <input className="input" value={name} style={{ flex: 1, height: 38 }} onChange={(e) => setCollegeRateItem(svc, i, e.target.value, price)} />
+                <input className="input" type="number" value={price} style={{ width: 90, height: 38, textAlign: "right" }} onChange={(e) => setCollegeRateItem(svc, i, name, Number(e.target.value))} />
+                <button className="btn xs sec" onClick={() => removeCollegeRateItem(svc, i)} aria-label={`Remove ${name}`}>×</button>
+              </div>
+            ))}
+            <button className="btn xs ghost mt8" onClick={() => addCollegeRateItem(svc)}>+ Add item</button>
+          </div>
+        ))}
+        <button
+          disabled={runBusy}
+          className="btn"
+          onClick={() => run(
+            () => saveCollegeRates(collegeRatesEdit.collegeId, collegeRatesEdit.useOverride ? collegeRatesEdit.rates : null),
+            collegeRatesEdit.useOverride ? "Per-piece rates saved" : "Reverted to cycle-based pricing",
+          )}
+        >
+          Save
+        </button>
       </Sheet>
 
       <Sheet open={sheet === "plan"} onClose={() => setSheet(null)}>

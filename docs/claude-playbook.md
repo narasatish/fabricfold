@@ -12,6 +12,67 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11: three real gaps found by the owner testing production directly
+
+The owner registered a real test BVRIT student and reported four things not
+working as expected. Investigating each against actual code (not assumption)
+found three genuine gaps — all UI/wiring gaps, not logic bugs in the
+already-tested server actions:
+
+**1. BVRIT was billing by cycle, not per piece.** `lib/money.ts`'s
+`collegeUsesCycleBasedPricing` is correct — it returns per-piece pricing the
+moment `College.rates` is set for that college. But `saveCollegeRates` and
+`saveCollegeExpressRates` (`lib/actions/admin.ts`) existed as fully working,
+already-tested server actions with **no UI anywhere calling them** — not
+even a button. `app/s/admin/page.tsx` was already passing `rates` through to
+`AdminClient`'s `colleges` prop (someone had started this and stopped), but
+the Props type didn't declare it and no sheet/form existed. Built a
+"Per-piece rates" button on each college card in `AdminClient.tsx` opening a
+sheet that edits and saves via `saveCollegeRates` — same shape as the global
+rates editor, but (deliberately, unlike the global one) does NOT hide
+washFold/washIron item editing, since per-piece pricing for those two
+services is the entire point of the override.
+
+**2. No way to delete/erase a student account.** `eraseStudentData`
+(`lib/actions/privacy.ts`) — the anonymization function fixed and tested in
+an earlier pass this same session (it now correctly blocks erasure while an
+order is in-flight) — was never called from any button anywhere in the app.
+Added a "Danger zone" section to the staff customer-detail page
+(`CustomerClient.tsx`, Admin+ only) with a reason-required confirmation
+sheet.
+
+**3. Students could pay right at drop-off, not just at delivery.** The
+owner's rule is payment happens when the clothes are handed back. The Pay
+button was showing for ANY non-draft/non-cancelled status (i.e. as soon as
+staff accepted the order), and — worse — the underlying server actions
+(`createGatewayOrder` in `lib/actions/payments.ts`, `payOrder` in
+`lib/actions/orders.ts`) had NO status check at all, only a client-side hide.
+Fixed both: the button now only shows at `ready`/`collected`, and both
+server actions now reject payment attempts outside that window even via a
+direct call. `recordPay` (staff, at the counter) is deliberately left
+unrestricted — staff discretion at the counter is a different thing from the
+student self-service flow.
+
+**4. Missing V-series bag code — unresolved, needs the owner's input.** The
+registration flow (`wa-register.ts`) is supposed to auto-mint a `V####` bag
+code the instant WhatsApp verification completes, in the same transaction as
+account creation. Couldn't reproduce or disprove this without knowing
+exactly which screen the owner was looking at — if `student.bags` is empty
+for that account, `CustomerClient.tsx`'s "No active bag" state matches what
+would be seen if bag creation genuinely failed (e.g. the wrapped transaction
+rolled back for some reason); if bags exist, the code shows fine. No
+production DB access this session to check directly — needs the owner to
+either point at the screen they looked at, or a session with DB access to
+query `Bag` rows for that student id.
+
+**Lesson**: every audit pass this session searched CODE for bugs (races,
+missing guards, error handling). None of them would ever catch "the
+correct, tested server action has no UI calling it" — that class of gap is
+invisible to code review because there's no broken code to find, just an
+absent button. Only using the actual product the way a real user does
+surfaces it. Worth periodically asking the owner (or a UI-walkthrough pass)
+to click through every screen, not just auditing source.
+
 ## RESOLVED 2026-09-11 (pass 20): complaint photo preview silently failed to load before submission
 
 **File**: `app/c/help/_components/HelpClient.tsx`

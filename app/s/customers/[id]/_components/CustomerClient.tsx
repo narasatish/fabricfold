@@ -13,6 +13,7 @@ import { CYCLE_RATES, CYCLE_KG_LIMIT, collegeUsesCycleBasedPricing, collegeExpre
 import { enqueueIntake, newIdemKey } from "@/lib/offline-queue";
 import { topUpCredits } from "@/lib/actions/ops";
 import { updateStudentPhone, updateStudentDetails } from "@/lib/actions/admin";
+import { eraseStudentData } from "@/lib/actions/privacy";
 
 type Student = {
   id: string;
@@ -456,6 +457,28 @@ Currently ${current}. Type the code printed on the bag they are being given.
     }
   };
 
+  /* Found 2026-09-11: eraseStudentData existed as a fully-tested server
+     action (including a guard against erasing while an order is in-flight)
+     but was never called from any button anywhere in the app — there was no
+     way for staff to actually erase a student's account. */
+  const [showErase, setShowErase] = useState(false);
+  const [eraseReason, setEraseReason] = useState("");
+  const [eraseBusy, setEraseBusy] = useState(false);
+  const doErase = async () => {
+    setEraseBusy(true);
+    try {
+      const r = await eraseStudentData(student.id, eraseReason);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast("Account erased");
+      setShowErase(false);
+      router.push("/s/students");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setEraseBusy(false);
+    }
+  };
+
   return (
     <div className="pad">
       {/* Profile card */}
@@ -699,6 +722,24 @@ Currently ${current}. Type the code printed on the bag they are being given.
               <div className="muted" style={{ fontSize: "11.5px", marginTop: "3px" }}>{timeAgo(c.at)}</div>
             </div>
           ))}
+        </>
+      )}
+
+      {/* Danger zone */}
+      {staffRole >= 3 && (
+        <>
+          <div className="sec-title mt20">Danger zone</div>
+          <div className="card pad mt10" style={{ borderColor: "var(--red)" }}>
+            <div className="h-sm">Erase account</div>
+            <div className="muted mt4" style={{ fontSize: 12.5 }}>
+              Anonymises this student — name and phone are scrubbed, they can no longer sign in. Their orders
+              and payments stay (accounting requires them) but show as &quot;Deleted student&quot;. Irreversible.
+              Blocked automatically while an order is in progress.
+            </div>
+            <button className="btn xs mt12" style={{ color: "var(--red)" }} onClick={() => setShowErase(true)}>
+              Erase account
+            </button>
+          </div>
         </>
       )}
 
@@ -1071,6 +1112,21 @@ Currently ${current}. Type the code printed on the bag they are being given.
           <input className="input" placeholder="Visible to the student" value={comp.comment} onChange={(e) => setComp({ ...comp, comment: e.target.value })} />
         </div>
         <button className="btn" onClick={doComp} disabled={compBusy}><Svg name="gift" size={16} /> {compBusy ? "Issuing…" : "Issue compensation"}</button>
+      </Sheet>
+
+      <Sheet open={showErase} onClose={() => setShowErase(false)}>
+        <div className="h-md" style={{ padding: "0 4px 4px", color: "var(--red)" }}>Erase {student.name}&apos;s account?</div>
+        <div className="muted" style={{ padding: "0 4px 12px", fontSize: 12.5 }}>
+          This cannot be undone from here. Their name and phone number are scrubbed and they'll no longer be
+          able to sign in. Orders and payments stay on record for accounting, shown as "Deleted student".
+        </div>
+        <div className="field">
+          <label>Reason (required, for the audit log)</label>
+          <input className="input" placeholder="e.g. Graduated, requested erasure" value={eraseReason} onChange={(e) => setEraseReason(e.target.value)} />
+        </div>
+        <button className="btn" style={{ background: "var(--red)" }} onClick={doErase} disabled={eraseBusy || eraseReason.trim().length < 3}>
+          {eraseBusy ? "Erasing…" : "Erase account permanently"}
+        </button>
       </Sheet>
     </div>
   );

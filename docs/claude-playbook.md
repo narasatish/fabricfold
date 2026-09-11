@@ -12,6 +12,34 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11 (pass 17): Sheets sync silently ignored tab write failures
+
+Deep audit of Sheets integration found that every call to `writeSheet()` in
+`lib/sheets-sync.ts`'s `runSheetsSyncUnsafe()` function was awaited but its
+return value was never checked. The function returns `{ ok: boolean, error?: string }`
+per the API contract (lib/sheets.ts lines 147, 153), so:
+
+- If writeSheet("Daily") failed with a network error, `result.ok` would be false
+- The error was silently ignored, and the code continued to call writeSheet("Plans")
+- Earlier tabs (Live, Daily) that succeeded stayed in Google Sheets
+- The final return statement claimed all tabs succeeded: `tabs: ["Live", "Daily", "Plans", ...]`
+- The caller (Admin "Sync now" button) was misled into thinking the full sync worked
+
+Fixed by:
+1. Capturing the result of every writeSheet call
+2. Throwing an error immediately if any tab write fails (line 125, etc.)
+3. Updating writeStudentsTab to return `{ ok: boolean, error?: string }` so the
+   caller can check it
+4. Updating runRosterSync to check writeStudentsTab result and propagate errors
+5. Test-locking the fix: tests/sheets-error-handling.test.ts verifies that failed
+   writes are caught and error messages identify which tab failed (not generic)
+
+**Root cause, same pattern as other audit-pass findings**: fire-and-forget or
+unchecked async calls accumulate silently. The sheet sync runs infrequently
+(nightly + manual button), so this would only surface if Google Sheets became
+unreachable mid-sync. A network blip during "Sync now" would now error clearly
+instead of claiming success while leaving some tabs stale.
+
 ## RESOLVED 2026-09-11 (pass 16): 6 atomic-double-submit bugs in bag/plan/wallet operations
 
 Systematic audit on CustomerClient.tsx handlers and their underlying server-side

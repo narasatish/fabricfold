@@ -119,7 +119,7 @@ async function runSheetsSyncUnsafe() {
     db.complaint.count({ where: { status: "open" } }),
   ]);
 
-  await writeSheet("Live", [
+  let result = await writeSheet("Live", [
     ["FabricFold — Live", `updated ${stamp}`],
     [],
     ["TODAY", ""],
@@ -149,6 +149,7 @@ async function runSheetsSyncUnsafe() {
     ["Avg turnaround (hrs)", Math.round(month.avgTurnaround * 10) / 10],
     ["Avg rating", Math.round(month.avgRating * 10) / 10],
   ]);
+  if (!result.ok) throw new Error(`Live tab write failed: ${result.error}`);
 
   /* ---- Daily (last 30 days) ---- */
   const daily: (string | number)[][] = [[
@@ -164,7 +165,8 @@ async function runSheetsSyncUnsafe() {
       money(r.total), money(r.refunds), money(r.expTotal), money(r.net), money(r.netGst),
     ]);
   }
-  await writeSheet("Daily", daily);
+  result = await writeSheet("Daily", daily);
+  if (!result.ok) throw new Error(`Daily tab write failed: ${result.error}`);
 
   /* ---- Plans ---- */
   const [colleges, plansAll] = await Promise.all([
@@ -185,13 +187,15 @@ async function runSheetsSyncUnsafe() {
       subs.filter((s) => s.active).length, subs.reduce((s, x) => s + x.cyclesUsed, 0),
     ]);
   }
-  await writeSheet("Plans", planRows);
+  result = await writeSheet("Plans", planRows);
+  if (!result.ok) throw new Error(`Plans tab write failed: ${result.error}`);
 
   /* ---- Students (roster) ---- The owner's register: everyone who can walk
      up to the counter, their customer ID, plan and balance. Phone numbers ARE
      here — this is the owner's own operational sheet and they asked for them;
      the privacy page names Google as a processor for exactly this data. */
-  await writeStudentsTab();
+  const studentResult = await writeStudentsTab();
+  if (!studentResult.ok) throw new Error(`Students tab write failed: ${studentResult.error}`);
 
   /* ---- Complaints ---- Every grievance and what it cost to settle, so the
      true price of service failures is visible next to the revenue figures
@@ -234,7 +238,8 @@ async function runSheetsSyncUnsafe() {
   }
   const openCount = complaints.filter((c) => c.status === "open").length;
   compRows.push([], ["Open", openCount, "Resolved", complaints.length - openCount]);
-  await writeSheet("Complaints", compRows);
+  result = await writeSheet("Complaints", compRows);
+  if (!result.ok) throw new Error(`Complaints tab write failed: ${result.error}`);
 
   /* ---- Staff (attendance + day-close) ---- */
   const m = istDate().slice(0, 7);
@@ -256,7 +261,8 @@ async function runSheetsSyncUnsafe() {
   for (const c of closes) {
     staffRows.push([c.date, money(N(c.expectedCash)), money(N(c.countedCash)), money(N(c.variance)), c.note || ""]);
   }
-  await writeSheet("Staff", staffRows);
+  result = await writeSheet("Staff", staffRows);
+  if (!result.ok) throw new Error(`Staff tab write failed: ${result.error}`);
 
   /* ---- Config (editable) — the current live values, ready to change ---- */
   const fresh = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
@@ -279,9 +285,10 @@ async function runSheetsSyncUnsafe() {
   for (const p of freshPlans) {
     cfgRows.push([`Plan · ${colName(p.collegeId)} · ${p.name}`, N(p.price), p.active ? "active" : "inactive"]);
   }
-  await writeSheet("Config", cfgRows);
+  result = await writeSheet("Config", cfgRows);
+  if (!result.ok) throw new Error(`Config tab write failed: ${result.error}`);
 
-  return { ok: true as const, at: stamp, tabs: ["Live", "Daily", "Plans", "Staff", "Config"], applied };
+  return { ok: true as const, at: stamp, tabs: ["Live", "Daily", "Plans", "Students", "Complaints", "Staff", "Config"], applied };
 }
 
 /* ─── Roster tabs, refreshable on their own ────────────────────────────────
@@ -315,7 +322,7 @@ const STUDENT_HEADER = ["Customer ID", "Name", "Phone", "Type", "College", "Plan
    mix-up between colleges — even the Sheet"). A counter working BVRIT only
    should never have to filter St Mary's rows out by eye; a separate tab does
    that for free and can't drift, since both are built from the same query. */
-export async function writeStudentsTab() {
+export async function writeStudentsTab(): Promise<{ ok: boolean; error?: string }> {
   const [students, colleges] = await Promise.all([
     db.student.findMany({
       // An erased student (eraseStudentData/eraseMyData) is anonymised, not
@@ -340,7 +347,8 @@ export async function writeStudentsTab() {
   const rows: (string | number)[][] = [STUDENT_HEADER];
   for (const st of students) rows.push(studentRow(st));
   rows.push([], ["Total", students.length, "Faculty", students.filter((x) => x.kind === "faculty").length]);
-  await writeSheet("Students", rows);
+  let result = await writeSheet("Students", rows);
+  if (!result.ok) return result;
 
   for (const c of colleges) {
     const theirs = students.filter((st) => st.college?.id === c.id);
@@ -348,13 +356,16 @@ export async function writeStudentsTab() {
     for (const st of theirs) campusRows.push(studentRow(st));
     campusRows.push([], ["Total", theirs.length, "Faculty", theirs.filter((x) => x.kind === "faculty").length]);
     // Sheet tab names can't carry "/" — campus names are free text elsewhere.
-    await writeSheet(`Students — ${c.name}`.replace(/\//g, "-").slice(0, 100), campusRows);
+    result = await writeSheet(`Students — ${c.name}`.replace(/\//g, "-").slice(0, 100), campusRows);
+    if (!result.ok) return result;
   }
+  return { ok: true };
 }
 
 export async function runRosterSync() {
   if (!sheetsConfigured()) return { ok: false as const, error: "sheets not configured" };
-  await writeStudentsTab();
+  const result = await writeStudentsTab();
+  if (!result.ok) return result;
   return { ok: true as const };
 }
 

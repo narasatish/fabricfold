@@ -7,11 +7,13 @@ import { submitComplaint } from "@/lib/actions/complaints";
 import { compressImage } from "@/lib/compress-image";
 import { MIN_DAMAGE_PHOTOS, MAX_PHOTOS_PER_MESSAGE } from "@/lib/complaint-rules";
 
+type PhotoItem = { key: string; preview: string };
+
 export default function HelpClient({ orderId }: { orderId?: string }) {
   const router = useRouter();
   const toast = useToast();
   const [complaintText, setComplaintText] = useState("");
-  const [photos, setPhotos] = useState<string[]>([]);
+  const [photos, setPhotos] = useState<PhotoItem[]>([]);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -28,14 +30,19 @@ export default function HelpClient({ orderId }: { orderId?: string }) {
       // shrink on-device first: a raw phone photo is 3-12 MB, which is slow to
       // upload and was exhausting serverless memory on the receiving end
       const { file: upload } = await compressImage(file);
+      // Create a blob URL for local preview — doesn't require server auth or
+      // a completed complaint message, so the user sees the photo immediately
+      // before submitting. Revoked when the component unmounts or the photo is removed.
+      const preview = URL.createObjectURL(upload);
       fd.append("file", upload);
       const res = await fetch("/api/upload/complaint", { method: "POST", body: fd });
       if (!res.ok) {
+        URL.revokeObjectURL(preview); // clean up unused preview
         toast((await res.text()) || "Upload failed", true);
         return;
       }
       const j = (await res.json()) as { key: string };
-      setPhotos((p) => [...p, j.key]);
+      setPhotos((p) => [...p, { key: j.key, preview }]);
     } catch {
       toast("Upload failed", true);
     } finally {
@@ -50,13 +57,15 @@ export default function HelpClient({ orderId }: { orderId?: string }) {
     }
     setLoading(true);
     try {
-      const r = await submitComplaint(complaintText, orderId || null, photos);
+      const r = await submitComplaint(complaintText, orderId || null, photos.map((p) => p.key));
       if (!r.ok) {
         toast(r.error || "Could not submit", true);
         return;
       }
       toast("Complaint submitted");
       setComplaintText("");
+      // Clean up blob URLs before clearing photos
+      photos.forEach((p) => URL.revokeObjectURL(p.preview));
       setPhotos([]);
       router.refresh();
     } catch (e) {
@@ -78,15 +87,18 @@ export default function HelpClient({ orderId }: { orderId?: string }) {
 
       {photos.length > 0 && (
         <div className="row wrap gap8" style={{ marginTop: "10px" }}>
-          {photos.map((key, i) => (
-            <div key={key} style={{ position: "relative" }}>
+          {photos.map((photo, i) => (
+            <div key={photo.key} style={{ position: "relative" }}>
               <img
-                src={`/api/complaint-photo?key=${encodeURIComponent(key)}`}
+                src={photo.preview}
                 alt={`Photo ${i + 1}`}
                 style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)" }}
               />
               <button
-                onClick={() => setPhotos((p) => p.filter((k) => k !== key))}
+                onClick={() => {
+                  URL.revokeObjectURL(photo.preview);
+                  setPhotos((p) => p.filter((item) => item.key !== photo.key));
+                }}
                 aria-label="Remove photo"
                 style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%", background: "var(--red)", color: "#fff", border: "none", fontSize: 12, lineHeight: 1, display: "grid", placeItems: "center" }}
               >

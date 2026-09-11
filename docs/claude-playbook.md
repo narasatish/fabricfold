@@ -12,6 +12,17 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11 (pass 20): complaint photo preview silently failed to load before submission
+
+**File**: `app/c/help/_components/HelpClient.tsx`
+**Issue**: When a student uploaded a photo in the complaint form, the preview image failed to load with a 401 error. The preview used `/api/complaint-photo?key=...` to display the uploaded photo, but that endpoint checks `mayView()` to ensure the photo key exists on one of the student's own ComplaintMessage rows. Before the complaint is submitted, no ComplaintMessage exists yet, so the ownership check fails and returns 401. The student could upload photos successfully but couldn't see previews until after submitting the complaint (and then refreshing), creating a confusing UX where users couldn't confirm what they were uploading.
+
+**Root cause**: The photo preview flow tried to reuse the same authorization-gated endpoint as the post-complaint display, instead of using a method that didn't require server ownership checks.
+
+**Fixed by**: Switched from server-based preview to client-side blob URLs. When `compressImage` completes, the function now creates a `URL.createObjectURL()` blob URL from the compressed file and stores both the server upload key and the blob URL as a `{key, preview}` pair. The preview displays the blob URL (no server round-trip), and submitting sends the keys to the server. Blob URLs are cleaned up (via `URL.revokeObjectURL`) when photos are removed or when submission completes, preventing memory leaks. This works because the File object (and its compressed version) is already available in memory on the client, so a local preview is instant and requires no server auth.
+
+**Verified**: TypeScript clean, photo preview now displays immediately after successful upload, no broken images before submission.
+
 ## CORRECTED 2026-09-11: pass 19's error-message sanitization swallowed real validation messages
 
 Pass 19's fix for raw-error-leakage in `acceptOrder`/`placeOrder`/`issueBag`/

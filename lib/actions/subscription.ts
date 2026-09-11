@@ -253,7 +253,7 @@ export async function assignSubscription(studentId: string, planId: string, meth
       if (cash > 0) {
         await tx.payment.create({ data: { method, amount: cash, collegeId: stu.collegeId, studentId, note: `Subscription: ${plan.name} (assigned at counter)` } });
       }
-    });
+    }, { timeout: 15_000 }); // advisory lock can queue a concurrent caller past Prisma's 5s default
   } catch (e) {
     return { ok: false as const, error: (e as Error).message };
   }
@@ -536,7 +536,7 @@ export async function sellCyclePack(
     await enqueueSheetEvent(tx, "payment", [
       istStamp(), stu.name, `Cycle pack ${cycles}× ${label}`, price, creditApplied > 0 ? (cash > 0 ? `${input.method}+credit` : "credit") : input.method, "—",
     ]);
-  });
+  }, { timeout: 15_000 }); // advisory lock can queue a concurrent caller past Prisma's 5s default — found 2026-09-11 when this exact scenario threw "commit on expired transaction" under test
 
   const paidNote = creditApplied > 0 ? (cash > 0 ? `₹${cash} ${input.method} + ₹${creditApplied} credit` : `₹${creditApplied} credit`) : `₹${price} ${input.method}`;
   await audit("Cycle pack sold", `${stu.name} (${stu.id}) · ${cycles}× ${label} · ${paidNote}`, st.id);

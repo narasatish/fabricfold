@@ -479,7 +479,7 @@ export async function createPayslip(input: { staffId: string; month: string; bas
       return tx.payslip.create({
         data: { number, staffId: input.staffId, month: input.month, basic: input.basic, allowances: input.allowances, deductions: input.deductions, net, expenseId },
       });
-    });
+    }, { timeout: 15_000 }); // advisory lock can queue a concurrent caller past Prisma's 5s default — same class as orders.ts's acceptOrder/walkInOrder
   } catch (e) {
     if ((e as { code?: string }).code === "DUPLICATE_PAYSLIP" || (e as { code?: string }).code === "P2002") {
       return { ok: false as const, error: `${target.name} already has a payslip for ${input.month}` };

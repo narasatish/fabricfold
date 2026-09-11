@@ -104,7 +104,7 @@ export async function issueBag(
           });
         }
         return b;
-      });
+      }, { timeout: 15_000 }); // advisory lock can queue a concurrent caller past Prisma's 5s default — same class as orders.ts's acceptOrder/walkInOrder
       break;
     } catch (e) {
       const isCodeCollision = (e as { code?: string }).code === "P2002";

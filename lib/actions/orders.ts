@@ -118,7 +118,7 @@ export async function placeOrder(input: { service: string; items: { label: strin
           timeline: { create: { status: "placed" } },
         },
       });
-    });
+    }, { timeout: 15_000 }); // assertSlotBookable's advisory lock can queue a concurrent caller past Prisma's 5s default
   } catch (e) {
     return { ok: false as const, error: (e as Error).message };
   }

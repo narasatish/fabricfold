@@ -12,6 +12,41 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11: 4 advisory-lock transactions missing the 15s timeout bump
+
+Caught by a genuine (non-contention) full-suite failure: `sellCyclePack`'s
+behavioral test threw a real Prisma error —
+`Transaction API error: A commit cannot be executed on an expired
+transaction. The timeout for this transaction was 5000 ms, however 6161 ms
+passed since the start of the transaction.` This is the exact failure mode
+`acceptOrder`/`walkInOrder` were already bumped to `{ timeout: 15_000 }` for
+(2026-09-05): a `pg_advisory_xact_lock` makes a concurrent caller queue
+behind the lock holder, and Prisma's default 5s interactive-transaction
+timeout can expire while still queued — especially on this project's
+higher-latency remote test DB, but the same risk exists in production under
+real concurrent load.
+
+Grepped every `pg_advisory_xact_lock` call site and found the 15s bump had
+only ever been applied to `acceptOrder`/`walkInOrder` — 4 other advisory-lock
+transactions still had the bare 5s default:
+- `subscription.ts` `assignSubscription` (line ~256)
+- `subscription.ts` `sellCyclePack` (line ~539) — the one that actually failed
+- `admin.ts` `createPayslip` (line ~481)
+- `bags.ts` `issueBag` (line ~106)
+- `orders.ts` `placeOrder` — wraps `slot-capacity.ts`'s advisory lock, same exposure
+
+All 5 now use `{ timeout: 15_000 }`, matching the existing pattern. Verified:
+`tests/subscription-first-time-race-behavioral.test.ts`,
+`tests/payslip-race-behavioral.test.ts`, `tests/bag-race-behavioral.test.ts`,
+and `tests/slot-capacity-race-behavioral.test.ts` all pass together.
+
+**Lesson, same shape as several others this session**: when a fix pattern is
+applied to fix ONE instance of a bug, grep for every other call site sharing
+the same root mechanism (here: `pg_advisory_xact_lock`) before considering
+the class closed — the original 2026-09-05 fix only touched the two spots
+that had an active test catching it at the time, not every spot with the
+same underlying exposure.
+
 ## RESOLVED 2026-09-11 (pass 12): College.expressRates was declared but never writable
 
 Deep-audit pass for "checked but never written" bugs (following the pattern of

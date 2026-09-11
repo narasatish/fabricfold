@@ -77,7 +77,7 @@ export async function sendComplaintMessage(complaintId: string, text: string, ph
     await pushNotif(c.studentId, t ? `Staff replied to your complaint: "${t.slice(0, 80)}"` : "Staff sent photos on your complaint.", "status");
     if (pics.length) {
       const stu = await db.student.findUnique({ where: { id: c.studentId }, select: { phone: true } });
-      if (stu) void sendWhatsAppPhotos(stu.phone, pics, t || undefined);
+      if (stu) void sendWhatsAppPhotos(stu.phone, pics, t || undefined).catch(() => {});
     }
     publish([`student:${c.studentId}`], { type: "complaint.message", payload: { complaintId } });
   }
@@ -109,7 +109,7 @@ export async function reportOrderDamage(orderId: string, input: { comment: strin
   });
 
   await pushNotif(o.studentId, `We noticed something on order #${o.id.slice(-4)} before washing: ${comment.slice(0, 120)}`, "status");
-  void sendWhatsAppPhotos(o.student.phone, pics, `FabricFold — order #${o.id.slice(-4)}: ${comment.slice(0, 200)}`);
+  void sendWhatsAppPhotos(o.student.phone, pics, `FabricFold — order #${o.id.slice(-4)}: ${comment.slice(0, 200)}`).catch(() => {});
   await audit("Damage reported", `#${o.id.slice(-4)} · ${o.student.name} · ${pics.length} photos`, st.id);
   await enqueueSheetEvent(db, "complaint", [
     istStamp(),

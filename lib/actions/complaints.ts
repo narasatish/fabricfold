@@ -162,7 +162,21 @@ export async function resolveComplaint(complaintId: string, resolution: string):
   const c = await db.complaint.findUniqueOrThrow({ where: { id: complaintId } });
   assertSameCollege(st, c.collegeId);
   const res = resolution.trim() || "Resolved by staff.";
-  await db.complaint.update({ where: { id: complaintId }, data: { status: "resolved", resolvedAt: new Date() } });
+
+  /* Claim the complaint atomically before recording the resolution — the check
+     above ran before the update, so two concurrent calls could both pass it and
+     both resolve the complaint, with the second one creating a duplicate message
+     and sending a duplicate notification. Scoping the update to status === "open"
+     means only the first caller's write actually lands; the second caller can't
+     silently resolve it twice. */
+  const claimed = await db.complaint.updateMany({
+    where: { id: complaintId, status: "open" },
+    data: { status: "resolved", resolvedAt: new Date() },
+  });
+  if (claimed.count === 0) {
+    return { ok: false as const, error: "Complaint is already resolved" };
+  }
+
   await db.complaintMessage.create({ data: { complaintId, from: "staff", by: st.id, text: "Resolved: " + res } });
   await pushNotif(c.studentId, "Your complaint was resolved: " + res, "status");
   publish([`student:${c.studentId}`, `orders:${c.collegeId}`], { type: "complaint.message", payload: { complaintId } });

@@ -103,6 +103,16 @@ describe("grantFreeReservice can't give away a free re-service twice", () => {
   });
 });
 
+describe("resolveComplaint can't resolve twice and send duplicate notifications", () => {
+  it("claims the complaint atomically (status still open) before recording the resolution", () => {
+    const src = read("lib/actions/complaints.ts");
+    const fn = src.slice(src.indexOf("export async function resolveComplaint"));
+    expect(fn).toMatch(/db\.complaint\.updateMany\({[\s\S]*?where:[^}]*complaintId[^}]*status/);
+    expect(fn).toMatch(/if \(claimed\.count === 0\)/);
+    expect(fn).toMatch(/Complaint is already resolved/);
+  });
+});
+
 describe("BVRIT self-registration can actually be retried after a failure", () => {
   it("reverts the WaVerify claim back to 'verified' if account creation throws", () => {
     const src = read("lib/actions/wa-register.ts");

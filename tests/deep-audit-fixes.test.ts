@@ -174,7 +174,10 @@ describe("money-moving buttons can't be double-tapped, and refund/compensation c
       const src = read(f);
       expect(src, f).toMatch(/const \[compBusy, setCompBusy\] = useState\(false\)/);
       expect(src, f).toMatch(/if \(!confirm\(`Issue \$\{fmt\(comp\.amount\)\} compensation/);
-      expect(src, f).toMatch(/disabled=\{compBusy\}/);
+      // CustomerClient additionally disables on a non-positive amount (fixed
+      // 2026-09-11, client-side mirror of the server's own rejection) —
+      // match either form, both still guard against double-submit.
+      expect(src, f).toMatch(/disabled=\{compBusy(?: \|\| comp\.amount <= 0)?\}/);
     }
   });
   it("HomeClient subscription activation has a busy guard", () => {

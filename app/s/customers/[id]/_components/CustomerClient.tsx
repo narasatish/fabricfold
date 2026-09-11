@@ -1097,7 +1097,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
         </div>
         <div className="field">
           <label>Amount (₹)</label>
-          <input className="input" type="number" value={comp.amount || ""} onChange={(e) => setComp({ ...comp, amount: Number(e.target.value) })} />
+          <input className="input" type="number" min={0} value={comp.amount || ""} onChange={(e) => setComp({ ...comp, amount: Number(e.target.value) })} />
         </div>
         <div className="field">
           <label>Method</label>
@@ -1111,7 +1111,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
           <label>Comment</label>
           <input className="input" placeholder="Visible to the student" value={comp.comment} onChange={(e) => setComp({ ...comp, comment: e.target.value })} />
         </div>
-        <button className="btn" onClick={doComp} disabled={compBusy}><Svg name="gift" size={16} /> {compBusy ? "Issuing…" : "Issue compensation"}</button>
+        <button className="btn" onClick={doComp} disabled={compBusy || comp.amount <= 0}><Svg name="gift" size={16} /> {compBusy ? "Issuing…" : "Issue compensation"}</button>
       </Sheet>
 
       <Sheet open={showErase} onClose={() => setShowErase(false)}>

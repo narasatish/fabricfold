@@ -12,6 +12,53 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11: BVRIT rates UX, a genuinely missing busy guard, and two validation gaps
+
+A round-3 pass covering data freshness, client-side cross-college leakage,
+form validation, and a fresh-eyes UX walkthrough of the per-college rates
+sheet. Freshness and cross-college leakage checked out clean (the `/s`
+layout already declares `dynamic = "force-dynamic"`; every dropdown/select
+sampled was correctly scoped). Three real fixes:
+
+**Per-college rates sheet seeded from the wrong data for a first-time
+campus.** Opening "Per-piece rates" on a campus with no existing override
+(exactly BVRIT's situation) seeded the editor from the GLOBAL rates blob —
+which for washFold/washIron carries their legacy multi-item, cycle-era
+price lists (₹12/₹20, ₹15/₹25), nothing like a sensible per-piece starting
+point, and also pulled in ironOnly/dryClean items that don't need
+overriding at all. `resolveCollegeRates` merges per-SERVICE key, not
+wholesale, so a campus's override only needs entries for the services it's
+actually changing. Now seeds a fresh campus with just washFold (₹15) and
+washIron (₹20), one line item each — exactly BVRIT's stated requirement,
+nothing to delete or puzzle over. Tightened the sheet's copy to say
+explicitly that only Wash & Fold/Wash & Iron are affected by the toggle.
+
+**`createPayslip`'s button had no busy-state guard or try/catch at all** —
+missed by every earlier button-handler sweep this session (all of which
+checked `lib/actions/*.ts` and their existing callers, not a fresh grep for
+NEW unguarded onClick handlers). An unhandled server error would leave the
+button silently clickable with zero feedback, and nothing stopped a
+double-tap from firing two `createPayslip` calls before the server's own
+advisory-lock+duplicate-check even ran. Added the same disabled+try/catch/
+finally pattern used everywhere else tonight. While fixing it, also noticed
+the "Net pay" display clamped negative values to ₹0 via `Math.max(0, ...)`
+— masking the actual computed number from the Owner instead of showing them
+why the create button was about to be rejected. Now shows the true
+(possibly negative, shown in red) value with an inline explanation, and the
+submit button is disabled client-side to match the server's own
+`net < 0` rejection — no more discovering the problem only after a
+round-trip.
+
+**Compensation amount had no client-side floor.** A staff member could
+type a negative amount and only find out it was rejected after the
+request round-tripped to the server (`lib/actions/credits.ts`'s own
+`amount <= 0` check). Added `min={0}` to the input and disabled the submit
+button while `comp.amount <= 0`, mirroring the payslip fix's same pattern.
+
+Verified: 12 affected test files (291 tests, including one stale assertion
+in `deep-audit-fixes.test.ts` updated to match the compensation button's
+new guard condition) pass; tsc clean.
+
 ## RESOLVED + FLAGGED 2026-09-11: widened the "zero call sites" sweep beyond lib/actions
 
 Extended the same audit to lib/*.ts (non-action helpers), every API route

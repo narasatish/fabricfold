@@ -100,6 +100,11 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   const [impBusy, setImpBusy] = useState(false);
   const [impResult, setImpResult] = useState<null | { added: string[]; skipped: string[]; problems: string[]; warnings: string[] }>(null);
   const [slip, setSlip] = useState({ staffId: staff[0]?.id || "", month: istDateStr(Date.now()).slice(0, 7), basic: 0, allowances: 0, deductions: 0, postExpense: true });
+  // Found 2026-09-11: this button had no busy-state guard or try/catch at
+  // all — an unhandled server error left it silently clickable with no
+  // feedback, and nothing stopped a double-tap from creating two payslips
+  // before the advisory-lock/duplicate-check on the server even ran.
+  const [slipBusy, setSlipBusy] = useState(false);
   // The dropdown below is scoped to visibleStaff, but slip.staffId was only
   // ever seeded once from the FULL staff list at mount — switching campus
   // (or the dropdown just falling back to its first option because the
@@ -161,7 +166,25 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
      no way for the Owner to fix it. */
   const [collegeRatesEdit, setCollegeRatesEdit] = useState<{ collegeId: string; collegeName: string; useOverride: boolean; rates: Rates }>({ collegeId: "", collegeName: "", useOverride: false, rates: {} });
   const openCollegeRates = (c: { id: string; name: string; rates?: Rates }) => {
-    const seed = c.rates ? JSON.parse(JSON.stringify(c.rates)) as Rates : JSON.parse(JSON.stringify(rates)) as Rates;
+    /* saveCollegeRates/resolveCollegeRates merge per-SERVICE key, not
+       wholesale — a campus only needs an entry here for the services it's
+       actually overriding; anything else still falls through to the global
+       rates untouched. Seeding from the FULL global rates blob (the
+       original version of this sheet) copied over washFold/washIron's
+       legacy multi-item cycle-era price lists (₹12/₹20, ₹15/₹25) as the
+       starting point for a brand-new per-piece campus, which is exactly
+       backwards — those numbers have nothing to do with what a per-piece
+       campus should charge. A fresh campus gets a clean single-item
+       default per service instead; ironOnly/dryClean aren't included since
+       BVRIT's actual requirement (₹15 Wash & Fold, ₹20 Wash & Iron) only
+       needs these two, and they can still be added manually if a campus
+       needs to override further. */
+    const seed: Rates = c.rates
+      ? (JSON.parse(JSON.stringify(c.rates)) as Rates)
+      : {
+          washFold: { label: "Wash & Fold", items: [["Regular garment", 15] as [string, number]] },
+          washIron: { label: "Wash & Iron", items: [["Regular garment", 20] as [string, number]] },
+        };
     setCollegeRatesEdit({ collegeId: c.id, collegeName: c.name, useOverride: !!c.rates, rates: seed });
     setSheet("collegeRates");
   };
@@ -528,7 +551,9 @@ Students already registered there keep their records and can be restored with th
         <div className="h-md" style={{ padding: "0 4px 4px" }}>Per-piece rates — {collegeRatesEdit.collegeName}</div>
         <div className="muted" style={{ padding: "0 4px 12px", fontSize: 12.5 }}>
           Off: this campus bills the same way every campus does by default — Wash &amp; Fold / Wash &amp; Iron by the cycle.
-          On: every service below bills per piece for {collegeRatesEdit.collegeName} only, using the prices you set here — no cycles, no weight.
+          On: Wash &amp; Fold and Wash &amp; Iron below bill per piece for {collegeRatesEdit.collegeName} only, at the prices you
+          set here — no cycles, no weight. Other services (Iron Only, Dry Clean) are unaffected by this toggle; add a
+          service below only if you need to override its price for this campus specifically.
         </div>
         <div className="chip-toggle" style={{ marginBottom: 14 }}>
           <div>
@@ -724,13 +749,21 @@ Students already registered there keep their records and can be restored with th
           </select>
         </div>
         <div className="field"><label>Month</label><input className="input" type="month" value={slip.month} onChange={(e) => setSlip({ ...slip, month: e.target.value })} /></div>
-        <div className="field"><label>Basic salary (₹)</label><input className="input" type="number" value={slip.basic || ""} onChange={(e) => setSlip({ ...slip, basic: Number(e.target.value) })} /></div>
-        <div className="field"><label>Allowances (₹)</label><input className="input" type="number" value={slip.allowances || ""} onChange={(e) => setSlip({ ...slip, allowances: Number(e.target.value) })} /></div>
-        <div className="field"><label>Deductions (₹)</label><input className="input" type="number" value={slip.deductions || ""} onChange={(e) => setSlip({ ...slip, deductions: Number(e.target.value) })} /></div>
+        <div className="field"><label>Basic salary (₹)</label><input className="input" type="number" min={0} value={slip.basic || ""} onChange={(e) => setSlip({ ...slip, basic: Number(e.target.value) })} /></div>
+        <div className="field"><label>Allowances (₹)</label><input className="input" type="number" min={0} value={slip.allowances || ""} onChange={(e) => setSlip({ ...slip, allowances: Number(e.target.value) })} /></div>
+        <div className="field"><label>Deductions (₹)</label><input className="input" type="number" min={0} value={slip.deductions || ""} onChange={(e) => setSlip({ ...slip, deductions: Number(e.target.value) })} /></div>
         <div className="card pad" style={{ marginBottom: 12 }}>
           <div className="kv total" style={{ borderTop: "none", margin: 0, padding: 0 }}>
-            <span>Net pay</span><span className="mono">{fmt(Math.max(0, slip.basic + slip.allowances - slip.deductions))}</span>
+            <span>Net pay</span>
+            <span className="mono" style={{ color: slip.basic + slip.allowances - slip.deductions < 0 ? "var(--red)" : undefined }}>
+              {fmt(slip.basic + slip.allowances - slip.deductions)}
+            </span>
           </div>
+          {slip.basic + slip.allowances - slip.deductions < 0 && (
+            <div className="muted" style={{ fontSize: 11.5, color: "var(--red)", marginTop: 4 }}>
+              Deductions exceed basic + allowances — net pay can&apos;t be negative
+            </div>
+          )}
         </div>
         <div className="chip-toggle" style={{ marginBottom: 15 }}>
           <div><div className="h-sm">Post to Salaries expenses</div><div className="muted" style={{ fontSize: 12 }}>Flows into accounts &amp; net</div></div>
@@ -738,15 +771,23 @@ Students already registered there keep their records and can be restored with th
         </div>
         <button
           className="btn"
+          disabled={slipBusy || slip.basic + slip.allowances - slip.deductions < 0}
           onClick={async () => {
-            const r = await createPayslip(slip);
-            if (!r.ok) return toast(r.error || "Failed", true);
-            toast(`Payslip ${"number" in r ? r.number : ""} created`);
-            setSheet(null);
-            router.refresh();
+            setSlipBusy(true);
+            try {
+              const r = await createPayslip(slip);
+              if (!r.ok) return toast(r.error || "Failed", true);
+              toast(`Payslip ${"number" in r ? r.number : ""} created`);
+              setSheet(null);
+              router.refresh();
+            } catch (e) {
+              toast(e instanceof Error ? e.message : "Failed", true);
+            } finally {
+              setSlipBusy(false);
+            }
           }}
         >
-          Create payslip
+          {slipBusy ? "Creating…" : "Create payslip"}
         </button>
       </Sheet>
 

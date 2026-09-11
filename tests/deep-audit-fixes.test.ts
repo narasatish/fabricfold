@@ -83,7 +83,7 @@ describe("flushSheetOutbox claims its batch before appending, holding the lock t
 
 describe("issueBag can't create two active bags for one student under concurrency", () => {
   const bagsSrc = read("lib/actions/bags.ts");
-  const fn = bagsSrc.slice(bagsSrc.indexOf("export async function issueBag"), bagsSrc.indexOf("export async function issueBag") + 5000);
+  const fn = bagsSrc.slice(bagsSrc.indexOf("export async function issueBag"), bagsSrc.indexOf("export async function issueBag") + 5500);
   it("locks and re-checks 'already active' fresh, inside the transaction", () => {
     expect(fn).toMatch(/FOR UPDATE`/);
     expect(fn).toMatch(/const stillActive = await tx\.bag\.findFirst/);

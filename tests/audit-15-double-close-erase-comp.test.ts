@@ -11,6 +11,25 @@ describe.skipIf(!process.env.DATABASE_URL?.startsWith("postgres"))("audit 15: ra
   let testCollegeId = "";
 
   beforeAll(async () => {
+    // Defensive cleanup first: an interrupted prior run (killed mid-test, a
+    // common thing this session while clearing stray vitest processes) can
+    // leave these fixed-id rows behind with afterAll never having run,
+    // which then crashes this same create() on a unique-constraint
+    // violation on every subsequent run until someone notices and cleans
+    // the DB by hand. Delete-then-create makes this file idempotent
+    // regardless of how the previous run ended.
+    // Delete children before the college itself — an FK constraint from any
+    // leftover Order/Compensation row silently blocks college.deleteMany
+    // (swallowed by .catch), leaving the college row in place so the
+    // create() below then fails on its own unique constraint. Covers every
+    // fixed id this file creates anywhere, not just the outer-scope ones.
+    await db.compensation.deleteMany({ where: { orderId: { in: ["test-order-comp-dup"] } } }).catch(() => {});
+    await db.order.deleteMany({ where: { id: { in: ["test-order-active", "test-order-comp-dup"] } } }).catch(() => {});
+    await db.dayClose.deleteMany({ where: { by: "test-staff-audit15" } }).catch(() => {});
+    await db.student.deleteMany({ where: { id: { in: ["test-student-audit15", "test-student-active-order"] } } }).catch(() => {});
+    await db.staff.deleteMany({ where: { id: "test-staff-audit15" } }).catch(() => {});
+    await db.college.deleteMany({ where: { id: "test-college-audit15" } }).catch(() => {});
+
     const college = await db.college.create({
       data: {
         id: "test-college-audit15",
@@ -84,6 +103,11 @@ describe.skipIf(!process.env.DATABASE_URL?.startsWith("postgres"))("audit 15: ra
   });
 
   test("eraseStudentData: blocks erasure when student has active order", async () => {
+    // Same idempotency concern as the outer beforeAll: these fixed ids must
+    // not still exist from an interrupted prior run.
+    await db.order.deleteMany({ where: { id: "test-order-active" } }).catch(() => {});
+    await db.student.deleteMany({ where: { id: "test-student-active-order" } }).catch(() => {});
+
     const student = await db.student.create({
       data: { id: "test-student-active-order", phone: "9988776644", name: "Active Order Student", collegeId: testCollegeId },
     });
@@ -115,6 +139,12 @@ describe.skipIf(!process.env.DATABASE_URL?.startsWith("postgres"))("audit 15: ra
       where: { studentId: student.id, status: { in: ["received", "processing"] } },
     });
     expect(activeOrder).not.toBeNull();
+
+    // Clean up — these rows aren't covered by the outer afterAll (order has
+    // no cleanup there at all, and this student's collegeId happens to match
+    // testCollegeId only incidentally).
+    await db.order.delete({ where: { id: order.id } }).catch(() => {});
+    await db.student.delete({ where: { id: student.id } }).catch(() => {});
   });
 
   test("submitCompensation: prevents duplicate compensation for same incident", async () => {

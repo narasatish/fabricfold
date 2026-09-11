@@ -1876,3 +1876,31 @@ verification themselves. Code-level fixes are verified via the test suite
 (`npm test`) and, where practical, a live *unauthenticated* browser check
 (console errors, CSP headers, page rendering) — this catches real bugs (the
 CSP `worker-src` gap was found exactly this way) without needing a session.
+
+## RESOLVED 2026-09-11: accept-order / free-redo / advance-status busy-guards, round 6 clean sweep
+
+Rounds 4-5 of the overnight UI-wiring audit found three more buttons with the
+same "missing busy-state guard" gap that had already been fixed on every
+other mutating button (collect/pay/refund/compensation/cancel/payslip): the
+staff order-detail page's "Accept order" (commit 3a26ff9), "Free re-do"
+(ec55d8f), and "Start processing / Mark ready / Verify & mark collected"
+(d58f7ad) buttons could all be double-tapped to fire two concurrent server
+calls. Fixed with the established pattern (busy state + re-entry guard +
+try/finally + disabled + "...ing" label), each verified independently (diff
+read personally, tsc --noEmit, grep for stale source-slice tests, full
+829/829 suite, build, deploy, live console check) before shipping.
+
+Round 6 swept subscriptions, Sheets-sync UI, photo uploads, express-fee
+calc, broadcast messaging, and swallowed-error catches - all genuinely
+clean. One false alarm worth recording: the agent's report claimed it had
+just fixed a "40%-of-subtotal" express-fee display bug in
+CustomerClient.tsx, but git log/git status showed no new commit and a
+clean tree - the fix was already in the code from a prior session (there's
+even an inline comment documenting it: "Bug fixed here..."). The agent
+mistook pre-existing code it read for something it had just changed. Lesson
+reinforced: an agent's self-report of "what I fixed" must be checked against
+git log/git diff, not taken at face value, even when the report sounds
+specific and confident - same failure mode as earlier miscounted test
+claims, just applied to commit claims instead. Severity of genuine findings
+has now dropped to zero for a full round, suggesting the UI-wiring gap class
+is close to exhausted.

@@ -145,6 +145,7 @@ export default function StaffOrderClient({
   const [countedPieces, setCountedPieces] = useState<number>(intakeCount);
   const [readyBusy, setReadyBusy] = useState(false);
   const [acceptBusy, setAcceptBusy] = useState(false);
+  const [redoBusy, setRedoBusy] = useState(false);
 
   const late = isOverdue({ status: order.status, receivedAt: order.receivedAt ? new Date(order.receivedAt) : null, express: order.express }) && (order.status === "received" || order.status === "processing");
   const isDraft = order.status === "draft";
@@ -389,6 +390,8 @@ export default function StaffOrderClient({
   // Handler: redo
   const handleRedo = async () => {
     if (!confirm("Create a free re-do of this order?")) return;
+    if (redoBusy) return;
+    setRedoBusy(true);
     try {
       const r = await redoOrder(order.id);
       if (!r.ok) {
@@ -399,6 +402,8 @@ export default function StaffOrderClient({
       router.push(`/s/orders/${r.id}`);
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setRedoBusy(false);
     }
   };
 
@@ -689,8 +694,8 @@ export default function StaffOrderClient({
           </button>
         )}
         {["processing", "ready", "collected"].includes(order.status) && (
-          <button className="btn xs sec" onClick={handleRedo}>
-            <Svg name="layers" size={15} /> Free re-do
+          <button className="btn xs sec" onClick={handleRedo} disabled={redoBusy}>
+            <Svg name="layers" size={15} /> {redoBusy ? "Creating…" : "Free re-do"}
           </button>
         )}
         {!["collected", "cancelled"].includes(order.status) && (

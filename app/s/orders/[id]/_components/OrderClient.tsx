@@ -146,6 +146,7 @@ export default function StaffOrderClient({
   const [readyBusy, setReadyBusy] = useState(false);
   const [acceptBusy, setAcceptBusy] = useState(false);
   const [redoBusy, setRedoBusy] = useState(false);
+  const [advanceBusy, setAdvanceBusy] = useState(false);
 
   const late = isOverdue({ status: order.status, receivedAt: order.receivedAt ? new Date(order.receivedAt) : null, express: order.express }) && (order.status === "received" || order.status === "processing");
   const isDraft = order.status === "draft";
@@ -269,6 +270,8 @@ export default function StaffOrderClient({
   const handleAdvance = async () => {
     // Going to ready goes through the recount prompt instead.
     if (order.status === "processing") return setShowReady(true);
+    if (advanceBusy) return;
+    setAdvanceBusy(true);
     try {
       const r = await advanceStatus(order.id);
       if (!r.ok) {
@@ -279,6 +282,8 @@ export default function StaffOrderClient({
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setAdvanceBusy(false);
     }
   };
 
@@ -635,8 +640,8 @@ export default function StaffOrderClient({
       {!isDraft && order.status !== "collected" && (
         <>
           {order.status !== "ready" && (
-            <button className="btn mt16" onClick={handleAdvance}>
-              {order.status === "received" ? "Start processing" : order.status === "processing" ? "Mark ready for collection" : "Verify & mark collected"}
+            <button className="btn mt16" onClick={handleAdvance} disabled={advanceBusy}>
+              {advanceBusy ? "Processing…" : order.status === "received" ? "Start processing" : order.status === "processing" ? "Mark ready for collection" : "Verify & mark collected"}
             </button>
           )}
 

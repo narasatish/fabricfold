@@ -12,6 +12,78 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11 (pass 16): 6 atomic-double-submit bugs in bag/plan/wallet operations
+
+Systematic audit on CustomerClient.tsx handlers and their underlying server-side
+actions found and fixed six bugs where concurrent calls to the same operation
+could either double-charge a student or send duplicate notifications:
+
+### UI-level bugs (missing busy-state guards):
+
+1. **doReissue (CustomerClient line 155)**: No busy-state guard. The button can
+   be clicked multiple times in rapid succession, firing multiple concurrent
+   `reissueBagSameCode` calls. Added `reissueBusy` state, try/finally guard,
+   and button disable. Same pattern as the existing `bagBusy`, `tuLoading`, etc.
+
+2. **doReleaseBag (CustomerClient line 215)**: No busy-state guard. Same gap as
+   doReissue. Added `releaseBusy` state, try/finally guard, and button disable.
+
+### Server-side atomicity bugs:
+
+3. **reissueBagSameCode (bags.ts line 219)**: 
+   - Pre-check at line 224 runs outside transaction
+   - Two concurrent calls both pass, both try to create active bag with same code
+   - Second call's create hits unique constraint (P2002) and threw unhandled error
+   - Fixed by: (a) adding try/catch for P2002 with friendly message, (b) adding
+     atomic re-check inside transaction to catch stale reads. Now if bag.status
+     changed between the check and the transaction, the error is caught and
+     reported cleanly.
+
+4. **releaseBagCode (bags.ts line 346)**:
+   - Pre-checks at lines 351-364 all run outside transaction
+   - Two concurrent calls both pass all checks, then both update the bag
+   - Second caller sees success even though bag was already released
+   - Fixed by: replacing unconditional update with atomic `updateMany({where:
+     {status: {not: "released"}}})` and checking affected count. Now only the
+     first caller's update matches and commits; second gets "already released".
+     Same pattern as retireBag (line 387) which was already using this correctly.
+
+5. **upgradeSubscription (subscription.ts line 291)**:
+   - Pre-check at line 310 runs outside transaction (`cur.planId === plan.id`)
+   - Two concurrent upgrade attempts to the same plan both pass the check
+   - Both acquire the advisory lock sequentially and both execute the update
+   - Both create a Payment row, charging the student twice for one upgrade
+   - Fixed by: re-checking inside the transaction (after the lock, fresh read)
+     that `fresh.planId !== plan.id` before proceeding. Second caller throws
+     "already on that plan" instead of creating a duplicate Payment.
+
+6. **cancelSubscription (subscription.ts line 393)**:
+   - Pre-check at line 406 runs outside transaction
+   - Two concurrent cancels both pass it
+   - Both call update and both send pushNotif/audit/notifyOwner calls
+   - Results in duplicate notifications to student and owner
+   - Fixed by: replacing unconditional update with atomic `updateMany({where:
+     {active: true}})` and checking affected count. Now only first caller
+     updates and notifies; second gets "already inactive" error. Same pattern
+     as collectOrder's atomic status transition (orders.ts line 568).
+
+**Root cause, pattern from earlier passes**: When a function reads a precondition
+outside a transaction, then does an unconditional write inside (or no transaction
+at all), two concurrent calls can both pass the check and both write, corrupting
+state or duplicating side effects. The fix is ALWAYS: either move the check
+inside the transaction and re-check after acquiring a lock/re-read, OR use
+`updateMany` with the precondition in the WHERE clause and check affected count.
+This session found six instances; all now follow this pattern consistently.
+
+**Not fixed (already correct)**:
+- OrderClient.tsx handlers (handleCollect, handlePayCash, handlePayUpi) — all
+  have actionBusy guards and their server-side actions (collectOrder via
+  updateMany; recordPay via payCore's P2002 unique-index backstop) are safe.
+- lib/bagcode.ts allocateBagCode — recycled-code race is intentionally handled
+  by P2002 collision + retry loop (issueBag lines 69-113), documented as working.
+- app/api/import/students bulk import — concurrent overlapping phone numbers
+  correctly get P2002 constraint violation, caught as per-row error (line 196).
+
 ## RESOLVED 2026-09-11 (pass 15): 3 race/atomicity issues in closeDay, erasure, compensation
 
 Systematic audit on ReportsClient.tsx, ops.ts closeDay, privacy.ts erasure, and

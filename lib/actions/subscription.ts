@@ -329,6 +329,15 @@ export async function upgradeSubscription(studentId: string, planId: string, met
     await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Subscription"`)} WHERE "studentId" = ${studentId} FOR UPDATE`;
     const fresh = await tx.subscription.findUniqueOrThrow({ where: { studentId } });
 
+    /* Re-check: the pre-check above ran outside the transaction at line 310.
+       Two concurrent upgrades could both pass it, both enter the transaction
+       and get the lock sequentially, and both proceed to create a Payment row
+       each. Only the first upgrade's Payment is legitimate; the second is a
+       duplicate charge. Re-check that the plan hasn't changed before writing. */
+    if (fresh.planId === plan.id) {
+      throw new Error("They're already on that plan");
+    }
+
     // Rebuild buckets on the new plan, carrying the old usage across.
     const oldBuckets = (fresh.buckets as unknown as Used[] | null) || [];
     const usedByService = new Map<string, number>();
@@ -407,10 +416,15 @@ export async function cancelSubscription(studentId: string, reason: string) {
 
   const left = Math.max(0, sub.cyclesTotal - sub.cyclesUsed);
 
-  await db.subscription.update({
-    where: { studentId },
+  /* Atomic update: the pre-check above ran outside the transaction. Two
+     concurrent cancels both pass it and both enter the update. Using
+     updateMany with a WHERE condition ensures only one actually changes
+     the active status, so notifications and audit entries aren't duplicated. */
+  const cancelled = await db.subscription.updateMany({
+    where: { studentId, active: true },
     data: { active: false, cancelledAt: new Date(), cancelledReason: note, cancelledBy: st.id },
   });
+  if (cancelled.count === 0) return { ok: false as const, error: "That plan is already inactive" };
 
   await pushNotif(
     studentId,

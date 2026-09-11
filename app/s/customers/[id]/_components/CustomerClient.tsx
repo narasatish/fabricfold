@@ -152,6 +152,7 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
   /* A lost bag does not change who the student is. They get a fresh bag with
      the SAME number printed on it, because a customer ID that changes whenever
      someone mislays a bag is not an identity. */
+  const [reissueBusy, setReissueBusy] = useState(false);
   const doReissue = async (bagId: string, code: string) => {
     if (!confirm(
       `Reissue ${code} to ${student.name}?
@@ -162,6 +163,7 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
 ` +
       `If the old bag turns up later it will also say ${code}. Destroy it; do not put it back into stock.`,
     )) return;
+    setReissueBusy(true);
     try {
       const r = await reissueBagSameCode(bagId, "lost");
       if (!r.ok) return toast(r.error || "Failed", true);
@@ -169,6 +171,8 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setReissueBusy(false);
     }
   };
 
@@ -212,6 +216,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
      Kept apart from "lost" and "replaced" because only this frees the code for
      somebody else, and the confirm spells out what that means. The action
      itself refuses while a plan or an open order is live. */
+  const [releaseBusy, setReleaseBusy] = useState(false);
   const doReleaseBag = async (bagId: string, code: string) => {
     if (!confirm(
       `Release customer ID ${code}?\n\n` +
@@ -219,6 +224,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
       `Their past orders keep this code — only future issuing is affected.\n\n` +
       `For a bag that was lost or swapped on a plan change, use Lost or Replaced instead: those keep the code reserved.`,
     )) return;
+    setReleaseBusy(true);
     try {
       const r = await releaseBagCode(bagId);
       if (!r.ok) return toast(r.error || "Failed", true);
@@ -226,6 +232,8 @@ Currently ${current}. Type the code printed on the bag they are being given.
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setReleaseBusy(false);
     }
   };
 
@@ -626,9 +634,9 @@ Currently ${current}. Type the code printed on the bag they are being given.
                 <div className="muted mt4" style={{ fontSize: 12 }}>Issued {dateStr(activeBag.issuedAt)}</div>
                 <div className="row gap8 mt12">
                   <button className="btn xs sec" onClick={() => doEditBagCode(activeBag.id, activeBag.code)}>Change ID</button>
-                  <button className="btn xs sec" onClick={() => doReissue(activeBag.id, activeBag.code)}>Lost — reissue</button>
-                  <button className="btn xs sec" style={{ color: "var(--red)" }} onClick={() => doReleaseBag(activeBag.id, activeBag.code)}>
-                    Student left
+                  <button className="btn xs sec" disabled={reissueBusy} onClick={() => doReissue(activeBag.id, activeBag.code)}>{reissueBusy ? "Reissuing…" : "Lost — reissue"}</button>
+                  <button className="btn xs sec" disabled={releaseBusy} style={{ color: "var(--red)" }} onClick={() => doReleaseBag(activeBag.id, activeBag.code)}>
+                    {releaseBusy ? "Releasing…" : "Student left"}
                   </button>
                 </div>
                 <div className="muted mt8" style={{ fontSize: 11.5 }}>

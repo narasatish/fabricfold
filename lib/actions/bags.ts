@@ -223,30 +223,48 @@ export async function reissueBagSameCode(bagId: string, reason: "lost" | "damage
   assertSameCollege(st, bag.student.collegeId);
   if (bag.status !== "active") return { ok: false as const, error: `That bag is already marked ${bag.status}` };
 
-  const fresh = await db.$transaction(async (tx) => {
-    /* Retire first. The unique index allows one ACTIVE bag per code, so the
-       old row has to stop being active before the new one starts. */
-    await tx.bag.update({
-      where: { id: bagId },
-      data: { status: "lost", note: `${reason} — reissued with the same code` },
+  try {
+    const fresh = await db.$transaction(async (tx) => {
+      /* Re-check inside the transaction: the pre-check above ran outside, and
+         two concurrent reissue calls could both pass it, then both enter the
+         transaction. Only one should succeed; the second's create throws P2002.
+         Same pattern as other atomic operations in this codebase. */
+      const stillActive = await tx.bag.findUnique({ where: { id: bagId } });
+      if (!stillActive || stillActive.status !== "active") {
+        throw new Error(`That bag is already marked ${stillActive?.status || "unknown"}`);
+      }
+      /* Retire first. The unique index allows one ACTIVE bag per code, so the
+         old row has to stop being active before the new one starts. */
+      await tx.bag.update({
+        where: { id: bagId },
+        data: { status: "lost", note: `${reason} — reissued with the same code` },
+      });
+      return tx.bag.create({
+        data: {
+          code: bag.code, // the whole point: same number, new bag
+          studentId: bag.studentId,
+          tier: bag.tier,
+          complimentary: true,
+          price: 0,
+          issuedBy: st.id,
+          note: `Replacement for a ${reason} bag`,
+        },
+      });
     });
-    return tx.bag.create({
-      data: {
-        code: bag.code, // the whole point: same number, new bag
-        studentId: bag.studentId,
-        tier: bag.tier,
-        complimentary: true,
-        price: 0,
-        issuedBy: st.id,
-        note: `Replacement for a ${reason} bag`,
-      },
-    });
-  });
 
-  await pushNotif(bag.studentId, `Your replacement bag is ready — same number, ${bag.code}. Collect it at the counter.`, "status");
-  await audit("Bag reissued", `${bag.code} · ${bag.student.name} · ${reason}, same code`, st.id);
-  publish([`student:${bag.studentId}`, `orders:${bag.student.collegeId}`], { type: "bag", payload: { studentId: bag.studentId, code: bag.code } });
-  return { ok: true as const, code: fresh.code };
+    await pushNotif(bag.studentId, `Your replacement bag is ready — same number, ${bag.code}. Collect it at the counter.`, "status");
+    await audit("Bag reissued", `${bag.code} · ${bag.student.name} · ${reason}, same code`, st.id);
+    publish([`student:${bag.studentId}`, `orders:${bag.student.collegeId}`], { type: "bag", payload: { studentId: bag.studentId, code: bag.code } });
+    return { ok: true as const, code: fresh.code };
+  } catch (e) {
+    // Two concurrent reissues can both pass the pre-check and both enter the
+    // transaction. The second one's create hits the partial unique index on
+    // (code, status='active') and throws P2002. Return a friendly message.
+    if ((e as { code?: string }).code === "P2002") {
+      return { ok: false as const, error: `${bag.code} is already being reissued — it's now active on another record` };
+    }
+    throw e;
+  }
 }
 
 /**
@@ -345,10 +363,16 @@ export async function releaseBagCode(bagId: string, note?: string) {
     return { ok: false as const, error: `${openOrders} order(s) still open for this student — finish them before releasing the code` };
   }
 
-  await db.bag.update({
-    where: { id: bagId },
+  /* Atomic update: only proceed if this bag is still active. Two concurrent
+     release calls both pass the checks above (reading the same stale status),
+     and the second would silently succeed. Using updateMany with a WHERE
+     condition ensures only one succeeds. */
+  const released = await db.bag.updateMany({
+    where: { id: bagId, status: { not: "released" } },
     data: { status: "released", releasedAt: new Date(), note: note?.trim() || bag.note },
   });
+  if (released.count === 0) return { ok: false as const, error: "This code has already been released" };
+
   await audit("Customer ID released", `${bag.code} · ${bag.student.name}${note ? ` — ${note}` : ""}`, st.id);
   rosterSoon();
   publish([`student:${bag.studentId}`], { type: "bag", payload: { studentId: bag.studentId } });

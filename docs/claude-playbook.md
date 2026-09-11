@@ -12,6 +12,25 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11 (late evening): missing busy-state guard on accept-order button
+
+Staff order acceptance flow (OrderClient.tsx, line 951) was missing the 
+busy-state guard present on every other state-changing button (collect, pay, 
+refund, compensation). The "Accept order" button had no `disabled` attribute 
+and the handler had no try/finally + busy flag — a double-tap would fire two 
+concurrent `acceptOrder` calls. While acceptOrder does check `status !== "draft"` 
+inside its transaction, the check runs on a stale read at line 150; under 
+READ COMMITTED isolation both concurrent calls could read the same snapshot 
+and both pass the check before either commits. Fixed by adding the same 
+`acceptBusy` state, try/finally wrapper, and button-disabled pattern used 
+everywhere else. The button now shows "Accepting…" during the request and 
+is disabled to prevent re-taps.
+
+**Symptom that would have surfaced**: a staff member double-tapping "Accept" 
+on a slow network or under load would see both requests start, both would 
+update the order, and depending on timing could result in duplicate audit 
+entries or sheet rows for a single order accept.
+
 ## RESOLVED 2026-09-11: BVRIT rates UX, a genuinely missing busy guard, and two validation gaps
 
 A round-3 pass covering data freshness, client-side cross-college leakage,

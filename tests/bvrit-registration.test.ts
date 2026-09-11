@@ -51,7 +51,7 @@ beforeAll(async () => {
   await ensureTestSchema(TEST_URL, async () => {
     try {
       await (await import("../lib/db")).db.college.findFirst({ select: { rates: true } });
-      await (await import("../lib/db")).db.waVerify.findFirst({ select: { collegeId: true } });
+      await (await import("../lib/db")).db.waVerify.findFirst({ select: { studentName: true } });
       return true;
     } catch {
       return false;

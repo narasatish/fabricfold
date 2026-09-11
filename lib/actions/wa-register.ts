@@ -66,16 +66,18 @@ export async function startWhatsAppRegister(input: { name: string; collegeId: st
   const code = newCode();
   const claimSecret = crypto.randomBytes(32).toString("base64url");
 
-  /* collegeId is stored HERE, server-side, at the moment the attempt starts —
-     never trusted from a later client-supplied parameter. Otherwise a client
-     could claim a phone-verified registration under a different college than
-     the one it actually started with, no server check would catch it. */
+  /* collegeId AND name are stored HERE, server-side, at the moment the
+     attempt starts — never trusted from a later client-supplied parameter.
+     Otherwise a client could claim a phone-verified registration under a
+     different college, or a different name, than the one it actually
+     started with, and no server check would catch it. */
   await db.waVerify.create({
     data: {
       code,
       claimHash: sha(claimSecret),
       mode: "register",
       collegeId: college.id,
+      studentName: name,
       expiresAt: new Date(Date.now() + TTL_MS),
     },
   });

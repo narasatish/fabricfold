@@ -223,6 +223,22 @@ export async function saveCollegeRates(collegeId: string, rates: Record<string, 
   return { ok: true as const };
 }
 
+/** Save per-college express-service rate override (Admin+). Pass null to clear the override. */
+export async function saveCollegeExpressRates(collegeId: string, expressRates: Record<string, number> | null) {
+  const st = await requireStaff(3);
+  assertSameCollege(st, collegeId);
+  const college = await db.college.findUniqueOrThrow({ where: { id: collegeId } });
+  // For nullable Json fields, Prisma.JsonNull is used to clear; undefined to skip
+  await db.college.update({
+    where: { id: collegeId },
+    data: {
+      expressRates: expressRates !== null ? (expressRates as object) : Prisma.JsonNull,
+    },
+  });
+  await audit("College express rates override", `${college.name}${expressRates ? " · set express rate override" : " · cleared override"}`, st.id);
+  return { ok: true as const };
+}
+
 /* ----- Payment & bank details (Admin+) ----- */
 export async function savePaymentConfig(payment: { upiId: string; payeeName: string; bankName: string; accountName: string; accountNo: string; ifsc: string; gatewayKey: string }) {
   const st = await requireStaff(3);

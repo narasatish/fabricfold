@@ -12,6 +12,46 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11 (pass 12): College.expressRates was declared but never writable
+
+Deep-audit pass for "checked but never written" bugs (following the pattern of
+the WaVerify.studentName fix this same session) found that `College.expressRates`
+was added to the schema in commit eef0e24 (BVRIT per-college pricing, Oct 2026),
+declared as:
+```
+expressRates  Json? // per-college express (same-day) flat-fee override; null = use global EXPRESS_FLAT
+```
+
+The field is **read** in `lib/actions/orders.ts` line 36-41 as an override for
+express-service pricing, identical to how `College.rates` works for regular
+pricing. However, there was **no `saveCollegeExpressRates` function** to let an
+admin actually SET this field — unlike `saveCollegeRates` which exists for the
+`rates` field. The feature was prepared (schema + read path) but never exposed
+for configuration.
+
+Fixed by adding `saveCollegeExpressRates(collegeId, expressRates)` to
+`lib/actions/admin.ts`, following the exact same pattern as `saveCollegeRates`:
+accepts a `Record<string, number>` or null (to clear), enforces Admin+ auth
+and campus isolation, audits the change, and writes to the College row via
+Prisma.
+
+**Lesson, same as the WaVerify case this session**: when a schema field is
+added as a configuration override (nullable Json with a comment explaining
+the intended value), the write path MUST exist. A field that is only readable
+is a schema declaration with no implementation — either remove it or implement
+the setter. Grep for the field name + "json\|Json" in the schema comment to
+find other overrideable config, and verify each has a matching function to set
+it in `lib/actions/admin.ts`.
+
+## RESOLVED 2026-09-11 (pass 12): WaVerify.studentName registration hijacking fix re-verified
+
+Confirmed the WaVerify registration hijacking fix from pass 11 is complete
+end-to-end: `studentName` is WRITTEN at registration start in
+`startWhatsAppRegister` (line 80, `data: { studentName: name, ... }`) and
+READ/enforced in `checkWhatsAppRegister` (line 128, `if (!row.studentName)
+return error`), plus both test files exist and pass: `wa-register-name-behavioral.test.ts`
+and `bvrit-registration.test.ts`. No gaps found.
+
 ## RESOLVED 2026-09-11 (pass 8): staff attendance clock-in/out race conditions
 
 Audit pass 8 found two related race conditions in `lib/actions/ops.ts`:

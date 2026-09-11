@@ -12,6 +12,30 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11 (pass 8): staff attendance clock-in/out race conditions
+
+Audit pass 8 found two related race conditions in `lib/actions/ops.ts`:
+
+**clockIn (line 15-23)**: A staff member double-tapping the "Clock In" button could 
+trigger two concurrent requests, both bypassing the `findUnique` check, both attempting 
+to create an `Attendance` record for the same `(staffId, date)`. The second request would 
+hit the unique constraint and throw an unhandled Prisma P2002 error instead of returning 
+a friendly "Already clocked in" message like the sequential case does. The fix mirrors 
+the pattern used in `registerStudent` and `updateStudentPhone`: wrapped the create in a 
+try/catch that converts P2002 to a user-friendly error message.
+
+**clockOut (line 25-35)**: Two concurrent clock-out requests both pass the initial checks,
+but the update itself was unconditional — the second concurrent request would silently
+overwrite the first's `clockOut` timestamp with its own. While this doesn't cause data 
+loss (just two timestamps ~milliseconds apart for the same moment), it's better to be 
+explicit: changed to use `updateMany` with a WHERE condition `clockOut: null`, so only 
+the first request to set `clockOut` wins, and the second gets a clear "Already clocked out" 
+error.
+
+Both fixes follow patterns already established elsewhere for similar races. Verified 
+with a new behavioral test (`tests/attendance-race-behavioral.test.ts`) that simulates 
+concurrent clock-in/out attempts. Full suite status: pending completion.
+
 ## RESOLVED 2026-09-11 (pass 6): timezone bug in daily report email label and payslip month form
 
 Audit pass 6 (deep re-check on fresh ground) found two timezone mismatches on

@@ -17,7 +17,15 @@ export async function clockIn() {
   const date = istToday();
   const existing = await db.attendance.findUnique({ where: { staffId_date: { staffId: st.id, date } } });
   if (existing) return { ok: false as const, error: existing.clockOut ? "Already clocked out for today" : "Already clocked in" };
-  await db.attendance.create({ data: { staffId: st.id, date } });
+  try {
+    await db.attendance.create({ data: { staffId: st.id, date } });
+  } catch (e) {
+    // The pre-check above ran before this create — two concurrent clock-in
+    // taps both pass it, and the second hits the unique constraint on
+    // (staffId, date) and throws unhandled. Guard against it here.
+    if ((e as { code?: string }).code === "P2002") return { ok: false as const, error: "Already clocked in" };
+    throw e;
+  }
   await audit("Clock in", `${st.name} · ${date}`, st.id);
   return { ok: true as const };
 }
@@ -28,7 +36,17 @@ export async function clockOut() {
   const rec = await db.attendance.findUnique({ where: { staffId_date: { staffId: st.id, date } } });
   if (!rec) return { ok: false as const, error: "Clock in first" };
   if (rec.clockOut) return { ok: false as const, error: "Already clocked out" };
-  await db.attendance.update({ where: { id: rec.id }, data: { clockOut: new Date() } });
+
+  /* Atomic update: only proceed if this record still has no clockOut. Two
+     concurrent clock-out taps both pass the check above, and the second
+     would silently overwrite the first's clockOut timestamp. Using updateMany
+     with a WHERE condition ensures only one succeeds. */
+  const updated = await db.attendance.updateMany({
+    where: { id: rec.id, clockOut: null },
+    data: { clockOut: new Date() }
+  });
+  if (updated.count === 0) return { ok: false as const, error: "Already clocked out" };
+
   const hours = ((Date.now() - rec.clockIn.getTime()) / 3600_000).toFixed(1);
   await audit("Clock out", `${st.name} · ${date} · ${hours}h`, st.id);
   return { ok: true as const, hours };

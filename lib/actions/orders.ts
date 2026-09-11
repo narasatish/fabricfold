@@ -120,7 +120,8 @@ export async function placeOrder(input: { service: string; items: { label: strin
       });
     }, { timeout: 15_000 }); // assertSlotBookable's advisory lock can queue a concurrent caller past Prisma's 5s default
   } catch (e) {
-    return { ok: false as const, error: (e as Error).message };
+    const msg = (e as Error).message || "Failed to place order";
+    return { ok: false as const, error: msg.includes("Unique constraint") || msg.includes("slot") ? msg : "Order placement failed — please try again" };
   }
   bcast(o, "order.created");
   void notifyOwner(
@@ -261,7 +262,9 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
     // busy subscription can legitimately queue behind another accept/walk-in, and 5s was
     // already tight for this transaction's normal run of sequential awaited queries.
   } catch (e) {
-    return { ok: false as const, error: (e as Error).message };
+    const msg = (e as Error).message || "Failed to accept order";
+    // Preserve user-facing error messages from throwable validations; hide internal errors
+    return { ok: false as const, error: msg.includes("Not enough") || msg.includes("already") || msg.includes("No active") ? msg : "Order acceptance failed — please try again" };
   }
 
   await pushNotif(result.studentId, `Order received — ${result.actualPieces} pieces logged for ${cfg.rates[result.service].label}.`, "status");

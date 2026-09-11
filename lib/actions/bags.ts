@@ -108,7 +108,12 @@ export async function issueBag(
       break;
     } catch (e) {
       const isCodeCollision = (e as { code?: string }).code === "P2002";
-      if (!isCodeCollision || attempt === 2) return { ok: false as const, error: isCodeCollision ? "Couldn't allocate a code — please try again" : (e as Error).message };
+      if (!isCodeCollision || attempt === 2) {
+        const msg = (e as Error).message || "Bag issue failed";
+        const sanitized = isCodeCollision ? "Couldn't allocate a code — please try again" :
+                         (msg.includes("active bag") || msg.includes("already") ? msg : "Bag issue failed — please try again");
+        return { ok: false as const, error: sanitized };
+      }
     }
   }
   if (!bag) return { ok: false as const, error: "Couldn't allocate a code — please try again" };
@@ -192,8 +197,9 @@ export async function syncBagToPlan(studentId: string) {
     if (!r.ok) return { ok: false as const, error: r.error };
     return { ok: true as const, code: r.code, changed: true, replaced: active?.code ?? null };
   } catch (e) {
-    console.error("[bags] syncBagToPlan failed:", (e as Error).message);
-    return { ok: false as const, error: (e as Error).message };
+    const msg = (e as Error).message || "Failed to sync bag to plan";
+    const sanitized = msg.includes("not found") || msg.includes("not registered") ? msg : "Plan sync failed — please try again";
+    return { ok: false as const, error: sanitized };
   }
 }
 

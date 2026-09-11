@@ -90,7 +90,6 @@ export async function POST(req: Request) {
         const from = msg.from;                      // sender's number, digits, country code included
         const text = msg.text?.body?.trim() ?? "";
         if (!from) continue;
-        console.log(`[wa-inbound] from=${from} type=${msg.type} text=${JSON.stringify(text.slice(0, 80))}`);
         await resolveSignIn(from, text);
       }
     }

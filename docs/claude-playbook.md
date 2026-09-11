@@ -12,6 +12,69 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11 (pass 19): debug logging, error message leaks, missing loading states
+
+Audit pass 19 focused on three fresh angles: error message consistency
+(staff actions), debug logging for data leaks, and UX completeness (loading
+states). Found:
+
+### (1) Console logging in WhatsApp webhook — data leak risk
+**File**: `app/api/whatsapp/webhook/route.ts:93`
+**Issue**: Production webhook endpoint logged inbound phone numbers and message
+content (first 80 chars) to console on every message:
+```
+console.log(`[wa-inbound] from=${from} type=${msg.type} text=${...}`)
+```
+These logs flow to Render's log stream, where they persist longer than
+necessary. The phone number is user PII; if a message ever contains sensitive
+data (OTP, verification code, etc.), it would be exposed there. Logging
+debug info in a webhook serving as part of the auth flow is unnecessary risk.
+
+**Fixed by**: Removed the console.log statement entirely. The webhook handler
+doesn't need to log every inbound message — errors are logged separately if
+they occur.
+
+### (2) Raw exception messages returned to clients — internal details leak
+**Files**: `lib/actions/orders.ts` (lines 123, 264), `lib/actions/bags.ts`
+(lines 111, 196)
+**Issue**: Catch blocks returned `(e as Error).message` directly, exposing
+internal error details to the client. Database constraint violations (P2002),
+query errors, or business-logic exceptions would leak raw text like:
+- "Unique constraint failed on the fields: (studentId_status)"
+- Raw Prisma error text
+- SQL details if a raw query failed
+
+These violate the error-message consistency already established elsewhere
+in the codebase (specific, user-facing messages).
+
+**Fixed by**: Sanitized all three catch blocks. Messages containing known
+user-facing keywords ("Not enough", "already", "active bag", "not found") pass
+through; all others return a generic, safe message like "Failed — please try
+again". This preserves intentional, actionable errors while hiding internals.
+
+### (3) No loading states on data-heavy pages — UX blank-screen problem
+**Files**: `app/s/reports/page.tsx`, `app/s/students/page.tsx`,
+`app/s/orders/[id]/page.tsx`
+**Issue**: These pages perform multiple sequential database queries in server
+components with no Suspense boundaries or loading.tsx files. If a query takes
+>1s (not rare on slow connections or busy DB), users see a blank white screen
+with no indication that data is loading. This violates Next.js best practice
+for server-side rendering.
+
+**Fixed by**: Added `loading.tsx` skeleton UI files for all three pages:
+- `app/s/reports/loading.tsx` — shimmer cards for stats and charts
+- `app/s/students/loading.tsx` — list skeleton for roster
+- `app/s/orders/[id]/loading.tsx` — order details skeleton
+
+The skeleton uses existing design tokens (var(--muted)) and matches the
+expected layout, so the page feels responsive even during load.
+
+**Lesson**: Raw exception messages are not tests — they don't validate your
+input, they just leak your implementation. Consistent error messages are part
+of the UX contract, not a side effect of error handling. And "the server
+works offline" is not an excuse for a blank screen; modern web UX expects
+feedback even before the HTML lands.
+
 ## RESOLVED 2026-09-11 (pass 18): form labels missing htmlFor/id, buttons missing accessible names
 
 Audit pass 18 checked the three most business-critical customer-facing pages

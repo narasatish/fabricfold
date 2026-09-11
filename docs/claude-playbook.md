@@ -12,6 +12,34 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11 (pass 18): form labels missing htmlFor/id, buttons missing accessible names
+
+Audit pass 18 checked the three most business-critical customer-facing pages
+(login, BVRIT registration, order placement) from an accessibility angle —
+a lens not yet used in 17 prior passes. Found:
+- `app/login/_components/LoginForm.tsx`: 3 `<label>` elements (phone, passcode,
+  OTP) had no `htmlFor`, and their `<input>`s had no matching `id` — a screen
+  reader announces these inputs with no name at all.
+- `app/join/bvrit/_components/RegisterForm.tsx`: same gap on the name field.
+- `app/c/order/new/_components/OrderNewClient.tsx`: the cycle and per-item
+  quantity +/- buttons only contained a bare "−"/"+" glyph with no
+  `aria-label`, so a screen reader announces "minus button" / "plus button"
+  with no indication of what's being adjusted. Slot-selection buttons already
+  had visible text but no `aria-pressed`, so the selected state (conveyed only
+  by background color) was invisible to assistive tech.
+
+Fixed by adding `id`/`htmlFor` pairs to all 4 labels, `aria-label` to the 4
+quantity buttons (2 generic "Decrease/Increase cycles", 2 per-item with the
+item name interpolated), and `aria-pressed` to the slot buttons. Verified the
+phone-input label/id pairing live via a local dev server + JS DOM query
+(`document.getElementById(label.htmlFor)` resolves correctly).
+
+**Lesson**: every prior pass used the same lens (server-side races, atomic
+guards, transaction timeouts). A genuinely different lens — here,
+accessibility — found a class of bug 17 passes of the same pattern-matching
+approach would never surface. Worth periodically switching the angle of
+attack rather than only deepening the same search.
+
 ## RESOLVED 2026-09-11 (pass 17): Sheets sync silently ignored tab write failures
 
 Deep audit of Sheets integration found that every call to `writeSheet()` in

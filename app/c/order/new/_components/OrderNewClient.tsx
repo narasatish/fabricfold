@@ -134,9 +134,9 @@ export default function OrderNewClient({
               </div>
               <div className="step">
                 <div className="qty">
-                  <button onClick={() => setCycles((c) => Math.max(1, c - 1))}>−</button>
+                  <button aria-label="Decrease cycles" onClick={() => setCycles((c) => Math.max(1, c - 1))}>−</button>
                   <span className="mono">{cycles}</span>
-                  <button onClick={() => setCycles((c) => Math.min(10, c + 1))}>+</button>
+                  <button aria-label="Increase cycles" onClick={() => setCycles((c) => Math.min(10, c + 1))}>+</button>
                 </div>
               </div>
             </div>
@@ -167,9 +167,9 @@ export default function OrderNewClient({
               </div>
               <div className="step">
                 <div className="qty">
-                  <button onClick={() => handleQtyChange(label, -1)}>−</button>
+                  <button aria-label={`Decrease ${label} quantity`} onClick={() => handleQtyChange(label, -1)}>−</button>
                   <span className="mono">{q}</span>
-                  <button onClick={() => handleQtyChange(label, 1)}>+</button>
+                  <button aria-label={`Increase ${label} quantity`} onClick={() => handleQtyChange(label, 1)}>+</button>
                 </div>
               </div>
             </div>
@@ -228,6 +228,7 @@ export default function OrderNewClient({
                       <button
                         key={s.startAt}
                         disabled={s.full}
+                        aria-pressed={selected}
                         onClick={() => setDropSlotAt(selected ? "" : s.startAt)}
                         className="card"
                         style={{

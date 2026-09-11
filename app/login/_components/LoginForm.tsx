@@ -228,8 +228,9 @@ export default function LoginForm() {
                 ) : (
                   <div className="mt20">
                     <div className="field">
-                      <label>Mobile number</label>
+                      <label htmlFor="phone-input">Mobile number</label>
                       <input
+                        id="phone-input"
                         className="input"
                         type="tel"
                         placeholder="10-digit number"
@@ -309,8 +310,9 @@ export default function LoginForm() {
               </span>
             </div>
             <div className="field">
-              <label>Passcode</label>
+              <label htmlFor="passcode-input">Passcode</label>
               <input
+                id="passcode-input"
                 className="input"
                 type="password"
                 placeholder="Your passcode"
@@ -359,8 +361,9 @@ export default function LoginForm() {
             )}
 
             <div className="field mt16">
-              <label>6-digit code</label>
+              <label htmlFor="otp-input">6-digit code</label>
               <input
+                id="otp-input"
                 className="input"
                 type="text"
                 placeholder="••••••"

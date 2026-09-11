@@ -93,8 +93,9 @@ export default function RegisterForm({ collegeId, collegeName }: RegisterFormPro
 
             <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <div>
-                <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6, color: "var(--ink-1)" }}>Your name</label>
+                <label htmlFor="name-input" style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6, color: "var(--ink-1)" }}>Your name</label>
                 <input
+                  id="name-input"
                   type="text"
                   placeholder="Enter your full name"
                   value={name}

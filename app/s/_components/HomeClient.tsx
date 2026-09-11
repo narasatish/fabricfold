@@ -141,7 +141,7 @@ export default function StaffHomeClient({
     try {
       const r = await registerStudent(reg);
       if (!r.ok) return toast(r.error || "Failed", true);
-      toast(`Student registered — ID ${r.id}`);
+      toast(`Student registered — ID ${r.bagCode || r.id}`);
       setShowRegister(false);
       setReg({ name: "", phone: "", collegeId: colleges[0]?.id || "", kind: "student" });
       router.push(`/s/customers/${r.id}`);

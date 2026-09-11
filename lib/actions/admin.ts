@@ -13,9 +13,12 @@ import { notifyOwner } from "../mail";
 import { isTier } from "../bagcode";
 
 /* ----- Register a student at the counter (any staff) -----
-   Students cannot self-register — this is the ONLY way a student account is
-   created. verifyOtp() will reject an unrecognised number with a message to
-   come to the counter. */
+   St Mary's students can only be added this way — verifyOtp() rejects an
+   unrecognised number with a message to come to the counter. BVRIT students
+   can also self-register via WhatsApp (see wa-register.ts), which auto-issues
+   a V-series bag in the same transaction as account creation; this function
+   mirrors that for BVRIT so a student added here by staff isn't left without
+   one — see the bag-issuance block below. */
 export async function registerStudent(input: { name: string; phone: string; collegeId: string; kind?: "student" | "faculty" }) {
   const st = await requireStaff(1);
   const name = input.name.trim();
@@ -34,9 +37,29 @@ export async function registerStudent(input: { name: string; phone: string; coll
     if (!(await db.student.findUnique({ where: { id } }))) break;
   }
   const kind = input.kind === "faculty" ? "faculty" : "student";
+  const isBvrit = college.name.trim().toUpperCase() === "BVRIT";
   let stu;
+  let bagCode: string | null = null;
   try {
-    stu = await db.student.create({ data: { id, phone, name, collegeId: college.id, kind } });
+    const result = await db.$transaction(async (tx) => {
+      const created = await tx.student.create({ data: { id, phone, name, collegeId: college.id, kind } });
+      // BVRIT students self-registering via WhatsApp get a V-series bag
+      // automatically in the same transaction as account creation
+      // (wa-register.ts) — mirror that here so a BVRIT student added by
+      // staff isn't left with no customer ID / bag code (found 2026-09-11:
+      // the owner registered a test student this way and got no code).
+      if (isBvrit) {
+        const { allocateBagCode } = await import("../bagcode");
+        const code = await allocateBagCode(tx, "bvrit");
+        await tx.bag.create({
+          data: { code, studentId: created.id, tier: null, complimentary: true, issuedBy: st.id, status: "active" },
+        });
+        return { stu: created, code };
+      }
+      return { stu: created, code: null as string | null };
+    });
+    stu = result.stu;
+    bagCode = result.code;
   } catch (e) {
     // The pre-check above ran before this create — two concurrent
     // registrations for the same number both pass it, and the second
@@ -44,10 +67,14 @@ export async function registerStudent(input: { name: string; phone: string; coll
     if ((e as { code?: string }).code === "P2002") return { ok: false as const, error: "This number is already registered" };
     throw e;
   }
-  await audit(kind === "faculty" ? "Faculty registered" : "Student registered", `${name} · +91 ${phone} · ${college.name}`, st.id);
+  await audit(
+    kind === "faculty" ? "Faculty registered" : "Student registered",
+    `${name} · +91 ${phone} · ${college.name}${bagCode ? ` · Code ${bagCode}` : ""}`,
+    st.id,
+  );
   rosterSoon();
-  void notifyOwner("New student registered", `${name} (+91 ${phone}) registered at the counter (${college.name}) by ${st.name} — ID ${stu.id}.`);
-  return { ok: true as const, id: stu.id };
+  void notifyOwner("New student registered", `${name} (+91 ${phone}) registered at the counter (${college.name}) by ${st.name} — ID ${bagCode || stu.id}.`);
+  return { ok: true as const, id: stu.id, bagCode };
 }
 
 /* ----- Change a student's registered mobile number (Admin+ only) -----

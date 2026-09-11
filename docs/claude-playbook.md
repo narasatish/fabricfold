@@ -12,6 +12,53 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## CORRECTED + RESOLVED 2026-09-11: payment-timing restriction reverted; found the real cause of the missing bag code
+
+Two follow-ups to the previous entry, from the owner testing further:
+
+**Payment timing reverted.** The "pay only at ready/collected" restriction
+added minutes earlier was based on my own inference of "pay at delivery,"
+not what the owner actually wanted. The owner clarified explicitly:
+students and staff should be able to pay before OR after delivery, no
+restriction. Reverted the client-side condition in
+`app/c/orders/[id]/page.tsx` back to its original "any non-draft,
+non-cancelled status," and removed the server-side status guards from both
+`createGatewayOrder` (`lib/actions/payments.ts`) and `payOrder`
+(`lib/actions/orders.ts`) entirely — this was never deployed, so no
+production impact. **Lesson**: a request phrased as "X should happen at
+delivery" is not automatically "X should ONLY happen at delivery" — when a
+business-rule fix restricts something, confirm the restriction direction
+before shipping it, especially when it wasn't explicitly spelled out as
+"only."
+
+**Root cause of the missing V-series bag code, found.** `registerStudent`
+(`lib/actions/admin.ts`) — used when STAFF add a student through the Admin
+UI, as opposed to a student self-registering via WhatsApp — created the
+Student row but never created a Bag. BVRIT's self-registration path
+(`wa-register.ts`) auto-issues a complimentary V-series bag in the same
+transaction as account creation; `registerStudent` never mirrored that. A
+BVRIT student added by staff (exactly what the owner did, testing with
+"shiva") ends up with zero Bag rows, so every UI that displays
+`bags[0]?.code ?? student.id` (the students list, the customer detail
+header) falls back to the raw 6-digit internal id — confirmed by the
+owner's screenshot showing "ID 594277" instead of a V#### code.
+
+Fixed by wrapping `registerStudent`'s student creation in a transaction
+that also allocates and creates a BVRIT bag when the target college is
+BVRIT (name-matched, same pattern as `requireCyclesEnabled`'s BVRIT check),
+mirroring `wa-register.ts` exactly. Also fixed the success toast in
+`HomeClient.tsx`, which showed the raw internal id even for a student who
+DID get a bag code from self-registration — now shows the bag code when
+one exists. Also corrected a stale top-of-function comment claiming
+`registerStudent` was "the ONLY way a student account is created," which
+stopped being true the moment WhatsApp self-registration shipped.
+
+**"shiva" (id 594277) in production still has no bag** — this fix only
+prevents the bug for future registrations. The owner needs to either issue
+a bag manually via that student's "Issue complimentary bag" button, or
+erase the test account (now possible via the Danger Zone added minutes
+earlier) and re-register to get a clean V#### code automatically.
+
 ## RESOLVED 2026-09-11: three real gaps found by the owner testing production directly
 
 The owner registered a real test BVRIT student and reported four things not

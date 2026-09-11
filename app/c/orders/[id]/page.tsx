@@ -214,11 +214,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           </div>
         </div>
 
-        {/* Pay button or paid badge — only once the order is ready for
-            delivery/pickup, not right at drop-off/acceptance. Owner's
-            explicit rule (2026-09): students pay at the time their clothes
-            are handed back, not before. */}
-        {!order.paid && !order.usedCycle && ["ready", "collected"].includes(order.status) && (
+        {/* Pay button or paid badge */}
+        {!order.paid && !order.usedCycle && !["draft", "cancelled"].includes(order.status) && (
           <Link href={`/c/pay/${order.id}`} className="btn mt16">
             <Svg name="card" size={18} /> Pay {fmt(Number(order.total))}
           </Link>

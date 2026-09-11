@@ -24,13 +24,6 @@ export async function createGatewayOrder(orderId: string, applyCredits: boolean)
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
   if (o.studentId !== stu.id) return { ok: false as const, error: "Not your order" };
   if (o.paid) return { ok: false as const, error: "Already paid" };
-  // Owner's explicit rule (2026-09): students pay at the time their clothes
-  // are handed back, not at drop-off/acceptance. The customer UI already
-  // hides the Pay button before "ready", but that alone doesn't stop a
-  // direct request to this action — enforce it here too.
-  if (!["ready", "collected"].includes(o.status)) {
-    return { ok: false as const, error: "Payment opens once your order is ready for pickup" };
-  }
 
   const total = Number(o.total);
   const credits = applyCredits ? Math.min(Number(stu.credits), total) : 0;

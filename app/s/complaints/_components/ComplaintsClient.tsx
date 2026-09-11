@@ -30,17 +30,27 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
 
   const list = filter === "all" ? complaints : complaints.filter((c) => c.status === filter);
 
+  const [sendBusy, setSendBusy] = useState<Record<string, boolean>>({});
   const send = async (c: Complaint) => {
     const t = (drafts[c.id] || "").trim();
     if (!t) return toast("Type a message", true);
-    const r = await sendComplaintMessage(c.id, t);
-    if (!r.ok) return toast(r.error || "Failed", true);
-    setDrafts({ ...drafts, [c.id]: "" });
-    router.refresh();
+    setSendBusy({ ...sendBusy, [c.id]: true });
+    try {
+      const r = await sendComplaintMessage(c.id, t);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      setDrafts({ ...drafts, [c.id]: "" });
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setSendBusy({ ...sendBusy, [c.id]: false });
+    }
   };
 
+  const [resolveBusy, setResolveBusy] = useState(false);
   const doResolve = async () => {
     if (!resolveFor) return;
+    setResolveBusy(true);
     try {
       const r = await resolveComplaint(resolveFor.id, resText);
       if (!r.ok) return toast(r.error || "Failed", true);
@@ -50,6 +60,8 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setResolveBusy(false);
     }
   };
 
@@ -127,9 +139,10 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
                     placeholder="Type a message…"
                     value={drafts[c.id] || ""}
                     onChange={(e) => setDrafts({ ...drafts, [c.id]: e.target.value })}
-                    onKeyDown={(e) => e.key === "Enter" && send(c)}
+                    onKeyDown={(e) => e.key === "Enter" && !sendBusy[c.id] && send(c)}
+                    disabled={sendBusy[c.id]}
                   />
-                  <button className="btn sm" style={{ width: "auto", height: 44 }} onClick={() => send(c)}>Send</button>
+                  <button className="btn sm" style={{ width: "auto", height: 44 }} onClick={() => send(c)} disabled={sendBusy[c.id]}>{sendBusy[c.id] ? "Sending…" : "Send"}</button>
                 </div>
                 <div className="row gap8 mt12">
                   <button className="btn xs" onClick={() => setResolveFor(c)}><Svg name="check" size={14} /> Resolve</button>
@@ -146,8 +159,8 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
       {/* Resolve sheet */}
       <Sheet open={!!resolveFor} onClose={() => setResolveFor(null)}>
         <div className="h-md" style={{ padding: "0 4px 12px" }}>Resolve complaint</div>
-        <textarea className="input" placeholder="How was this resolved? (visible to the student)" value={resText} onChange={(e) => setResText(e.target.value)} />
-        <button className="btn mt12" onClick={doResolve}>Mark resolved</button>
+        <textarea className="input" placeholder="How was this resolved? (visible to the student)" value={resText} onChange={(e) => setResText(e.target.value)} disabled={resolveBusy} />
+        <button className="btn mt12" onClick={doResolve} disabled={resolveBusy}>{resolveBusy ? "Resolving…" : "Mark resolved"}</button>
       </Sheet>
 
       {/* Compensation sheet */}

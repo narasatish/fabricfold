@@ -654,6 +654,14 @@ model WaVerify {
   phone     String? // filled from Meta's payload — this is the VERIFIED number
   studentId String? // the matched account id — a Student id or a Staff id, per mode
   collegeId String? // for "register" mode, which college this registration is for
+  // for "register" mode, the name typed at the START of the attempt — same
+  // reasoning as collegeId above: fixed server-side the moment the attempt
+  // begins, never re-trusted from whatever the claim request happens to pass
+  // later. Without this, anyone holding the claim cookie for an open,
+  // unattended registration tab could complete it under a name of their own
+  // choosing while the VERIFIED phone number still belongs to whoever
+  // actually sent the WhatsApp message (found 2026-09-11, audit pass 11).
+  studentName String?
   reason    String? // why it failed, in words the student can act on
 
   expiresAt DateTime

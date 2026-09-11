@@ -29,7 +29,7 @@ export default function RegisterForm({ collegeId, collegeName }: RegisterFormPro
     if (!waCode) return;
     const stop = () => { if (waTimer.current) clearInterval(waTimer.current); waTimer.current = null; };
     waTimer.current = setInterval(async () => {
-      const r = await checkWhatsAppRegister(waCode, name);
+      const r = await checkWhatsAppRegister(waCode);
       if (r.ok && r.status === "pending") return;         // still waiting
       stop();
       setWaCode(null);
@@ -37,7 +37,7 @@ export default function RegisterForm({ collegeId, collegeName }: RegisterFormPro
       if (!r.ok) { setStep("form"); toast(r.error, true); }
     }, 2000);
     return stop;
-  }, [waCode, name, router, toast]);
+  }, [waCode, router, toast]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

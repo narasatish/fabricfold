@@ -107,7 +107,7 @@ export async function startWhatsAppRegister(input: { name: string; collegeId: st
  * is the same browser that started the attempt. Account creation must be
  * atomic with session creation so either both happens or neither does.
  */
-export async function checkWhatsAppRegister(code: string, studentName: string) {
+export async function checkWhatsAppRegister(code: string) {
   const row = await db.waVerify.findUnique({ where: { code } });
   if (!row) return { ok: false as const, status: "unknown" as const, error: "That registration has expired — start again." };
 
@@ -116,11 +116,14 @@ export async function checkWhatsAppRegister(code: string, studentName: string) {
   if (row.status === "failed") return { ok: false as const, status: "failed" as const, error: row.reason || "We couldn't verify that number." };
   if (row.status !== "verified" || !row.phone) return { ok: true as const, status: "pending" as const };
 
-  /* collegeId is read from the row created at startWhatsAppRegister — never
-     from a client-supplied parameter — so which college this registration is
-     for was fixed the moment the attempt began and can't be changed later. */
+  /* collegeId and studentName are read from the row created at startWhatsAppRegister — never
+     from client-supplied parameters — so which college this registration is for and what name
+     it will be created with are both fixed the moment the attempt begins. This prevents anyone
+     with the claim cookie from hijacking an unattended registration tab to register under a
+     different name against a verified phone number (found audit pass 11, 2026-09-11). */
   const college = row.collegeId ? await db.college.findUnique({ where: { id: row.collegeId } }) : null;
   if (!college) return { ok: false as const, status: "failed" as const, error: "Campus configuration error. Please try again." };
+  if (!row.studentName) return { ok: false as const, status: "failed" as const, error: "Registration configuration error. Please start again." };
 
   /* The claim cookie proves this browser — same as login. */
   const jar = await cookies();
@@ -157,7 +160,7 @@ export async function checkWhatsAppRegister(code: string, studentName: string) {
         data: {
           id,
           phone: row.phone || "",  // phone is guaranteed by webhook
-          name: studentName.trim(),
+          name: row.studentName!.trim(),  // studentName is guaranteed by the check above
           collegeId: college!.id,  // college is guaranteed by the check above
           kind: "student",
         },

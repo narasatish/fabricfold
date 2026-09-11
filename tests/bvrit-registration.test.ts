@@ -188,7 +188,7 @@ describe("phone verification and account creation", () => {
     });
 
     // The check should fail because the phone is already registered
-    const check = await checkWhatsAppRegister(regStart.code, "New Student");
+    const check = await checkWhatsAppRegister(regStart.code);
     expect(check.ok).toBe(false);
     expect(check.error).toMatch(/already registered/i);
   });
@@ -219,7 +219,7 @@ describe("phone verification and account creation", () => {
     const phone = "9876500123";
     await db.waVerify.update({ where: { code: regStart.code }, data: { status: "verified", phone } });
 
-    const result = await checkWhatsAppRegister(regStart.code, "Bob Registration");
+    const result = await checkWhatsAppRegister(regStart.code);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.status).toBe("registered");
@@ -236,7 +236,7 @@ describe("phone verification and account creation", () => {
 
     // A second poll on the same (now-claimed) code must not create a
     // duplicate account or a duplicate bag.
-    const again = await checkWhatsAppRegister(regStart.code, "Bob Registration");
+    const again = await checkWhatsAppRegister(regStart.code);
     expect(again.ok).toBe(false);
   });
 

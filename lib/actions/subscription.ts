@@ -102,7 +102,7 @@ export async function adjustCycleUsage(studentId: string, updates: { service: st
     const cyclesUsed = newBuckets.reduce((s, b) => s + b.used, 0);
     await tx.subscription.update({ where: { studentId }, data: { buckets: newBuckets, cyclesUsed } });
     return true;
-  });
+  }, { timeout: 15_000 }); // row lock can queue concurrent corrections
   if (!changed) return { ok: true as const, changed: false };
   await audit("Cycle usage corrected", `${stu.name} (${stu.id}) · ${changes.join("; ")}`, st.id);
   rosterSoon();
@@ -183,7 +183,7 @@ export async function activateSubscription(studentId: string, method: "cash" | "
         data: { active: true, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesUsed: 0 },
       });
       await tx.payment.create({ data: { method, amount: gross, collegeId: stu.collegeId, studentId, note: `Subscription: ${stu.subscription!.plan}` } });
-    });
+    }, { timeout: 15_000 }); // row lock can queue concurrent activation attempts
   } catch (e) {
     return { ok: false as const, error: (e as Error).message };
   }
@@ -363,7 +363,7 @@ export async function upgradeSubscription(studentId: string, planId: string, met
     await tx.payment.create({
       data: { method, amount: difference, collegeId: stu.collegeId, studentId, note: `Plan change: ${cur.plan} → ${plan.name}` },
     });
-  });
+  }, { timeout: 15_000 }); // row lock can queue concurrent upgrade attempts
 
   /* A tier change changes the letter on the bag, so the code is re-issued and
      the old one retired. Free — charging a student to upgrade would be wrong,

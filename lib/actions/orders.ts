@@ -579,7 +579,7 @@ export async function collectOrder(orderId: string, code: string) {
         o.actualPieces || 0,
         st.name,
       ]);
-    });
+    }, { timeout: 15_000 }); // enqueueSheetEvent makes a real Google Sheets API call inside the transaction
   } catch (e) {
     return { ok: false as const, error: (e as Error).message };
   }
@@ -643,7 +643,7 @@ async function payInner(orderId: string, method: "upi" | "cash", creditApplied: 
       (invoice as { number?: string } | null)?.number ?? "—",
     ]);
     return updated;
-  });
+  }, { timeout: 15_000 }); // enqueueSheetEvent makes a real Google Sheets API call inside the transaction
 }
 
 /* Customer pays own bill. */
@@ -733,7 +733,7 @@ export async function refundOrder(orderId: string, amount: number, via: "upi" | 
       const newRefundAmount = Number(fresh.refundAmount || 0) + amount;
       await tx.order.update({ where: { id: o.id }, data: { refunded: true, refundAmount: newRefundAmount } });
       if (restoreCycle) await restoreCycleFor(tx, o, o.student.subscription);
-    });
+    }, { timeout: 15_000 }); // may call restoreCycleFor which locks the subscription row
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
@@ -885,7 +885,7 @@ export async function cancelOrder(orderId: string): Promise<ActionResult> {
       await tx.orderEvent.create({ data: { orderId: ord.id, status: "cancelled" } });
       // Cancelling means the wash never happened, so the cycle always goes back.
       await restoreCycleFor(tx, ord, ord.student.subscription);
-    });
+    }, { timeout: 15_000 }); // restoreCycleFor locks the subscription row, which can queue under concurrent cancels
   } catch (e) {
     return { ok: false as const, error: (e as Error).message };
   }

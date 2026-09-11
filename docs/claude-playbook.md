@@ -12,6 +12,49 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED + FLAGGED 2026-09-11: widened the "zero call sites" sweep beyond lib/actions
+
+Extended the same audit to lib/*.ts (non-action helpers), every API route
+in app/api/*/route.ts, every feature-flag/schema Boolean, and every staff
+permission definition. Most of the codebase checked out clean — every
+lib helper, feature flag, and permission has a real caller/UI toggle.
+Two real findings:
+
+**Fixed: `/api/export/statement` had no UI link.** The route itself was
+fully correct (auth-checked, builds a real monthly-statement XLSX of
+orders/payments/credit activity) but nothing in the customer app linked to
+it — a student could never reach their own statement. Added a link to
+`ProfileClient.tsx` next to the "Download my data" button added earlier
+tonight.
+
+**Flagged, NOT fixed: `/api/rt` (the SSE realtime stream) has zero client
+subscribers anywhere in the codebase.** The server half is fully built —
+`publish()` is called from ~15+ places across orders/bags/complaints/
+credits/subscriptions, and the route itself correctly checks session
+revocation (`liveSession()`, fixed earlier this session). But no component
+anywhere opens `new EventSource("/api/rt")` — confirmed by grep, zero hits
+for `EventSource` in app/ or components/. Every `publish()` call has been
+broadcasting into an empty room since this was built.
+
+**Deliberately NOT rush-fixed, unlike everything else tonight**: this is
+genuinely different in kind from the "add a button" gaps found earlier.
+Severity is real but bounded, not "the app is broken" — every action
+handler already calls `router.refresh()` (47 call sites) to update the
+actor's own view, and the thing a student actually needs to know without
+having the tab open ("my order is ready") already goes through Web Push
+(`pushNotif`, 21 call sites), a completely separate and already-verified-
+working channel. What's actually missing is narrower: a second staff
+terminal, or a student's OTHER open tab, doesn't update live without a
+manual refresh. Wiring a correct EventSource client (reconnection on drop,
+cleanup on unmount, routing incoming events to the right component state)
+is real architectural work, not a 20-minute fix — building it hastily at
+the end of a long session risks shipping a new, harder-to-spot bug class
+(leaked connections, stale closures, a reconnect storm) in exchange for a
+nice-to-have. Left for a dedicated session with the owner's explicit scope
+sign-off rather than guessed at here.
+
+Verified: tsc clean for the statement-link fix.
+
 ## RESOLVED 2026-09-11: systematic "zero call sites" sweep of every exported server action
 
 Following the pattern of the night's earlier gaps (saveCollegeRates,

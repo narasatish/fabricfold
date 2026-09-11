@@ -211,6 +211,19 @@ export default function ProfileClient({ studentName, hasPasscode }: { studentNam
         </div>
       </button>
 
+      {/* Found 2026-09-11: this route was fully working (auth-checked, correctly
+          built XLSX) but had no link anywhere — a student could never reach
+          their own monthly statement. */}
+      <a className="list-item tap" style={{ width: "100%", textAlign: "left", padding: "15px 18px" }} href="/api/export/statement">
+        <span style={{ color: "var(--teal)" }}>
+          <Svg name="card" size={20} />
+        </span>
+        <div style={{ flex: 1 }}>
+          <div className="h-sm">This month&apos;s statement</div>
+          <div className="muted" style={{ fontSize: 12 }}>Orders, payments and credit activity — as a spreadsheet</div>
+        </div>
+      </a>
+
       <button className="list-item tap" style={{ width: "100%", textAlign: "left", padding: "15px 18px" }} onClick={handleSignOutEverywhere} disabled={signOutAllBusy}>
         <span style={{ color: "var(--teal)" }}>
           <Svg name="shield" size={20} />

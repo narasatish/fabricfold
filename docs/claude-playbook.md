@@ -12,6 +12,48 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11 (pass 13): 6 non-advisory-lock transactions missing the 15s timeout bump
+
+Found by systematic sweep for every `db.$transaction(` call in `lib/actions/*`
+and `lib/sheet-events.ts`: the lessons from the advisory-lock timeout timeout
+bugs (pass 12, same day) also apply to row-locked and external-call
+transactions. Six functions had default 5s Prisma timeout but legitimately
+could exceed it under concurrent load or when calling external services:
+
+- `collectOrder` (line 559 in orders.ts): calls `enqueueSheetEvent`, which
+  makes a real Google Sheets API call INSIDE the transaction. Sheet API
+  latency of 3-5s under load + holding a write lock on the Order row can
+  easily exceed 5s total.
+  
+- `payInner` (line 608 in orders.ts): identical issue — `enqueueSheetEvent`
+  + multiple Payment/CreditUse/Student/Invoice writes in sequence.
+  
+- `cancelOrder` (line 865 in orders.ts): calls `restoreCycleFor`, which
+  locks the Subscription row. Two concurrent cancels can queue the second
+  one behind the first's lock, same pattern as the advisory-lock fixes.
+  
+- `refundOrder` (line 708 in orders.ts): locks the Order row, then may call
+  `restoreCycleFor` (which locks Subscription), or `createCreditNote`.
+  
+- `activateSubscription` (line 165 in subscription.ts): locks Subscription row +
+  re-reads + creates Payment. Concurrent activation attempts queue.
+  
+- `upgradeSubscription` (line 322 in subscription.ts): locks Subscription row +
+  re-reads + creates Payment. Concurrent upgrades queue.
+  
+- `adjustCycleUsage` (line 90 in subscription.ts): locks Subscription row +
+  re-reads + updates. Concurrent corrections queue.
+
+All now use `{ timeout: 15_000 }`, matching the pattern. The 15s value accounts
+for a single queued row lock PLUS a reasonable external API latency (Sheets).
+
+**Lesson, same root cause as advisory-lock fixes**: timeout bumps are per-call-site,
+not per-mechanism. An advisory lock needs 15s, a row lock needs 15s, an external
+call needs 15s — but the pattern is invisible if you only look at one type. A
+grep for `db.$transaction(` that documents EVERY call site's timeout (or lack
+of one) and its risk level is the only way to close this class of bug
+systematically, not just the instances that fail during the current test run.
+
 ## RESOLVED 2026-09-11: 4 advisory-lock transactions missing the 15s timeout bump
 
 Caught by a genuine (non-contention) full-suite failure: `sellCyclePack`'s

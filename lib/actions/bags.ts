@@ -109,9 +109,13 @@ export async function issueBag(
     } catch (e) {
       const isCodeCollision = (e as { code?: string }).code === "P2002";
       if (!isCodeCollision || attempt === 2) {
-        const msg = (e as Error).message || "Bag issue failed";
+        // A thrown Error with no .code (and not the P2002 collision handled
+        // above) is this function's own "already has an active bag" business
+        // message — safe to show. Any other internal error gets the generic
+        // message instead of leaking internals.
+        const hasCode = !!(e as { code?: string }).code;
         const sanitized = isCodeCollision ? "Couldn't allocate a code — please try again" :
-                         (msg.includes("active bag") || msg.includes("already") ? msg : "Bag issue failed — please try again");
+                         (!hasCode ? (e as Error).message : "Bag issue failed — please try again");
         return { ok: false as const, error: sanitized };
       }
     }
@@ -197,9 +201,14 @@ export async function syncBagToPlan(studentId: string) {
     if (!r.ok) return { ok: false as const, error: r.error };
     return { ok: true as const, code: r.code, changed: true, replaced: active?.code ?? null };
   } catch (e) {
-    const msg = (e as Error).message || "Failed to sync bag to plan";
-    const sanitized = msg.includes("not found") || msg.includes("not registered") ? msg : "Plan sync failed — please try again";
-    return { ok: false as const, error: sanitized };
+    // Nothing in this try deliberately throws (business errors here are all
+    // `return`s, not throws) — anything caught is a genuine internal error,
+    // so the generic message is always correct. Kept the .code check for
+    // consistency with the other catches in this file. Server-side log kept
+    // (not user-facing, no PII) so a real failure is still diagnosable.
+    console.error("[bags] syncBagToPlan failed:", (e as Error).message);
+    const hasCode = !!(e as { code?: string }).code;
+    return { ok: false as const, error: !hasCode ? (e as Error).message : "Plan sync failed — please try again" };
   }
 }
 

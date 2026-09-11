@@ -12,6 +12,41 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## CORRECTED 2026-09-11: pass 19's error-message sanitization swallowed real validation messages
+
+Pass 19's fix for raw-error-leakage in `acceptOrder`/`placeOrder`/`issueBag`/
+`syncBagToPlan` used a keyword-substring allowlist (`msg.includes("Not
+enough")`, `msg.includes("already")`, etc.) to decide which caught error
+messages were safe to show the user. Checking every actual `throw new
+Error(...)` site inside each function's `try` block found this allowlist
+was incomplete: `acceptOrder` can throw `"Unknown item " + label`, `"Pick at
+least one cycle"` / `"Add at least one piece"`, and — worst of all — the
+`requireCyclesEnabled` gate's rejection message (the "BVRIT bills per piece,
+cycle plans are never sold here" business rule the owner has repeatedly
+insisted on). None of those contain any of the allowlisted words, so they
+were all being silently replaced with a useless generic "please try again",
+hiding exactly the information a student or staff member needs.
+
+Fixed by switching the filter from keyword-matching to what the codebase
+already uses everywhere else to distinguish an internal error from a
+deliberate business-validation throw: a genuine Prisma/internal error always
+carries a `.code` property (e.g. P2002); a `throw new Error("...")` written
+by this codebase's own validation logic never does. `!(e as {code?:string}).code`
+is a complete, robust test — every legitimate validation message passes
+through untouched, and only real internal errors get the generic message.
+Also caught (while re-running the tests this touches) that the same commit
+had removed a legitimate server-side-only `console.error` in
+`syncBagToPlan`, breaking `tests/customer-id.test.ts`'s assertion that it
+still logs failures for diagnosability — restored it (it carries no PII,
+unlike the WhatsApp-webhook log this same pass correctly removed).
+
+**Lesson**: a fix framed as "make error messages safer" needs the SAME rigor
+as a concurrency fix — enumerate every actual throw site inside the guarded
+block and verify each one is preserved, don't reason abstractly about "known
+error keywords." An allowlist is only as good as its enumeration, and this
+one silently regressed the exact BVRIT business rule this session has
+fixed and re-verified multiple times already.
+
 ## RESOLVED 2026-09-11 (pass 19): debug logging, error message leaks, missing loading states
 
 Audit pass 19 focused on three fresh angles: error message consistency

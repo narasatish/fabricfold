@@ -120,8 +120,11 @@ export async function placeOrder(input: { service: string; items: { label: strin
       });
     }, { timeout: 15_000 }); // assertSlotBookable's advisory lock can queue a concurrent caller past Prisma's 5s default
   } catch (e) {
-    const msg = (e as Error).message || "Failed to place order";
-    return { ok: false as const, error: msg.includes("Unique constraint") || msg.includes("slot") ? msg : "Order placement failed — please try again" };
+    // Same reasoning as acceptOrder's catch: a thrown Error with no .code is
+    // one of assertSlotBookable's own business messages (e.g. "That slot is
+    // full") and is safe to show; only a genuine internal error gets hidden.
+    const hasCode = !!(e as { code?: string }).code;
+    return { ok: false as const, error: !hasCode ? (e as Error).message : "Order placement failed — please try again" };
   }
   bcast(o, "order.created");
   void notifyOwner(
@@ -262,9 +265,18 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
     // busy subscription can legitimately queue behind another accept/walk-in, and 5s was
     // already tight for this transaction's normal run of sequential awaited queries.
   } catch (e) {
-    const msg = (e as Error).message || "Failed to accept order";
-    // Preserve user-facing error messages from throwable validations; hide internal errors
-    return { ok: false as const, error: msg.includes("Not enough") || msg.includes("already") || msg.includes("No active") ? msg : "Order acceptance failed — please try again" };
+    // A deliberately-thrown `new Error("...")` (no .code) is always one of
+    // this function's own business-validation messages — every throw inside
+    // this try is one of those, and they're safe and meant to reach the
+    // user. Only a genuine internal error (Prisma etc., which always carries
+    // a .code) gets the generic message, hiding stack/SQL/constraint detail.
+    // CORRECTED 2026-09-11: an earlier version of this catch matched
+    // specific keyword substrings instead, which silently swallowed real
+    // validation messages that didn't happen to contain one of those words
+    // (e.g. "Unknown item X", "Pick at least one cycle", and — worst of all —
+    // the BVRIT per-piece cycle-gate rejection message).
+    const hasCode = !!(e as { code?: string }).code;
+    return { ok: false as const, error: !hasCode ? (e as Error).message : "Order acceptance failed — please try again" };
   }
 
   await pushNotif(result.studentId, `Order received — ${result.actualPieces} pieces logged for ${cfg.rates[result.service].label}.`, "status");

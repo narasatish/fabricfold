@@ -4,13 +4,14 @@ import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { fmt, timeAgo, initials } from "@/lib/format";
 import { Seg, Sheet, useToast } from "@/components/chrome";
-import { sendComplaintMessage, resolveComplaint } from "@/lib/actions/complaints";
+import { sendComplaintMessage, resolveComplaint, grantFreeReservice } from "@/lib/actions/complaints";
 import { submitCompensation } from "@/lib/actions/credits";
 
 type Complaint = {
   id: string;
   studentId: string;
   orderId: string | null;
+  redoOrderId: string | null;
   text: string;
   status: string;
   at: number;
@@ -86,6 +87,29 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
     }
   };
 
+  /* Found 2026-09-11: grantFreeReservice existed as a fully-tested server
+     action (atomic guard against giving one away twice) but was never
+     wired to a button — only monetary compensation was reachable from this
+     screen. A free re-wash is a different remedy than a payout (it doesn't
+     cost the till directly, it re-does the actual service) and the two can
+     both apply to the same complaint. */
+  const [redoBusy, setRedoBusy] = useState<Record<string, boolean>>({});
+  const doRedo = async (c: Complaint) => {
+    if (!c.orderId) return;
+    if (!confirm(`Raise a free re-service for ${c.student.name}'s order? This creates a new order at no charge.`)) return;
+    setRedoBusy((s) => ({ ...s, [c.id]: true }));
+    try {
+      const r = await grantFreeReservice(c.id);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast("Free re-service order created");
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setRedoBusy((s) => ({ ...s, [c.id]: false }));
+    }
+  };
+
   return (
     <div className="pad">
       <Seg<"open" | "resolved" | "all">
@@ -147,6 +171,15 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
                 <div className="row gap8 mt12">
                   <button className="btn xs" onClick={() => setResolveFor(c)}><Svg name="check" size={14} /> Resolve</button>
                   <button className="btn xs sec" onClick={() => setCompFor(c)}><Svg name="gift" size={14} /> Compensate</button>
+                  {c.orderId && (
+                    c.redoOrderId ? (
+                      <span className="pill" style={{ fontSize: 11 }}>Free re-service given</span>
+                    ) : (
+                      <button className="btn xs sec" disabled={redoBusy[c.id]} onClick={() => doRedo(c)}>
+                        <Svg name="shirt" size={14} /> {redoBusy[c.id] ? "Raising…" : "Free re-service"}
+                      </button>
+                    )
+                  )}
                 </div>
               </>
             )}

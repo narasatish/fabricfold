@@ -19,7 +19,7 @@ export default async function StaffComplaintsPage() {
   const complaints = await db.complaint.findMany({
     where: staff.collegeId ? { collegeId: staff.collegeId } : undefined,
     select: {
-      id: true, studentId: true, orderId: true, text: true, status: true, at: true,
+      id: true, studentId: true, orderId: true, redoOrderId: true, text: true, status: true, at: true,
       student: { select: { id: true, name: true, college: { select: { name: true } } } },
       messages: { orderBy: { at: "asc" }, select: { id: true, from: true, text: true, at: true } },
     },
@@ -31,6 +31,7 @@ export default async function StaffComplaintsPage() {
     id: c.id,
     studentId: c.studentId,
     orderId: c.orderId,
+    redoOrderId: c.redoOrderId,
     text: c.text,
     status: c.status,
     at: c.at.getTime(),

@@ -12,6 +12,56 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11: systematic "zero call sites" sweep of every exported server action
+
+Following the pattern of the night's earlier gaps (saveCollegeRates,
+eraseStudentData — correct, tested actions with no UI calling them), ran a
+systematic sweep: every exported function name in `lib/actions/*.ts` grepped
+against `app/**/*.tsx` for at least one call site.
+
+**Real gaps found and fixed** (all customer- or staff-facing, all missing
+entirely from the UI):
+- `grantFreeReservice` (complaints.ts) — free re-wash for a bad clean, a
+  DIFFERENT remedy than monetary compensation (`submitCompensation`, which
+  was already wired). Added a "Free re-service" button next to "Compensate"
+  in `ComplaintsClient.tsx`; shows "Free re-service given" once one exists
+  for that complaint (via `complaint.redoOrderId`, added to the page query).
+- `eraseMyData`, `exportMyData`, `signOutEverywhere` (all student
+  self-service, requiring their own session) — none had ANY button in
+  `ProfileClient.tsx`. A student had no way to download their data (GDPR),
+  erase their own account without visiting the counter, or remotely sign
+  out a lost phone. Added all three, following the exact same
+  confirm-then-toast-then-navigate pattern already used for logout/erase
+  elsewhere tonight. Export downloads via a client-side Blob + temporary
+  `<a download>` (server actions can't set Content-Disposition headers the
+  way an API route can).
+
+**False positives, checked and confirmed NOT gaps** (the sweep's own
+methodology — grep app/ only — can't see calls from OTHER server actions,
+or logic reimplemented directly in a server component instead of calling
+the standalone action):
+- `syncBagToPlan` — called from within `subscription.ts` itself (3 call
+  sites), just never directly from a component. Correct as an internal
+  helper.
+- `todayClose` — its job (has today's shift already been closed?) is
+  already done by `app/s/reports/page.tsx` querying `db.dayClose` directly
+  and passing `closed`/`variance` as props to `CloseDayButton`. The
+  standalone action duplicates that query and is genuinely unused, but
+  nothing is missing — the UI already shows the right state.
+- `cancelSubscriptionRequest` — dead code from a deprecated self-service
+  subscription-REQUEST flow. `requestSubscription` (right above it in the
+  same file) is already a permanent refusing stub with its own comment
+  explaining plans are counter-only now; this is that stub's leftover
+  "cancel my pending request" companion, from before that model existed.
+  Nothing currently creates the state this would cancel.
+- `listColleges` — genuinely has zero call sites anywhere in the codebase
+  (not even other lib/ files), but no evidence any current flow needs it —
+  registration passes `collegeId` via a fixed URL (`/join/bvrit`), not a
+  dynamic picker. Left as-is; flagging here in case a future college
+  selector needs it rather than reinventing the query.
+
+Verified: 11 affected test files (251 tests) pass; tsc clean.
+
 ## CORRECTED + RESOLVED 2026-09-11: payment-timing restriction reverted; found the real cause of the missing bag code
 
 Two follow-ups to the previous entry, from the owner testing further:

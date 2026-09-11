@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast, Sheet, Switch, toggleTheme } from "@/components/chrome";
 import { Svg } from "@/components/icons";
-import { logout, updateName, setPasscode, changePasscode } from "@/lib/actions/auth";
+import { logout, updateName, setPasscode, changePasscode, signOutEverywhere } from "@/lib/actions/auth";
+import { exportMyData, eraseMyData } from "@/lib/actions/privacy";
 
 export default function ProfileClient({ studentName, hasPasscode }: { studentName: string; hasPasscode: boolean }) {
   const router = useRouter();
@@ -84,6 +85,64 @@ export default function ProfileClient({ studentName, hasPasscode }: { studentNam
     }
   };
 
+  /* Found 2026-09-11: exportMyData, eraseMyData and signOutEverywhere all
+     existed as fully-tested server actions (the staff-facing erase button
+     was wired the same night this was found) but had no UI anywhere in the
+     customer app — a student had no way to download their data, sign out
+     a lost phone remotely, or erase their own account without visiting the
+     counter. */
+  const [exportBusy, setExportBusy] = useState(false);
+  const handleExport = async () => {
+    setExportBusy(true);
+    try {
+      const data = await exportMyData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `fabricfold-my-data-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast("Download started");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setExportBusy(false);
+    }
+  };
+
+  const [signOutAllBusy, setSignOutAllBusy] = useState(false);
+  const handleSignOutEverywhere = async () => {
+    if (!confirm("Sign out on every device signed in as you? You'll need to sign in again here too.")) return;
+    setSignOutAllBusy(true);
+    try {
+      await signOutEverywhere();
+    } catch {
+      // Same reasoning as handleLogout — the cookie may already be cleared
+      // even if this throws, so send them to /login regardless.
+    } finally {
+      router.push("/login");
+    }
+  };
+
+  const [showErase, setShowErase] = useState(false);
+  const [eraseConfirm, setEraseConfirm] = useState("");
+  const [eraseBusy, setEraseBusy] = useState(false);
+  const handleErase = async () => {
+    setEraseBusy(true);
+    try {
+      const r = await eraseMyData(eraseConfirm);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      router.push("/login");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setEraseBusy(false);
+    }
+  };
+
   return (
     <>
       <button
@@ -142,10 +201,38 @@ export default function ProfileClient({ studentName, hasPasscode }: { studentNam
         <Switch on={dark} onToggle={handleDark} />
       </div>
 
+      <button className="list-item tap" style={{ width: "100%", textAlign: "left", padding: "15px 18px" }} onClick={handleExport} disabled={exportBusy}>
+        <span style={{ color: "var(--teal)" }}>
+          <Svg name="list" size={20} />
+        </span>
+        <div style={{ flex: 1 }}>
+          <div className="h-sm">{exportBusy ? "Preparing…" : "Download my data"}</div>
+          <div className="muted" style={{ fontSize: 12 }}>Everything FabricFold holds about you, as a file</div>
+        </div>
+      </button>
+
+      <button className="list-item tap" style={{ width: "100%", textAlign: "left", padding: "15px 18px" }} onClick={handleSignOutEverywhere} disabled={signOutAllBusy}>
+        <span style={{ color: "var(--teal)" }}>
+          <Svg name="shield" size={20} />
+        </span>
+        <div style={{ flex: 1 }}>
+          <div className="h-sm">{signOutAllBusy ? "Signing out…" : "Sign out everywhere"}</div>
+          <div className="muted" style={{ fontSize: 12 }}>Lost your phone? End every signed-in session, including this one</div>
+        </div>
+      </button>
+
       <button className="list-item tap" style={{ width: "100%", textAlign: "left", padding: "15px 18px", color: "var(--red)" }} onClick={handleLogout} disabled={loading}>
         <Svg name="logout" size={20} />
         <div style={{ flex: 1 }}>
           <div className="h-sm" style={{ color: "var(--red)" }}>{loading ? "Logging out…" : "Log out"}</div>
+        </div>
+      </button>
+
+      <button className="list-item tap" style={{ width: "100%", textAlign: "left", padding: "15px 18px", color: "var(--red)" }} onClick={() => setShowErase(true)}>
+        <Svg name="trash" size={20} />
+        <div style={{ flex: 1 }}>
+          <div className="h-sm" style={{ color: "var(--red)" }}>Erase my account</div>
+          <div className="muted" style={{ fontSize: 12 }}>Permanent — removes your name and number, blocked while an order is in progress</div>
         </div>
       </button>
 
@@ -223,6 +310,30 @@ export default function ProfileClient({ studentName, hasPasscode }: { studentNam
             <p className="muted mt4" style={{ fontSize: "13px" }}>Pay by UPI, cash at the counter, or store credits. Refunds are returned the way you paid or as credits, with a GST credit note where an invoice was issued.</p>
           </div>
           <button className="btn sec mt16" onClick={() => setShowTerms(false)}>Close</button>
+        </div>
+      </Sheet>
+
+      {/* Erase account */}
+      <Sheet open={showErase} onClose={() => { setShowErase(false); setEraseConfirm(""); }}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "6px", color: "var(--red)" }}>Erase your account?</h2>
+          <div className="muted" style={{ fontSize: "12.5px", marginBottom: "16px" }}>
+            This cannot be undone. Your name and phone number are scrubbed and you won&apos;t be able to
+            sign in again with this number. Orders and payments stay on record for accounting, shown as
+            &quot;Deleted student&quot;. Blocked while you have an order in progress.
+          </div>
+          <div className="field">
+            <label>Type DELETE to confirm</label>
+            <input className="input" value={eraseConfirm} onChange={(e) => setEraseConfirm(e.target.value)} />
+          </div>
+          <button
+            className="btn"
+            style={{ background: "var(--red)" }}
+            onClick={handleErase}
+            disabled={eraseBusy || eraseConfirm.trim().toUpperCase() !== "DELETE"}
+          >
+            {eraseBusy ? "Erasing…" : "Erase my account permanently"}
+          </button>
         </div>
       </Sheet>
     </>

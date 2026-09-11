@@ -144,6 +144,7 @@ export default function StaffOrderClient({
   const [showReady, setShowReady] = useState(false);
   const [countedPieces, setCountedPieces] = useState<number>(intakeCount);
   const [readyBusy, setReadyBusy] = useState(false);
+  const [acceptBusy, setAcceptBusy] = useState(false);
 
   const late = isOverdue({ status: order.status, receivedAt: order.receivedAt ? new Date(order.receivedAt) : null, express: order.express }) && (order.status === "received" || order.status === "processing");
   const isDraft = order.status === "draft";
@@ -156,6 +157,7 @@ export default function StaffOrderClient({
     const adjusted = serviceRates.items
       .filter((it) => acceptInput.itemQtys[it[0]] > 0)
       .map((it) => ({ label: it[0], qty: acceptInput.itemQtys[it[0]] }));
+    setAcceptBusy(true);
     try {
       const r = await acceptOrder(order.id, {
         weightKg: acceptInput.weightKg || null,
@@ -175,6 +177,8 @@ export default function StaffOrderClient({
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setAcceptBusy(false);
     }
   };
 
@@ -948,8 +952,8 @@ export default function StaffOrderClient({
               />
             </label>
           </div>
-          <button className="btn mt16" onClick={handleAccept}>
-            <Svg name="check" size={18} /> Accept
+          <button className="btn mt16" onClick={handleAccept} disabled={acceptBusy}>
+            <Svg name="check" size={18} /> {acceptBusy ? "Accepting…" : "Accept"}
           </button>
         </div>
       </Sheet>

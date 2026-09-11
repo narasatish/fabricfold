@@ -21,22 +21,41 @@ export async function submitCompensation(input: { studentId: string; orderId?: s
   const stu = await db.student.findUniqueOrThrow({ where: { id: input.studentId } });
   assertSameCollege(st, stu.collegeId);
 
-  await db.$transaction(async (tx) => {
-    await tx.compensation.create({
-      // complaintId ties a payout to the grievance that justified it, so the
-      // cost of a service failure is traceable rather than a loose adjustment.
-      data: { studentId: stu.id, orderId: input.orderId || null, complaintId: input.complaintId || null, kind: input.kind, amount, comment: input.comment.trim() || null, by: st.id, method: input.method },
-    });
-    if (input.method === "credit") {
-      await tx.student.update({ where: { id: stu.id }, data: { credits: { increment: amount } } });
-    } else {
-      await tx.payment.create({ data: { method: "cash_out", amount: -amount, collegeId: stu.collegeId, orderId: input.orderId || null, studentId: stu.id, note: "Cash compensation" } });
-      if (input.orderId) {
-        const inv = await tx.invoice.findUnique({ where: { orderId: input.orderId } });
-        if (inv) await createCreditNote(tx, inv, amount, "Cash compensation", st.id, "cash");
+  try {
+    await db.$transaction(async (tx) => {
+      // A double-tap on the compensation button could fire two submissions
+      // concurrently. Check within the transaction if the exact same
+      // compensation was already issued (same orderId/complaintId/kind), and
+      // bail if so — the second tap gets a friendly error instead of creating
+      // a duplicate payout.
+      const existing = await tx.compensation.findFirst({
+        where: {
+          studentId: stu.id,
+          orderId: input.orderId || null,
+          complaintId: input.complaintId || null,
+          kind: input.kind,
+        },
+      });
+      if (existing) throw new Error("This compensation was already issued");
+
+      await tx.compensation.create({
+        // complaintId ties a payout to the grievance that justified it, so the
+        // cost of a service failure is traceable rather than a loose adjustment.
+        data: { studentId: stu.id, orderId: input.orderId || null, complaintId: input.complaintId || null, kind: input.kind, amount, comment: input.comment.trim() || null, by: st.id, method: input.method },
+      });
+      if (input.method === "credit") {
+        await tx.student.update({ where: { id: stu.id }, data: { credits: { increment: amount } } });
+      } else {
+        await tx.payment.create({ data: { method: "cash_out", amount: -amount, collegeId: stu.collegeId, orderId: input.orderId || null, studentId: stu.id, note: "Cash compensation" } });
+        if (input.orderId) {
+          const inv = await tx.invoice.findUnique({ where: { orderId: input.orderId } });
+          if (inv) await createCreditNote(tx, inv, amount, "Cash compensation", st.id, "cash");
+        }
       }
-    }
-  });
+    });
+  } catch (e) {
+    return { ok: false as const, error: (e as Error).message };
+  }
 
   if (input.method === "credit") await pushNotif(stu.id, `You received ₹${amount} in credits. ${input.comment || ""}`.trim(), "status");
   await audit("Compensation", `${KIND_LABEL[input.kind] || "Credit"} ₹${amount} (${input.method}) → ${stu.name}`, st.id);

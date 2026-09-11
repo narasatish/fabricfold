@@ -84,6 +84,15 @@ export async function eraseMyData(confirmation: string) {
   }
   if (stu.anonymisedAt) return { ok: false as const, error: "This account has already been erased" };
 
+  // Check for active orders — anonymizing while an order is in-flight will break
+  // SMS notifications and pickup OTP (phone becomes "deleted-{id}").
+  const activeOrder = await db.order.findFirst({
+    where: { studentId: stu.id, status: { in: ["received", "processing"] } },
+  });
+  if (activeOrder) {
+    return { ok: false as const, error: "You have an order in progress. Please wait for it to complete before erasing your account." };
+  }
+
   await db.$transaction(async (tx) => {
     // Notifications are pure PII with no accounting value — actually delete them.
     await tx.notification.deleteMany({ where: { studentId: stu.id } });
@@ -111,6 +120,15 @@ export async function eraseStudentData(studentId: string, reason: string) {
   if (!stu) return { ok: false as const, error: "Student not found" };
   assertSameCollege(st, stu.collegeId);
   if (stu.anonymisedAt) return { ok: false as const, error: "That account has already been erased" };
+
+  // Check for active orders — anonymizing while an order is in-flight will break
+  // SMS notifications and pickup OTP (phone becomes "deleted-{id}").
+  const activeOrder = await db.order.findFirst({
+    where: { studentId: stu.id, status: { in: ["received", "processing"] } },
+  });
+  if (activeOrder) {
+    return { ok: false as const, error: "This student has an order in progress. Wait for it to complete before erasing." };
+  }
 
   await db.$transaction(async (tx) => {
     await tx.notification.deleteMany({ where: { studentId: stu.id } });

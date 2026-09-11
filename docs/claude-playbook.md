@@ -12,6 +12,51 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11 (pass 15): 3 race/atomicity issues in closeDay, erasure, compensation
+
+Systematic audit on ReportsClient.tsx, ops.ts closeDay, privacy.ts erasure, and
+credits.ts submitCompensation found and fixed three issues:
+
+1. **closeDay double-close creates duplicate DayClose rows.**
+   The pre-check `if (await db.dayClose.findUnique(...))` ran outside a
+   transaction. Two concurrent "Close day" button taps both passed the check,
+   then both attempted `db.dayClose.create()`. The second hit Postgres's
+   unique constraint on (date) and threw an unhandled P2002 error, unlike
+   `clockIn()` (line 26) which catches and returns a friendly message.
+   
+   Fixed by adding a P2002 catch block to `closeDay()` (ops.ts line 77-81),
+   following the same pattern as `clockIn()`. Now the second tap gets a
+   friendly error instead of a crash. Verified by test that races only create
+   one DayClose row.
+
+2. **eraseStudentData/eraseMyData break SMS and pickup OTP for active orders.**
+   Anonymizing a student's name/phone while they have an order in-flight
+   (status="received" or "processing") breaks SMS notifications and the
+   pickup OTP collection flow. The phone field becomes "deleted-{studentId}",
+   which is not a valid number to dial. The check `if (stu.anonymisedAt)`
+   was outside the transaction and vulnerable to concurrent calls.
+   
+   Fixed by adding a pre-transaction check `if (activeOrder)` to both
+   `eraseMyData()` and `eraseStudentData()` (privacy.ts) to reject erasure
+   while an order is in-flight. Customers are told to wait for collection
+   first. Verified by test that erasure is blocked when active order exists.
+
+3. **submitCompensation double-submit creates duplicate payouts.**
+   The compensation sheet uses `actionBusy` UI-level guard, but no server-side
+   idempotency check. Two compensation requests for the same incident (same
+   orderId/complaintId/kind) could both succeed and create two separate
+   compensation records. Database has no unique constraint to prevent this.
+   
+   Fixed by adding a transaction-level check in `submitCompensation()`
+   (credits.ts line 27-31): before creating, check if a compensation with
+   the same (studentId, orderId, complaintId, kind) already exists, and
+   throw "already issued" if so. Different kinds for the same order are
+   allowed. Verified by test that duplicate same-kind compensations are
+   rejected but different-kind compensations succeed.
+
+**Verified:** All three fixes are test-locked (`audit-15-double-close-erase-comp.test.ts`),
+type-check clean, and pass integration tests.
+
 ## RESOLVED 2026-09-11 (pass 14): 3 concurrent-request issues in complaints and UI
 
 Audit sweep on complaint-handling logic found and fixed:

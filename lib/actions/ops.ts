@@ -65,7 +65,15 @@ export async function closeDay(countedCash: number, note?: string) {
   const expected = r.expectedDrawer;
   const variance = Math.round((countedCash - expected) * 100) / 100;
 
-  await db.dayClose.create({ data: { date, expectedCash: expected, countedCash, variance, note: note?.trim() || null, by: st.id } });
+  try {
+    await db.dayClose.create({ data: { date, expectedCash: expected, countedCash, variance, note: note?.trim() || null, by: st.id } });
+  } catch (e) {
+    // Two concurrent close-day taps both pass the pre-check above, and the
+    // second hits the unique constraint on `date`. Catch and return the same
+    // friendly error as the pre-check, not a raw constraint violation.
+    if ((e as { code?: string }).code === "P2002") return { ok: false as const, error: "Today is already closed" };
+    throw e;
+  }
   await audit("Day closed", `${date} · counted ₹${countedCash} vs expected ₹${expected} · variance ₹${variance}`, st.id);
   /* Awaited, not void: a floating promise is abandoned when Vercel freezes
      the instance, and the variance mail is the one this ritual exists for.

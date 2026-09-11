@@ -12,6 +12,39 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-09-11 (pass 14): 3 concurrent-request issues in complaints and UI
+
+Audit sweep on complaint-handling logic found and fixed:
+
+1. **resolveComplaint could be called twice and send duplicate notifications.**
+   The function checked if the complaint was open, then called `db.complaint.update()`,
+   but the check-then-act was not atomic. Two concurrent calls (or a retried request
+   while a response was pending) could both pass the status check and both update,
+   resulting in two calls to `pushNotif()` and two duplicate messages to the student.
+   
+   Fixed by adopting the atomic pattern already used by `grantFreeReservice`: 
+   use `db.complaint.updateMany({ where: { id, status: "open" }, data: {...} })`
+   and check `if (claimed.count === 0)` to detect and reject the second caller.
+   This is now a test-locked invariant in `deep-audit-fixes.test.ts`.
+
+2. **ComplaintsClient send/resolve buttons had no busy-state guards.**
+   While `doComp` (compensation) had busy-state tracking to prevent double-tap,
+   `send` (message) and `doResolve` (resolve complaint) had no guard, making duplicate
+   message/resolution calls possible if a user clicked rapidly or on slow networks.
+   
+   Fixed by adding `sendBusy` and `resolveBusy` state (following the pattern of
+   `compBusy`) and disabling the buttons/inputs while in-flight. Messages show
+   "Sending…" / "Resolving…" to signal the state to the user.
+
+3. **Fire-and-forget sendWhatsAppPhotos calls had no catch handlers.**
+   Two calls to `void sendWhatsAppPhotos()` in complaints.ts (lines 80, 112)
+   lacked `.catch(() => {})` handlers. While the function is designed not to
+   throw, adding explicit catch handlers provides defense-in-depth to prevent
+   any unexpected errors from becoming unhandled rejections.
+
+**Verified:** All three fixes are test-locked (`deep-audit-fixes.test.ts`),
+type-check clean, and pass the full complaint-related test suite.
+
 ## RESOLVED 2026-09-11 (pass 13): 6 non-advisory-lock transactions missing the 15s timeout bump
 
 Found by systematic sweep for every `db.$transaction(` call in `lib/actions/*`

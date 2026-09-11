@@ -1129,6 +1129,40 @@ verify infrastructure assumptions specifically.
   the browser (tunneled through same-origin `/monitoring-tunnel`, so CSP's
   `connect-src` was never actually a concern — only `worker-src` was).
 
+## RESOLVED 2026-09-11 (pass 11): WaVerify registration hijacking on shared computers
+
+Audit pass 11 found a real registration hijacking vulnerability: on a
+shared/public computer, an attacker could hijack a BVRIT WhatsApp
+registration after the legitimate user had verified their phone but before
+they completed the claim.
+
+**The scenario:** User A starts registration with name "Alice", gets a claim
+cookie and code "ABC123". User A sends "ABC123" to WhatsApp to verify the
+phone `+91 9876543210`. Webhook marks the WaVerify row verified. User A
+closes the browser without completing the claim. The httpOnly cookie remains
+(TTL 5 minutes). User B on the same computer calls `checkWhatsAppRegister`
+with the same code, and the cookie check passes. The account is created
+with name "Bob" (attacker-controlled) and phone `+91 9876543210` (verified,
+but now owned by the attacker). User A cannot register with their own number
+afterward.
+
+**Root cause:** `checkWhatsAppRegister()` accepted a `studentName` parameter
+at claim time, inconsistent with how `collegeId` is deliberately locked
+server-side when the attempt begins.
+
+**Fix:** `studentName` is now stored in `WaVerify.studentName` when
+`startWhatsAppRegister()` creates the attempt. `checkWhatsAppRegister()`
+no longer accepts a name parameter; it uses the stored value. The same
+pattern already applied to `collegeId`. Both are fixed at attempt-start,
+never re-trusted from a claim-time parameter.
+
+Updated: `lib/actions/wa-register.ts` (function signature + usage),
+`app/join/bvrit/_components/RegisterForm.tsx` (caller removed the parameter),
+test suite updated. Added behavioral test
+(`tests/wa-register-name-behavioral.test.ts`) confirming the account is
+created under the original name, not a name an attacker might pass at claim
+time. Commit dce7695.
+
 ## Live-testing constraints (why some things stay code-verified only)
 
 Production has no test-OTP bypass (`TEST_TOOLS` env var is unset on both

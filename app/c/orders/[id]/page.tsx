@@ -28,6 +28,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
 
   const items = order.items as unknown as Array<{ label: string; rate: number; qty: number }>;
   const totalQty = items.reduce((s, i) => s + i.qty, 0);
+  // Detect cycle-based orders by checking if any item label contains "cycle"
+  const isCycleOrder = items.some((i) => i.label.includes("cycle"));
 
   // Customer-facing ETA while the order is in progress.
   const dueAt = orderDueAt({ receivedAt: order.receivedAt, express: order.express });
@@ -195,7 +197,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             </div>
           ))}
           <div className="kv">
-            <span className="k">Subtotal ({totalQty} pcs)</span>
+            <span className="k">Subtotal ({totalQty} {isCycleOrder ? "cycle" : "pc"}{totalQty !== 1 ? "s" : ""})</span>
             <span className="mono">{fmt(Number(order.subtotal ?? 0))}</span>
           </div>
           {(Number(order.surcharge ?? 0)) > 0 && (

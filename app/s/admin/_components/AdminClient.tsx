@@ -830,18 +830,15 @@ Students already registered there keep their records and can be restored with th
         </button>
         {slotEdit.id && (
           <button
+            disabled={runBusy}
             className="btn sec mt10"
             style={{ color: "var(--red)", background: "var(--red-soft)", border: "none" }}
-            onClick={async () => {
+            onClick={() => {
               if (!confirm("Delete this window? Orders already booked into it keep their slot.")) return;
-              const r = await deleteSlotWindow(slotEdit.id!);
-              if (!r.ok) return toast("Failed", true);
-              toast("Window deleted");
-              setSheet(null);
-              router.refresh();
+              run(() => deleteSlotWindow(slotEdit.id!), "Window deleted");
             }}
           >
-            <Svg name="trash" size={16} /> Delete window
+            <Svg name="trash" size={16} /> {runBusy ? "Deleting…" : "Delete window"}
           </button>
         )}
       </Sheet>

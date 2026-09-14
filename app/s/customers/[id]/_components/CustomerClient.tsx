@@ -177,7 +177,9 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
     }
   };
 
+  const [retireBusy, setRetireBusy] = useState(false);
   const doRetireBag = async (bagId: string, status: "lost" | "replaced") => {
+    setRetireBusy(true);
     try {
       const r = await retireBag(bagId, status);
       if (!r.ok) return toast(r.error || "Failed", true);
@@ -185,6 +187,8 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setRetireBusy(false);
     }
   };
 
@@ -193,6 +197,7 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
      Needed when the counter has a specific bag in hand and the student must
      end up with the number on it. Everything downstream reads the code from
      the same row, so no other screen needs touching. */
+  const [editBagBusy, setEditBagBusy] = useState(false);
   const doEditBagCode = async (bagId: string, current: string) => {
     const next = prompt(
       `Customer ID for ${student.name}
@@ -203,6 +208,8 @@ Currently ${current}. Type the code printed on the bag they are being given.
       current,
     );
     if (!next || next.trim().toUpperCase() === current) return;
+    if (editBagBusy) return;
+    setEditBagBusy(true);
     try {
       const r = await setBagCode(bagId, next);
       if (!r.ok) return toast(r.error || "Failed", true);
@@ -210,6 +217,8 @@ Currently ${current}. Type the code printed on the bag they are being given.
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setEditBagBusy(false);
     }
   };
 
@@ -656,7 +665,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
                 </div>
                 <div className="muted mt4" style={{ fontSize: 12 }}>Issued {dateStr(activeBag.issuedAt)}</div>
                 <div className="row gap8 mt12">
-                  <button className="btn xs sec" onClick={() => doEditBagCode(activeBag.id, activeBag.code)}>Change ID</button>
+                  <button className="btn xs sec" disabled={editBagBusy} onClick={() => doEditBagCode(activeBag.id, activeBag.code)}>{editBagBusy ? "Updating…" : "Change ID"}</button>
                   <button className="btn xs sec" disabled={reissueBusy} onClick={() => doReissue(activeBag.id, activeBag.code)}>{reissueBusy ? "Reissuing…" : "Lost — reissue"}</button>
                   <button className="btn xs sec" disabled={releaseBusy} style={{ color: "var(--red)" }} onClick={() => doReleaseBag(activeBag.id, activeBag.code)}>
                     {releaseBusy ? "Releasing…" : "Student left"}

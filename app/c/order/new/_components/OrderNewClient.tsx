@@ -50,7 +50,14 @@ export default function OrderNewClient({
     });
     return q;
   });
-  const [cycles, setCycles] = useState(1);
+  // For cycle-based reorders: extract cycle count from the synthetic item (e.g., "Wash & Fold — cycle" × 2)
+  const [cycles, setCycles] = useState(() => {
+    const rateItemsForCurrentService = allRates[currentService] ?? [];
+    const cycleItem = reorderItems.find(
+      (i) => rateItemsForCurrentService.some(([label]) => label === i.label && label.includes("cycle"))
+    );
+    return cycleItem?.qty || 1;
+  });
   const [express, setExpress] = useState(false);
   const [dropSlotAt, setDropSlotAt] = useState<string>("");
   const [loading, setLoading] = useState(false);

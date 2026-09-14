@@ -24,7 +24,9 @@ export default async function StaffAdminPage() {
   // — the write side was already correctly guarded (assertSameCollege), only
   // the read side leaked. Owner (collegeId null) is unaffected.
   const staffScope = staff.collegeId ? { collegeId: staff.collegeId } : {};
-  const [cfg, colleges, staffList, payslips, plans, attToday, attMonth] = await Promise.all([
+  const todayStart = new Date(new Date(istDate + "T00:00:00+05:30").getTime());
+  const todayEnd = new Date(todayStart.getTime() + 24 * 3600_000);
+  const [cfg, colleges, staffList, payslips, plans, attToday, attMonth, actionsToday] = await Promise.all([
     db.appConfig.findUniqueOrThrow({ where: { id: "main" } }),
     /* ALL colleges, not just active ones, for an OWNER — filtering here is
        what made "remove campus" a one-way door: the removed campus vanished
@@ -39,6 +41,7 @@ export default async function StaffAdminPage() {
     db.plan.findMany({ where: staffScope, orderBy: [{ collegeId: "asc" }, { price: "asc" }] }),
     db.attendance.findMany({ where: { date: istDate, ...(staff.collegeId ? { staff: staffScope } : {}) } }),
     db.attendance.groupBy({ by: ["staffId"], where: { date: { startsWith: month }, ...(staff.collegeId ? { staff: staffScope } : {}) }, _count: true }),
+    db.auditLog.groupBy({ by: ["by"], where: { at: { gte: todayStart, lt: todayEnd } }, _count: true }),
   ]);
 
   const slotWindows = await db.slotWindow.findMany({
@@ -72,6 +75,7 @@ export default async function StaffAdminPage() {
             todayIn: today ? today.clockIn.getTime() : null,
             todayOut: today?.clockOut ? today.clockOut.getTime() : null,
             daysThisMonth: attMonth.find((a) => a.staffId === x.id)?._count ?? 0,
+            actionsToday: actionsToday.find((a) => a.by === x.id)?._count ?? 0,
           };
         })}
         month={month}

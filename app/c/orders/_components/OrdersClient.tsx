@@ -17,8 +17,9 @@ type Order = {
 
 export default function OrdersClient({ orders, rates }: { orders: Order[]; rates: Record<string, any> }) {
   const [filter, setFilter] = useState<"all" | "active" | "draft" | "collected">("all");
+  const [q, setQ] = useState("");
 
-  const filtered =
+  const byStatus =
     filter === "all"
       ? orders
       : filter === "active"
@@ -26,6 +27,14 @@ export default function OrdersClient({ orders, rates }: { orders: Order[]; rates
         : filter === "draft"
           ? orders.filter((o) => o.status === "draft")
           : orders.filter((o) => o.status === "collected");
+
+  const needle = q.trim().toLowerCase();
+  const filtered = needle
+    ? byStatus.filter((o) => {
+        const label = (rates?.[o.service]?.label || o.service).toLowerCase();
+        return label.includes(needle) || o.id.toLowerCase().includes(needle);
+      })
+    : byStatus;
 
   return (
     <>
@@ -38,6 +47,14 @@ export default function OrdersClient({ orders, rates }: { orders: Order[]; rates
       <TopBar title="My Orders" sub={`${filtered.length} total`} />
 
       <div className="pad">
+      <input
+        className="input"
+        placeholder="Search by service or order #"
+        style={{ border: "none", boxShadow: "none", height: "44px" }}
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+      />
+      <div className="mt10">
       <Seg<string>
         options={[
           ["all", "All"],
@@ -48,6 +65,7 @@ export default function OrdersClient({ orders, rates }: { orders: Order[]; rates
         value={filter}
         onChange={(f) => setFilter(f as any)}
       />
+      </div>
 
       <div className="mt12">
         {filtered.length > 0 ? (
@@ -55,7 +73,7 @@ export default function OrdersClient({ orders, rates }: { orders: Order[]; rates
         ) : (
           <div className="empty">
             <Svg name="bag" size={48} />
-            <div>No orders here yet</div>
+            <div>{needle ? "No orders match your search" : "No orders here yet"}</div>
           </div>
         )}
       </div>
@@ -68,53 +86,65 @@ function OrderRow({ order, rates }: { order: Order; rates: Record<string, any> }
   const items = order.items as unknown as Array<{ label: string; qty: number }>;
   const totalQty = items.reduce((s, i) => s + i.qty, 0);
   const rateLabel = rates?.[order.service]?.label || order.service;
+  const canReorder = !["draft", "cancelled"].includes(order.status);
 
   return (
-    <Link
-      href={`/c/orders/${order.id}`}
-      className="card mt10"
-      style={{ padding: "14px 16px", width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: "13px", textDecoration: "none" }}
-    >
-      <div
-        className="icon-tile"
-        style={{
-          background:
-            order.status === "ready"
-              ? "var(--teal-soft)"
-              : order.status === "draft"
-                ? "var(--line)"
-                : "var(--teal-tint)",
-        }}
+    <div className="card mt10" style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: "13px" }}>
+      <Link
+        href={`/c/orders/${order.id}`}
+        style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: "13px", textDecoration: "none", color: "inherit" }}
       >
-        <Svg name={order.status === "ready" ? "ready" : order.status === "draft" ? "edit" : "bag"} size={22} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="between">
-          <span className="h-sm">{rateLabel}</span>
-          <span className="mono muted" style={{ fontSize: "12px" }}>
-            #{order.id.slice(-4)}
-          </span>
+        <div
+          className="icon-tile"
+          style={{
+            background:
+              order.status === "ready"
+                ? "var(--teal-soft)"
+                : order.status === "draft"
+                  ? "var(--line)"
+                  : "var(--teal-tint)",
+          }}
+        >
+          <Svg name={order.status === "ready" ? "ready" : order.status === "draft" ? "edit" : "bag"} size={22} />
         </div>
-        <div className="row gap8 mt4" style={{ flexWrap: "wrap" }}>
-          <span className={`pill st-${order.status}`}>
-            {STATUS_LABEL[order.status] || order.status}
-          </span>
-          <span className="muted" style={{ fontSize: "12.5px" }}>
-            {totalQty} pcs · {fmt(order.total)}
-          </span>
-          <span className="muted" style={{ fontSize: "12.5px" }}>
-            {dateStr(order.createdAt)}
-          </span>
-          {order.express && (
-            <span className="pill amber">
-              <Svg name="bolt" size={11} /> Express
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="between">
+            <span className="h-sm">{rateLabel}</span>
+            <span className="mono muted" style={{ fontSize: "12px" }}>
+              #{order.id.slice(-4)}
             </span>
-          )}
+          </div>
+          <div className="row gap8 mt4" style={{ flexWrap: "wrap" }}>
+            <span className={`pill st-${order.status}`}>
+              {STATUS_LABEL[order.status] || order.status}
+            </span>
+            <span className="muted" style={{ fontSize: "12.5px" }}>
+              {totalQty} pcs · {fmt(order.total)}
+            </span>
+            <span className="muted" style={{ fontSize: "12.5px" }}>
+              {dateStr(order.createdAt)}
+            </span>
+            {order.express && (
+              <span className="pill amber">
+                <Svg name="bolt" size={11} /> Express
+              </span>
+            )}
+          </div>
         </div>
-      </div>
-      <span style={{ color: "var(--faint)" }}>
+      </Link>
+      {canReorder && (
+        <Link
+          href={`/c/order/new?service=${order.service}&reorder=${order.id}`}
+          className="btn xs sec"
+          title="Order again"
+          style={{ flexShrink: 0 }}
+        >
+          <Svg name="bag" size={15} />
+        </Link>
+      )}
+      <Link href={`/c/orders/${order.id}`} style={{ color: "var(--faint)", flexShrink: 0 }}>
         <Svg name="chevR" size={18} />
-      </span>
-    </Link>
+      </Link>
+    </div>
   );
 }

@@ -243,7 +243,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
 
         {/* Reorder button */}
         {!["draft", "cancelled"].includes(order.status) && (
-          <Link href={`/c/order/new?reorder=${order.id}`} className="btn sec mt12">
+          <Link href={`/c/order/new?service=${order.service}&reorder=${order.id}`} className="btn sec mt12">
             <Svg name="bag" size={17} /> Reorder these items
           </Link>
         )}

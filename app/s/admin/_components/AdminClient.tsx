@@ -36,7 +36,7 @@ type Props = {
   staff: { id: string; name: string; phone: string; role: number; collegeId: string | null; active: boolean; perms: Record<string, boolean> }[];
   payslips: { id: string; number: string; month: string; net: number; staffName: string; collegeId: string | null }[];
   plans: PlanRow[];
-  attendance: { staffId: string; name: string; todayIn: number | null; todayOut: number | null; daysThisMonth: number }[];
+  attendance: { staffId: string; name: string; todayIn: number | null; todayOut: number | null; daysThisMonth: number; actionsToday: number }[];
   month: string;
   errors: { id: string; kind: string; message: string; url: string | null; seen: boolean; at: number }[];
   slotWindows: SlotWindowRow[];
@@ -482,6 +482,7 @@ Students already registered there keep their records and can be restored with th
               <div className="h-sm">{a.name}</div>
               <div className="muted" style={{ fontSize: 12 }}>
                 {a.todayIn ? `Today: in ${hhmm(a.todayIn)}${a.todayOut ? ` · out ${hhmm(a.todayOut)}` : " · on shift"}` : "Not in today"}
+                {a.actionsToday > 0 && ` · ${a.actionsToday} action${a.actionsToday === 1 ? "" : "s"} today`}
               </div>
             </div>
             <span className="pill gray">{a.daysThisMonth} day{a.daysThisMonth === 1 ? "" : "s"}</span>

@@ -690,7 +690,7 @@ export default function StaffOrderClient({
             <Svg name="card" size={15} /> GST bill
           </a>
         )}
-        <a href={`https://wa.me/91${order.student.phone}?text=${encodeURIComponent(`Your ${order.service} order #${order.id.slice(-4)} is ready for collection`)}`} target="_blank" className="btn xs sec" style={{ color: "#0f8a4d", borderColor: "#bfe6cf" }}>
+        <a href={`https://wa.me/91${order.student.phone}?text=${encodeURIComponent(order.status === "ready" ? `Your ${order.service} order #${order.id.slice(-4)} is ready for collection` : `Hi, about your ${order.service} order #${order.id.slice(-4)} (currently ${STATUS_LABEL[order.status] || order.status})…`)}`} target="_blank" className="btn xs sec" style={{ color: "#0f8a4d", borderColor: "#bfe6cf" }}>
           <Svg name="chat" size={15} /> WhatsApp
         </a>
         {order.paid && !order.refunded && (

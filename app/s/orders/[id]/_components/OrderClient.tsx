@@ -547,7 +547,7 @@ export default function StaffOrderClient({
           </div>
         ) : null}
         <div className="kv">
-          <span className="k">{order.noGst || order.gstPct === 0 ? "GST — not charged" : `GST (${order.gstPct}%)`}</span>
+          <span className="k">{order.noGst || order.usedCycle || order.gstPct === 0 ? "GST — not charged" : `GST (${order.gstPct}%)`}</span>
           <span className="mono">{fmt(Number(order.gst))}</span>
         </div>
         <div className="kv total">

@@ -207,7 +207,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             </div>
           )}
           <div className="kv">
-            <span className="k">{order.noGst || Number(order.gstPctSnapshot) === 0 ? "GST — not charged" : `GST (${Number(order.gstPctSnapshot)}%)`}</span>
+            <span className="k">{order.noGst || order.usedCycle || Number(order.gstPctSnapshot) === 0 ? "GST — not charged" : `GST (${Number(order.gstPctSnapshot)}%)`}</span>
             <span className="mono">{fmt(Number(order.gst))}</span>
           </div>
           <div className="kv total">

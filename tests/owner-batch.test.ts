@@ -1,42 +1,37 @@
-/* The Sep-2026 owner batch: 5 kg / Rs 50 flat / round-up excess with waiver,
-   4-digit bag codes, parked wash day, batch advance, uncollected list,
-   weekly digest, variance alert, sign-in audit, QR removals, /get page. */
+/* The Sep-2026 owner batch: 5 kg allowance (weight over it never billed,
+   management decision, later Sep 2026), 4-digit bag codes, parked wash day,
+   batch advance, uncollected list, weekly digest, variance alert, sign-in
+   audit, QR removals, /get page. */
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { excessWeightCharge, CYCLE_KG_LIMIT, EXCESS_PER_KG } from "../lib/money";
+import { excessWeightCharge, CYCLE_KG_LIMIT } from "../lib/money";
 
 const read = (p: string) => fs.readFileSync(path.resolve(__dirname, "..", p), "utf8");
 
-describe("overweight — 5 kg, Rs 50, round UP", () => {
-  it("is 5 kg and Rs 50 flat", () => {
+describe("overweight — 5 kg allowance, never billed beyond it", () => {
+  it("is 5 kg", () => {
     expect(CYCLE_KG_LIMIT).toBe(5);
-    expect(EXCESS_PER_KG).toBe(50);
   });
-  it("rounds to the started HALF kilogram: the owner's 6.5 kg → ₹75 example", () => {
-    expect(excessWeightCharge(5.2)).toBe(25);
-    expect(excessWeightCharge(6)).toBe(50);
-    expect(excessWeightCharge(6.5)).toBe(75);
-    expect(excessWeightCharge(8)).toBe(150);
+  it("charges nothing over the limit, at any weight", () => {
+    expect(excessWeightCharge(5.2)).toBe(0);
+    expect(excessWeightCharge(6)).toBe(0);
+    expect(excessWeightCharge(6.5)).toBe(0);
+    expect(excessWeightCharge(8)).toBe(0);
   });
-  it("charges nothing at or under the limit", () => {
+  it("charges nothing at or under the limit either", () => {
     expect(excessWeightCharge(5)).toBe(0);
     expect(excessWeightCharge(4.9)).toBe(0);
     expect(excessWeightCharge(null)).toBe(0);
   });
-  it("waived means zero, whatever the weight", () => {
+  it("the waived flag changes nothing — there is no charge to waive any more", () => {
     expect(excessWeightCharge(12, undefined, { waived: true })).toBe(0);
+    expect(excessWeightCharge(12, undefined, { waived: false })).toBe(0);
   });
-  it("the waiver is recorded with who did it", () => {
-    const src = read("lib/actions/orders.ts");
-    expect(src).toMatch(/audit\("Excess weight waived"/);
-    // and only when there was actually something to waive
-    expect(src).toMatch(/input\.waiveExcess && Number\(input\.weightKg\) > CYCLE_KG_LIMIT/);
-  });
-  it("the accept sheet quotes the same half-kg-rounded number that bills", () => {
+  it("the accept sheet tells staff over-allowance weight is free, not what it costs", () => {
     const ui = read("app/s/orders/[id]/_components/OrderClient.tsx");
-    expect(ui).toMatch(/Math\.ceil\(overKg \* 2\) \/ 2/);
-    expect(ui).toMatch(/Waive excess charge/);
+    expect(ui).not.toMatch(/Waive excess charge/);
+    expect(ui).toMatch(/no charge; add another cycle above to cover it, or send the excess back with the student\./);
   });
 });
 

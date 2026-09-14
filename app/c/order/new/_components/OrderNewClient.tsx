@@ -129,7 +129,7 @@ export default function OrderNewClient({
         <>
           <div className="muted mt12" style={{ fontSize: "12.5px" }}>
             One cycle = up to {CYCLE_KG_LIMIT} kg. A heavier bag can simply use more cycles —
-            your choice; anything over the allowance is ₹50 per kg at the counter.
+            your choice, no extra charge either way.
           </div>
           <div className="list mt12">
             <div className="list-item">

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { Qr } from "@/components/qr";
 import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, upiLink } from "@/lib/format";
-import { CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, collegeUsesCycleBasedPricing, excessWeightCharge } from "@/lib/money";
+import { CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, collegeUsesCycleBasedPricing } from "@/lib/money";
 import { isOverdue } from "@/lib/money";
 import { useToast, Sheet, Seg, Switch } from "@/components/chrome";
 import {
@@ -112,14 +112,13 @@ export default function StaffOrderClient({
   // a college with its own rates override (BVRIT) never bills washFold/washIron
   // by the cycle — always itemized.
   const cycleBased = collegeUsesCycleBasedPricing(order.service, collegeHasRatesOverride);
-  const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, cycles: Math.max(1, order.cyclesCount || 1), useCycle: canUseCycle, noGst: false, waiveExcess: false, itemQtys: {} as Record<string, number> });
+  const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, cycles: Math.max(1, order.cyclesCount || 1), useCycle: canUseCycle, noGst: false, itemQtys: {} as Record<string, number> });
   /* The weight field holds a STRING while being typed — see the input below. */
   const [weightText, setWeightText] = useState(order.weightKg ? String(order.weightKg) : "");
   /* Previewed with the same function that bills it, so the number staff quote
      at the counter is the number the order is charged. */
   const allowanceKg = CYCLE_KG_LIMIT * (cycleBased ? acceptInput.cycles : 1);
   const overKg = Math.max(0, (acceptInput.weightKg || 0) - allowanceKg);
-  const excessNow = excessWeightCharge(acceptInput.weightKg, undefined, { waived: acceptInput.waiveExcess, cycles: cycleBased ? acceptInput.cycles : 1 });
   const [intakePhotos, setIntakePhotos] = useState<string[]>([]);
   // Damage report — opens a complaint thread the student can see, so it needs
   // real evidence attached before it can be filed.
@@ -166,7 +165,6 @@ export default function StaffOrderClient({
         cycles: cycleBased ? acceptInput.cycles : undefined,
         useCycle: acceptInput.useCycle,
         noGst: acceptInput.noGst,
-        waiveExcess: acceptInput.waiveExcess,
         items: adjusted.length ? adjusted : undefined,
         intakePhotos: intakePhotos.length ? intakePhotos : undefined,
       });
@@ -876,30 +874,12 @@ export default function StaffOrderClient({
             {cycleBased && (
               <div className="muted" style={{ fontSize: "12px", marginTop: "7px" }}>
                 {overKg > 0 ? (
-                  acceptInput.waiveExcess ? (
-                    <span style={{ fontWeight: 600 }}>
-                      {Math.ceil(overKg * 2) / 2} kg over — charge waived, nothing to collect.
-                    </span>
-                  ) : (
-                    <span style={{ color: "var(--amber)", fontWeight: 600 }}>
-                      {/* Billed per started HALF kg — quote the same number that bills. */}
-                      {Math.ceil(overKg * 2) / 2} kg over the {allowanceKg} kg allowance — collect {fmt(excessNow)}
-                    </span>
-                  )
+                  <span style={{ fontWeight: 600 }}>
+                    {Math.ceil(overKg * 2) / 2} kg over the {allowanceKg} kg allowance — no charge; add another cycle above to cover it, or send the excess back with the student.
+                  </span>
                 ) : (
                   <>Within the {allowanceKg} kg allowance — nothing extra.</>
                 )}
-              </div>
-            )}
-            {/* The waiver appears only when there is a charge to waive; a
-                switch that mostly does nothing teaches staff to ignore it. */}
-            {cycleBased && overKg > 0 && (
-              <div className="chip-toggle" style={{ marginTop: "10px" }}>
-                <div>
-                  <div className="h-sm">Waive excess charge</div>
-                  <div className="muted" style={{ fontSize: "12px" }}>Recorded in the audit log with your name</div>
-                </div>
-                <Switch on={acceptInput.waiveExcess} onToggle={() => setAcceptInput({ ...acceptInput, waiveExcess: !acceptInput.waiveExcess })} />
               </div>
             )}
           </div>

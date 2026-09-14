@@ -2,9 +2,10 @@
 
    Wash services are sold by the CYCLE — Rs 200 Wash & Fold, Rs 250 Wash &
    Iron, each carrying 5 kg — and the rate is FINAL: no GST, ever, on a cycle
-   order. Excess weight is Rs 25 per started half-kg (the owner's own 6.5 kg
-   → Rs 75 example) and applies to plan-paid and cash-paid orders alike.
-   Faculty buy flexible packs of cycles rather than tiered plans.
+   order. Weight over the 5 kg allowance is never billed (management
+   decision, Sep 2026) — staff or the student burn another cycle to cover it,
+   or take the excess back. Faculty buy flexible packs of cycles rather than
+   tiered plans.
 
    Thought through as the owner asked — as a student, as counter staff, as a
    teacher — and each seat's failure mode is pinned below. */
@@ -34,22 +35,22 @@ describe("as a student — every billing scenario", () => {
     const excess = excessWeightCharge(4, undefined, { cycles: 1 });
     expect(computeBill(200, 0, 18, { usedCycle: true, excessCharge: excess })).toEqual({ gst: 0, total: 0 });
   });
-  it("scenario: 6.5 kg on a plan cycle → Rs 75, the owner's example", () => {
+  it("scenario: 6.5 kg on a plan cycle → still nothing; over-allowance weight is never billed", () => {
     const excess = excessWeightCharge(6.5, undefined, { cycles: 1 });
-    expect(computeBill(200, 0, 18, { usedCycle: true, excessCharge: excess })).toEqual({ gst: 0, total: 75 });
+    expect(computeBill(200, 0, 18, { usedCycle: true, excessCharge: excess })).toEqual({ gst: 0, total: 0 });
   });
   it("scenario: 9 kg burning TWO cycles → nothing (10 kg allowance)", () => {
     const excess = excessWeightCharge(9, undefined, { cycles: 2 });
     expect(computeBill(400, 0, 18, { usedCycle: true, excessCharge: excess })).toEqual({ gst: 0, total: 0 });
   });
-  it("scenario: 9 kg insisting on ONE cycle → Rs 200 excess; their wish, priced", () => {
-    expect(excessWeightCharge(9, undefined, { cycles: 1 })).toBe(200);
+  it("scenario: 9 kg insisting on ONE cycle → still nothing; the choice is theirs, never priced", () => {
+    expect(excessWeightCharge(9, undefined, { cycles: 1 })).toBe(0);
   });
-  it("scenario: no plan, 6 kg Wash & Fold, one cycle → 200 + 50 = 250, GST-free", () => {
+  it("scenario: no plan, 6 kg Wash & Fold, one cycle → flat 200, GST-free, no excess", () => {
     /* The FINAL-price rule: Rs 200 means Rs 200. noGst is forced for cycle
-       services, and the excess rides outside the taxable base. */
+       services, and weight over the allowance is never billed. */
     const excess = excessWeightCharge(6, undefined, { cycles: 1 });
-    expect(computeBill(200, 0, 18, { usedCycle: false, excessCharge: excess, noGst: true })).toEqual({ gst: 0, total: 250 });
+    expect(computeBill(200, 0, 18, { usedCycle: false, excessCharge: excess, noGst: true })).toEqual({ gst: 0, total: 200 });
   });
   it("scenario: no plan, 9 kg Wash & Iron on two cycles → flat 500", () => {
     const excess = excessWeightCharge(9, undefined, { cycles: 2 });
@@ -58,15 +59,13 @@ describe("as a student — every billing scenario", () => {
 });
 
 describe("as counter staff", () => {
-  it("the 500-600 g grace is the waive toggle, not a hidden threshold", () => {
-    // 5.5 kg is Rs 25 by the book; the STAFF decide to let it go, and the
-    // decision is recorded — a silent free band would be invisible forever
-    expect(excessWeightCharge(5.5, undefined, { cycles: 1 })).toBe(25);
+  it("over-allowance weight is free at any size — no waive toggle needed any more", () => {
+    expect(excessWeightCharge(5.5, undefined, { cycles: 1 })).toBe(0);
     expect(excessWeightCharge(5.5, undefined, { cycles: 1, waived: true })).toBe(0);
-    expect(orders).toMatch(/audit\("Excess weight waived"/);
   });
-  it("cycle orders always price the excess — plan-paid or cash-paid alike", () => {
-    // the excess computation sits OUTSIDE the useCycle branch now
+  it("cycle orders never price the excess — plan-paid or cash-paid alike", () => {
+    // the excess computation sits OUTSIDE the useCycle branch, and it's
+    // always zero regardless of which branch runs
     const accept = orders.slice(orders.indexOf("export async function acceptOrder("));
     const excessAt = accept.indexOf("excessCharge = excessWeightCharge");
     const useCycleAt = accept.indexOf("if (input.useCycle)");
@@ -207,12 +206,12 @@ describe("urgent (same-day) is a flat fee, EVERY service, no percentage anywhere
     expect(expressFlatFee("washIron")).toBe(99);
     expect(expressFlatFee("dryClean")).toBe(79);
   });
-  it("a plan-paid urgent cycle order totals excess + the flat fee, nothing else", async () => {
+  it("a plan-paid urgent cycle order totals just the flat fee — weight is never billed", async () => {
     const { expressFlatFee } = await import("../lib/money");
-    // 6 kg urgent W&I on a plan: Rs 50 excess + Rs 99 = 149
+    // 6 kg urgent W&I on a plan, over the allowance: still just Rs 99
     const excess = excessWeightCharge(6, undefined, { cycles: 1 });
     expect(computeBill(250, expressFlatFee("washIron"), 18, { usedCycle: true, excessCharge: excess }))
-      .toEqual({ gst: 0, total: 149 });
+      .toEqual({ gst: 0, total: 99 });
   });
   it("a cash urgent cycle order stays GST-free: 200 + 79 = 279 flat", async () => {
     const { expressFlatFee } = await import("../lib/money");

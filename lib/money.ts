@@ -78,12 +78,10 @@ export function shouldInvoiceOrder(o: { noGst?: boolean }, method: string, staff
    when billing a new order. */
 export const CYCLE_KG_LIMIT = 5;
 
-/* Flat rupees per kg over the allowance, charged in HALF-kg steps. Owner-set
-   (Sep 2026, refined): 6.5 kg = 1.5 kg over = Rs 50 + Rs 25 = Rs 75. Half-kg
-   granularity is the owner's own worked example — whole-kg rounding would
-   charge Rs 100 for the same bag, and Rs 25 steps are still sayable at the
-   counter. The 500-600 g grace the owner allows is not a rule here: it is
-   staff judgement, which is exactly what the waive toggle records. */
+/* No longer charged (management decision, Sep 2026) — excessWeightCharge
+   always returns 0 now; see its own comment. Kept as exports rather than
+   deleted since nothing currently reads them, but removing them outright
+   risked missing a caller this pass didn't find. */
 export const EXCESS_PER_KG = 50;
 export const EXCESS_PER_HALF_KG = 25;
 
@@ -154,31 +152,19 @@ export function resolveCollegeRates(globalRates: RateTable, collegeRates: RateTa
 }
 
 /**
- * What the student owes for weight beyond the cycle's 5 kg.
- *
- * PROPORTIONAL, not rounded up to the next whole kilo. The old code did
- * `Math.ceil(over)`, so a bag 200 g over the limit was billed a full extra
- * Rounded UP to the started HALF kilogram: 5.2 kg bills as 0.5 over (Rs 25),
- * 6.5 kg as 1.5 over (Rs 75) — the owner's own example. A scale reading 5.2
- * on one weighing and 5.4 on the next gives the same price.
- *
- * `cycles` is how many cycles this order uses — a student may burn two at
- * once for a 9 kg bag, and the allowance scales with them: 2 cycles = 10 kg
- * free before the excess starts.
- *
- * `waived` zeroes the charge — staff judgement (the ~half-kg grace the owner
- * allows, a bedsheet week, a scale acting up). Audited with who did it.
+ * Weight beyond the cycle's 5 kg is never billed (management decision,
+ * Sep 2026 — previously Rs 25 per half-kilo over). A bag over the allowance
+ * is the student's or staff's call: burn an extra cycle to cover it, or take
+ * the excess back. `excessWeightCharge` is kept (always returning 0) rather
+ * than deleted so every call site — acceptOrder, walkInOrder, the accept-sheet
+ * preview — keeps working unchanged; only the money it returns changed.
  */
 export function excessWeightCharge(
-  weightKg: number | null | undefined,
+  _weightKg?: number | null,
   _basePieceRate?: number,
-  opts: { waived?: boolean; cycles?: number } = {},
+  _opts: { waived?: boolean; cycles?: number } = {},
 ) {
-  if (opts.waived) return 0;
-  const cycles = Math.max(1, Math.floor(opts.cycles ?? 1));
-  const over = (Number(weightKg) || 0) - CYCLE_KG_LIMIT * cycles;
-  if (over <= 0) return 0;
-  return Math.ceil(over * 2) * EXCESS_PER_HALF_KG;
+  return 0;
 }
 
 /** Bill math shared by acceptOrder and tests. Cycle orders carry only the excess charge. */

@@ -105,6 +105,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   // feedback, and nothing stopped a double-tap from creating two payslips
   // before the advisory-lock/duplicate-check on the server even ran.
   const [slipBusy, setSlipBusy] = useState(false);
+  const [errorsBusy, setErrorsBusy] = useState(false);
   // The dropdown below is scoped to visibleStaff, but slip.staffId was only
   // ever seeded once from the FULL staff list at mount — switching campus
   // (or the dropdown just falling back to its first option because the
@@ -208,7 +209,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
             <span className="sec-title" style={{ padding: 0, color: unseenErrors ? "var(--red)" : undefined }}>
               App errors {unseenErrors ? `· ${unseenErrors} new` : ""}
             </span>
-            <button className="btn xs sec" onClick={async () => { await markErrorsSeen(); toast("Marked reviewed"); router.refresh(); }}>Mark reviewed</button>
+            <button className="btn xs sec" disabled={errorsBusy} onClick={async () => { if (errorsBusy) return; setErrorsBusy(true); try { await markErrorsSeen(); toast("Marked reviewed"); router.refresh(); } catch (e) { toast(e instanceof Error ? e.message : "Failed", true); } finally { setErrorsBusy(false); } }}>Mark reviewed</button>
           </div>
           <div className="card pad">
             {errors.slice(0, 8).map((e) => (

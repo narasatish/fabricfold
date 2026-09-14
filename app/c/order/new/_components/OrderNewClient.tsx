@@ -278,7 +278,7 @@ export default function OrderNewClient({
             <span className="mono">{fmt(surcharge)}</span>
           </div>
         )}
-        {gstPct > 0 && (
+        {!cycleBased && gstPct > 0 && (
           <div className="kv">
             <span className="k">GST ({gstPct}%)</span>
             <span className="mono">{fmt(gst)}</span>

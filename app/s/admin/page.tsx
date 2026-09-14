@@ -26,7 +26,12 @@ export default async function StaffAdminPage() {
   const staffScope = staff.collegeId ? { collegeId: staff.collegeId } : {};
   const todayStart = new Date(new Date(istDate + "T00:00:00+05:30").getTime());
   const todayEnd = new Date(todayStart.getTime() + 24 * 3600_000);
-  const [cfg, colleges, staffList, payslips, plans, attToday, attMonth, actionsToday] = await Promise.all([
+
+  // Fetch staffList first so we can scope the AuditLog query by staff ID.
+  const staffList = await db.staff.findMany({ where: staffScope, orderBy: { role: "desc" } });
+  const staffIds = staffList.map(s => s.id);
+
+  const [cfg, colleges, payslips, plans, attToday, attMonth, actionsToday] = await Promise.all([
     db.appConfig.findUniqueOrThrow({ where: { id: "main" } }),
     /* ALL colleges, not just active ones, for an OWNER — filtering here is
        what made "remove campus" a one-way door: the removed campus vanished
@@ -36,12 +41,11 @@ export default async function StaffAdminPage() {
       where: staff.collegeId ? { id: staff.collegeId } : {},
       orderBy: [{ active: "desc" }, { name: "asc" }],
     }),
-    db.staff.findMany({ where: staffScope, orderBy: { role: "desc" } }),
     db.payslip.findMany({ where: staff.collegeId ? { staff: staffScope } : {}, include: { staff: true }, orderBy: { at: "desc" }, take: 12 }),
     db.plan.findMany({ where: staffScope, orderBy: [{ collegeId: "asc" }, { price: "asc" }] }),
     db.attendance.findMany({ where: { date: istDate, ...(staff.collegeId ? { staff: staffScope } : {}) } }),
     db.attendance.groupBy({ by: ["staffId"], where: { date: { startsWith: month }, ...(staff.collegeId ? { staff: staffScope } : {}) }, _count: true }),
-    db.auditLog.groupBy({ by: ["by"], where: { at: { gte: todayStart, lt: todayEnd } }, _count: true }),
+    db.auditLog.groupBy({ by: ["by"], where: { at: { gte: todayStart, lt: todayEnd }, ...(staff.collegeId ? { by: { in: staffIds } } : {}) }, _count: true }),
   ]);
 
   const slotWindows = await db.slotWindow.findMany({

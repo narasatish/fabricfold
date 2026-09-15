@@ -64,6 +64,23 @@ async function main() {
   ];
   for (const s of students) await db.student.create({ data: s });
 
+  // BVRIT students always carry a V-series bag code as their Customer ID —
+  // registerStudent() and WhatsApp self-registration both issue one up
+  // front (see admin.ts, wa-register.ts) — so the seed must too, or a BVRIT
+  // seed student shows its raw internal id instead of "V1001" on the
+  // Customer ID card, which is exactly the bug app/c/page.tsx now self-heals
+  // for real students but seed data should never need healing in the first
+  // place.
+  const { allocateBagCode } = await import("../lib/bagcode");
+  for (const s of students.filter((s) => s.collegeId === c2.id)) {
+    await db.$transaction(async (tx) => {
+      const code = await allocateBagCode(tx, "bvrit");
+      await tx.bag.create({
+        data: { code, studentId: s.id, tier: null, complimentary: true, issuedBy: "seed", status: "active" },
+      });
+    });
+  }
+
   // Aarav's active subscription with dated cycle log
   const sub = await db.subscription.create({
     data: {

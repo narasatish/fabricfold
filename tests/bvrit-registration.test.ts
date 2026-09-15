@@ -266,6 +266,64 @@ describe("phone verification and account creation", () => {
   });
 });
 
+describe("customerIdFor self-heals a legacy BVRIT student with no bag", () => {
+  /* registerStudent() and WhatsApp self-registration both issue a V-code up
+     front, but a student created before either existed (old seed data, an
+     old signup) has no bag row — and used to show their raw internal id as
+     the Customer ID, which read as a different, wrong-looking ID scheme
+     next to every other BVRIT student's V1001-style code (owner, Sep 2026,
+     reported repeatedly: "fabric fold id for bvrit will be like V1000,
+     V1001... not like FabricFold ID 238876"). customerIdFor() in
+     lib/bagcode.ts is what every customer- and staff-facing screen now
+     calls instead of inlining `activeBag?.code ?? student.id`. */
+  it("mints a V-code on first lookup for a BVRIT student with no bag", async () => {
+    const college = await db.college.findFirst({ where: { name: "BVRIT" } });
+    if (!college) return;
+    const { customerIdFor } = await import("../lib/bagcode");
+
+    const phone = "9876500199";
+    const prior = await db.student.findUnique({ where: { phone } });
+    if (prior) {
+      await db.bag.deleteMany({ where: { studentId: prior.id } });
+      await db.student.delete({ where: { id: prior.id } });
+    }
+    const legacy = await db.student.create({
+      data: { id: "999199", phone, name: "Legacy No-Bag Student", collegeId: college.id },
+    });
+    expect(await db.bag.findFirst({ where: { studentId: legacy.id } })).toBeNull();
+
+    const id1 = await customerIdFor(db, legacy, college.name);
+    expect(id1).toMatch(/^V\d{4}$/);
+    expect(id1).not.toBe(legacy.id);
+
+    // Idempotent: a second lookup reuses the same bag, never mints a second one.
+    const id2 = await customerIdFor(db, legacy, college.name);
+    expect(id2).toBe(id1);
+    const bags = await db.bag.findMany({ where: { studentId: legacy.id, status: "active" } });
+    expect(bags.length).toBe(1);
+  });
+
+  it("does NOT mint a code for a non-BVRIT student with no bag — falls back to student.id as before", async () => {
+    const stMarys = await db.college.findFirst({ where: { name: "St Mary's" } });
+    if (!stMarys) return;
+    const { customerIdFor } = await import("../lib/bagcode");
+
+    const phone = "9876500198";
+    const prior = await db.student.findUnique({ where: { phone } });
+    if (prior) {
+      await db.bag.deleteMany({ where: { studentId: prior.id } });
+      await db.student.delete({ where: { id: prior.id } });
+    }
+    const walkin = await db.student.create({
+      data: { id: "999198", phone, name: "St Mary's Walk-in, No Bag Yet", collegeId: stMarys.id },
+    });
+
+    const id = await customerIdFor(db, walkin, stMarys.name);
+    expect(id).toBe(walkin.id);
+    expect(await db.bag.findFirst({ where: { studentId: walkin.id } })).toBeNull();
+  });
+});
+
 describe("bag code format and parsing", () => {
   it("parses BVRIT V codes correctly", () => {
     expect(parseBagCode("V001")).toEqual({ kind: "bvrit", n: 1 });

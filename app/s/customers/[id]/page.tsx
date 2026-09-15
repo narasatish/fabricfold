@@ -33,12 +33,15 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
      id, regardless of their own role or campus assignment. */
   if (staff.collegeId && staff.collegeId !== student.collegeId) redirect("/s/students");
 
-  /* The bag code (B1001/S1055/G1002...) is the CUSTOMER-FACING ID — printed
-     on the physical bag, quoted at the counter. student.id is an internal
-     random 6-digit row key nobody outside the database should ever see; the
-     header was showing that instead, which is exactly what looked wrong. */
-  const activeBag = student.bags.find((b) => b.status === "active");
-  const displayId = activeBag?.code ?? student.id;
+  /* The bag code (B1001/S1055/G1002.../V1001) is the CUSTOMER-FACING ID —
+     printed on the physical bag, quoted at the counter. student.id is an
+     internal random 6-digit row key nobody outside the database should ever
+     see; the header was showing that instead, which is exactly what looked
+     wrong. Self-heals a missing BVRIT V-code — see customerIdFor() in
+     lib/bagcode.ts — rather than relying on the student having opened the
+     customer app first. */
+  const { customerIdFor } = await import("@/lib/bagcode");
+  const displayId = await customerIdFor(db, student, student.college?.name);
 
   /* Campuses a student may be moved to, plus each one's closed day so the
      edit sheet can grey out a wash day the campus does not operate. */
@@ -102,6 +105,7 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
       <StaffCustomerClient
         colleges={colleges}
         student={plain}
+        displayId={displayId}
         staffRole={staff.role}
         plans={collegePlans}
         rates={effectiveRates}

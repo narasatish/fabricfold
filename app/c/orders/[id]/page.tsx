@@ -26,13 +26,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   // staff look for, not the internal id — quoting the internal id here sent
   // a student to the counter with a number staff had never seen (owner,
   // Sep 2026: "one fixed customer ID", found via the home dashboard already
-  // using the bag code while this banner still quoted student.id).
-  const activeBag = await db.bag.findFirst({
-    where: { studentId: student.id, status: "active" },
-    orderBy: { issuedAt: "desc" },
-    select: { code: true },
-  });
-  const customerId = activeBag?.code ?? student.id;
+  // using the bag code while this banner still quoted student.id). Self-heals
+  // a missing BVRIT V-code the same way the home dashboard does — see
+  // customerIdFor() in lib/bagcode.ts.
+  const { customerIdFor } = await import("@/lib/bagcode");
+  const customerId = await customerIdFor(db, student, student.college?.name);
 
   const appConfig = await db.appConfig.findUnique({ where: { id: "main" } });
   const rates = appConfig?.rates as unknown as Record<string, { label: string }>;

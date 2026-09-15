@@ -35,13 +35,11 @@ export default async function CustomerHome() {
     where: { studentId: student.id, read: false },
   });
 
-  // The bag the student is currently carrying — its code is printed on the bag
-  // and is what staff look for at the counter.
-  const activeBag = await db.bag.findFirst({
-    where: { studentId: student.id, status: "active" },
-    orderBy: { issuedAt: "desc" },
-    select: { code: true },
-  });
+  // The Customer ID to show — the student's active bag code (printed on the
+  // bag, what staff look for at the counter), self-healing a missing
+  // V-series code for BVRIT students. See customerIdFor() in lib/bagcode.ts.
+  const { customerIdFor } = await import("@/lib/bagcode");
+  const customerId = await customerIdFor(db, student, college?.name);
 
   // Check subscription expiry
   const sub = student.subscription;
@@ -97,7 +95,7 @@ export default async function CustomerHome() {
                 Customer ID
               </div>
               <div className="big-num mono mt4" style={{ letterSpacing: ".06em" }}>
-                {activeBag?.code ?? student.id}
+                {customerId}
               </div>
             </div>
             <div
@@ -117,7 +115,7 @@ export default async function CustomerHome() {
                   Never truncated: a chip reading 31181 for ID 311815 sends the
                   counter looking for a student who doesn't exist. Bag codes
                   (≤5 chars) get the big size; a 6-digit fallback id shrinks. */}
-              <span style={{ fontWeight: 800, fontSize: (activeBag?.code ?? student.id).length > 5 ? 12 : 15, letterSpacing: ".03em" }}>{activeBag?.code ?? student.id}</span>
+              <span style={{ fontWeight: 800, fontSize: customerId.length > 5 ? 12 : 15, letterSpacing: ".03em" }}>{customerId}</span>
             </div>
           </div>
           <div className="between" style={{ marginTop: "12px" }}>

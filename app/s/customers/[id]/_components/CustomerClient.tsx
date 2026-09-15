@@ -41,7 +41,7 @@ type CollegePlan = { id: string; name: string; tier: string | null; price: numbe
 
 type Rates = Record<string, { label: string; items: [string, number][] }>;
 
-export default function StaffCustomerClient({ student, staffRole, plans, rates, collegeHasRatesOverride, collegeExpressOverride, gstEnabled, colleges }: { student: Student; staffRole: number; plans: CollegePlan[]; rates: Rates; collegeHasRatesOverride: boolean; collegeExpressOverride: Record<string, number> | null; gstEnabled: boolean; colleges: { id: string; name: string; closedWeekday: number | null }[] }) {
+export default function StaffCustomerClient({ student, displayId, staffRole, plans, rates, collegeHasRatesOverride, collegeExpressOverride, gstEnabled, colleges }: { student: Student; displayId: string; staffRole: number; plans: CollegePlan[]; rates: Rates; collegeHasRatesOverride: boolean; collegeExpressOverride: Record<string, number> | null; gstEnabled: boolean; colleges: { id: string; name: string; closedWeekday: number | null }[] }) {
   const router = useRouter();
   const toast = useToast();
   const tier = loyaltyBadge(student.lifetimePieces);
@@ -500,7 +500,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
           <div className="avatar" style={{ width: "56px", height: "56px", fontSize: "20px" }}>{initials(student.name)}</div>
           <div style={{ flex: 1 }}>
             <div className="h-md">{student.name}</div>
-            <div className="muted mono">ID {activeBag?.code ?? student.id}</div>
+            <div className="muted mono">ID {displayId}</div>
             <div className="row gap8" style={{ alignItems: "center" }}>
               <div className="muted" style={{ fontSize: "12px" }}>+91 {student.phone}</div>
               {staffRole >= 3 && (

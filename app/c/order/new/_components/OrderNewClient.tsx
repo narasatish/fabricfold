@@ -6,7 +6,7 @@ import { Seg, Switch } from "@/components/chrome";
 import { Svg } from "@/components/icons";
 import { fmt } from "@/lib/format";
 import { placeOrder } from "@/lib/actions/orders";
-import { collegeExpressFee, CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService, collegeUsesCycleBasedPricing } from "@/lib/money";
+import { collegeExpressFee, expressItemRate, CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService, collegeUsesCycleBasedPricing } from "@/lib/money";
 
 type EnabledService = { key: string; flag: string; label: string };
 type Slot = { startAt: string; endAt: string; dateStr: string; timeLabel: string; left: number; full: boolean };
@@ -62,17 +62,19 @@ export default function OrderNewClient({
   const [dropSlotAt, setDropSlotAt] = useState<string>("");
   const [loading, setLoading] = useState(false);
 
-  // Calculate totals
-  const items = rateItems
-    .filter(([label]) => quantities[label] > 0)
-    .map(([label, rate]) => ({ label, rate, qty: quantities[label] }));
-
   // Determine if this service uses cycle-based pricing: only for services that
   // are defined in CYCLE_RATES AND the college doesn't have per-piece override
   const cycleBased = isCycleService(service) && collegeUsesCycles;
+  // Calculate totals. Per-piece colleges price express INTO each item's rate
+  // (50% more per garment) instead of a flat fee — see lib/money.ts.
+  const items = rateItems
+    .filter(([label]) => quantities[label] > 0)
+    .map(([label, rate]) => ({ label, rate: express && !cycleBased ? expressItemRate(rate) : rate, qty: quantities[label] }));
+
   const subtotal = cycleBased ? cycles * CYCLE_RATES[service] : items.reduce((s, i) => s + i.rate * i.qty, 0);
-  // Flat same-day fee for every service (owner, Sep 2026) — no percentage.
-  const surcharge = express ? collegeExpressFee(service, collegeExpressOverride) : 0;
+  // Cycle colleges: flat same-day fee (owner, Sep 2026). Per-piece colleges
+  // already priced the premium into each item's rate above.
+  const surcharge = express && cycleBased ? collegeExpressFee(service, collegeExpressOverride) : 0;
   // Cycle-based orders are FINAL — Rs 200 means Rs 200, no GST line on cycle orders.
   const gst = cycleBased ? 0 : Math.round((subtotal + surcharge) * (gstPct / 100));
   const total = subtotal + surcharge + gst;
@@ -198,13 +200,15 @@ export default function OrderNewClient({
               <div>
                 <div className="h-sm">Express (same-day)</div>
                 <div className="muted" style={{ fontSize: "12px" }}>
-                  Flat {fmt(collegeExpressFee(service, collegeExpressOverride))} — same-day turnaround
+                  {cycleBased
+                    ? `Flat ${fmt(collegeExpressFee(service, collegeExpressOverride))} — same-day turnaround`
+                    : "50% more per piece — same-day turnaround"}
                 </div>
               </div>
             </div>
             <Switch on={express} onToggle={() => setExpress(!express)} />
           </div>
-          {express && hasActiveSubscription && (
+          {express && cycleBased && hasActiveSubscription && (
             <div className="muted mt8" style={{ fontSize: "12px", padding: "0 4px" }}>
               Using a plan cycle for this order? The cycle already covers the wash — you'd pay just the flat {fmt(collegeExpressFee(service, collegeExpressOverride))} same-day fee in cash at pickup, not the surcharge above.
             </div>

@@ -47,10 +47,10 @@ describe("the 40% commission model is gone, not just hidden", () => {
     expect(terms).not.toMatch(/40%/);
     expect(terms).toMatch(/₹99 Wash & Iron, ₹79 Wash & Fold and Dry Cleaning/);
   });
-  it("every surcharge call site uses the flat fee unconditionally — cash or plan-paid, any service", () => {
+  it("every flat-fee call site still exists — now gated to cycle colleges only (BVRIT prices express per-piece instead, Sep 2026)", () => {
     // expressFlatFee became collegeExpressFee (college-aware) once BVRIT's
-    // per-college express pricing landed — still all 5 call sites, still
-    // unconditional.
+    // per-college express pricing landed; still all 5 call sites, each now
+    // gated on usesCycles (see cycle-model.test.ts) rather than unconditional.
     const orders = read("lib/actions/orders.ts");
     expect(orders.match(/collegeExpressFee\((input|o)\.service, cfg\.collegeExpressOverride\)/g)?.length).toBe(5);
   });

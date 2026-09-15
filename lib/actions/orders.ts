@@ -7,7 +7,7 @@ import { featureOn, serviceOn } from "../features";
 import { enqueueSheetEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff, requireStaffPerm, assertSameCollege } from "../auth";
-import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, expressFlatFee, collegeExpressFee, isCycleService, collegeUsesCycleBasedPricing, resolveCollegeRates } from "../money";
+import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, expressFlatFee, collegeExpressFee, expressItemRate, isCycleService, collegeUsesCycleBasedPricing, resolveCollegeRates } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit } from "../notify";
@@ -71,6 +71,10 @@ export async function placeOrder(input: { service: string; items: { label: strin
 
   const usesCycles = collegeUsesCycleBasedPricing(input.service, cfg.collegeHasRatesOverride);
   const cyclesCount = usesCycles ? Math.min(10, Math.max(1, Math.floor(input.cycles ?? 1))) : 1;
+  /* Express defaults OFF. The old `!== false` meant a college whose map
+     lacked the key would have the surcharge applied anyway — a money path
+     turned on by an absent flag rather than a deliberate one. */
+  const express = input.express && featureOn(stu.college.features, "express");
   const items = usesCycles
     ? cycleItems(input.service, rate.label, cyclesCount)
     : input.items
@@ -78,17 +82,14 @@ export async function placeOrder(input: { service: string; items: { label: strin
         .map((i) => {
           const found = rate.items.find((r) => r[0] === i.label);
           if (!found) throw new Error("Unknown item " + i.label);
-          return { label: found[0], rate: found[1], qty: Math.min(99, Math.floor(i.qty)) };
+          return { label: found[0], rate: express ? expressItemRate(found[1]) : found[1], qty: Math.min(99, Math.floor(i.qty)) };
         });
   if (!items.length) return { ok: false as const, error: usesCycles ? "Pick at least one cycle" : "Add at least one piece" };
 
   const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
-  /* Express defaults OFF. The old `!== false` meant a college whose map
-     lacked the key would have the surcharge applied anyway — a money path
-     turned on by an absent flag rather than a deliberate one. */
-  const express = input.express && featureOn(stu.college.features, "express");
-  // Flat same-day fee for every service (owner, Sep 2026) — no percentage anywhere.
-  const surcharge = express ? collegeExpressFee(input.service, cfg.collegeExpressOverride) : 0;
+  // Cycle colleges add a flat same-day fee; per-piece colleges already
+  // priced the premium into each item's rate above, so no separate charge.
+  const surcharge = express && usesCycles ? collegeExpressFee(input.service, cfg.collegeExpressOverride) : 0;
   // Cycle-based orders never add GST; per-piece orders add GST if enabled.
   const gst = !usesCycles && cfg.gstEnabled ? Math.round((sub + surcharge) * (cfg.gstPct / 100)) : 0;
   const total = sub + surcharge + gst;
@@ -164,7 +165,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       items = input.items.filter((i) => i.qty > 0).map((i) => {
         const found = rate.items.find((r) => r[0] === i.label);
         if (!found) throw new Error("Unknown item " + i.label);
-        return { label: found[0], rate: found[1], qty: Math.floor(i.qty) };
+        return { label: found[0], rate: o.express ? expressItemRate(found[1]) : found[1], qty: Math.floor(i.qty) };
       });
     }
     const declaredPieces = items.reduce((s, i) => s + i.qty, 0);
@@ -218,8 +219,9 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
     // GST is skipped when staff chose 'Bill without GST' OR GST billing is
     // switched off app-wide in Admin, or the service is cycle-based.
     const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
-    // Flat fee for everyone, every service — plan-paid or cash-paid alike.
-    const surcharge = o.express ? collegeExpressFee(o.service, cfg.collegeExpressOverride) : 0;
+    // Cycle colleges: flat fee, plan-paid or cash-paid alike. Per-piece
+    // colleges already priced the premium into each item's rate above.
+    const surcharge = o.express && usesCycles ? collegeExpressFee(o.service, cfg.collegeExpressOverride) : 0;
     // Cycle-based orders are FINAL (owner): Rs 200 means Rs 200, so GST never applies.
     const noGst = !usedCycle && (usesCycles || !!input.noGst || !cfg.gstEnabled);
     const { gst, total } = computeBill(sub, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });
@@ -332,7 +334,7 @@ export async function walkInOrder(
         .map((i) => {
           const found = rate.items.find((r) => r[0] === i.label);
           if (!found) throw new Error("Unknown item " + i.label);
-          return { label: found[0], rate: found[1], qty: Math.min(99, Math.floor(i.qty)) };
+          return { label: found[0], rate: input.express ? expressItemRate(found[1]) : found[1], qty: Math.min(99, Math.floor(i.qty)) };
         });
   if (!items.length) return { ok: false as const, error: usesCycles ? "Pick at least one cycle" : "Add at least one piece" };
 
@@ -372,7 +374,7 @@ export async function walkInOrder(
       }
 
       const sub2 = items.reduce((s, i) => s + i.rate * i.qty, 0);
-      const surcharge = input.express ? collegeExpressFee(input.service, cfg.collegeExpressOverride) : 0;
+      const surcharge = input.express && usesCycles ? collegeExpressFee(input.service, cfg.collegeExpressOverride) : 0;
       // Cycle-based orders are FINAL (owner): Rs 200 means Rs 200, so GST never applies.
       const noGst = !usedCycle && (usesCycles || !!input.noGst || !cfg.gstEnabled);
       const { gst, total } = computeBill(sub2, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });

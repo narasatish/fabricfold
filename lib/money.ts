@@ -118,6 +118,15 @@ export function collegeExpressFee(service: string, collegeExpressOverride: Recor
   if (collegeExpressOverride && service in collegeExpressOverride) return collegeExpressOverride[service];
   return expressFlatFee(service);
 }
+
+/* Per-piece colleges (BVRIT, Sep 2026) don't add a flat same-day fee — each
+   garment's own rate goes up 50% instead: Rs 20 Wash & Iron becomes Rs 30
+   express, the owner's own example. Applies only where billing is already
+   per garment; a cycle-based order (St Mary's) keeps the flat fee above. */
+export const EXPRESS_ITEM_MULTIPLIER = 1.5;
+export function expressItemRate(baseRate: number): number {
+  return Math.round(baseRate * EXPRESS_ITEM_MULTIPLIER);
+}
 export function isCycleService(service: string) {
   return service in CYCLE_RATES;
 }

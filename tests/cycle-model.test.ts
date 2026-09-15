@@ -145,7 +145,7 @@ describe("the screens quote what the server bills", () => {
   it("staff accept sheet scales the allowance with the cycle count", () => {
     const ui = read("app/s/orders/[id]/_components/OrderClient.tsx");
     expect(ui).toMatch(/const allowanceKg = CYCLE_KG_LIMIT \* \(cycleBased \? acceptInput\.cycles : 1\)/);
-    expect(ui).toMatch(/cycles: cycleBased \? acceptInput\.cycles : 1/);
+    expect(ui).toMatch(/cycles: cycleBased \? acceptInput\.cycles : undefined/);
   });
   it("walk-in: cycle stepper for cycle services, item grid for the rest", () => {
     // isCycleService(wiService) became wiCycleBased (college-aware) once
@@ -199,8 +199,8 @@ describe("switching the service tab shows THAT service's menu", () => {
   });
 });
 
-describe("urgent (same-day) is a flat fee, EVERY service, no percentage anywhere (owner, second pass)", () => {
-  it("Rs 79 Wash & Fold and Dry Cleaning, Rs 99 Wash & Iron — students and faculty alike", async () => {
+describe("urgent (same-day): flat fee on cycle colleges, 50%-per-piece on per-piece colleges (owner, third pass Sep 2026)", () => {
+  it("Rs 79 Wash & Fold and Dry Cleaning, Rs 99 Wash & Iron — the flat fee cycle colleges still use", async () => {
     const { expressFlatFee } = await import("../lib/money");
     expect(expressFlatFee("washFold")).toBe(79);
     expect(expressFlatFee("washIron")).toBe(99);
@@ -224,17 +224,34 @@ describe("urgent (same-day) is a flat fee, EVERY service, no percentage anywhere
     expect(read("lib/money.ts")).not.toMatch(/EXPRESS_PCT|expressSurcharge|urgentCycleCharge/);
     expect(orders).not.toMatch(/EXPRESS_PCT|expressSurcharge|urgentCycleCharge/);
   });
-  it("all three entry points use the flat fee for EVERY service, not just cycle ones", () => {
-    /* place (1) + accept (urgent-cash branch + general surcharge = 2) +
-       walkIn (same shape = 2) = 5 call sites, none gated on isCycleService. */
-    expect(orders.match(/collegeExpressFee\((input|o)\.service, cfg\.collegeExpressOverride\)/g)?.length).toBe(5);
+  it("expressItemRate is a straight 50% markup, rounded — Rs 20 Wash & Iron becomes Rs 30, the owner's own example", async () => {
+    const { expressItemRate } = await import("../lib/money");
+    expect(expressItemRate(20)).toBe(30);
+    expect(expressItemRate(15)).toBe(23); // 22.5 rounds to 23
   });
-  it("both apps SAY the flat fee, and the customer form applies it to every service", () => {
-    expect(read("app/c/order/new/_components/OrderNewClient.tsx")).toMatch(/const surcharge = express \? collegeExpressFee\(service, collegeExpressOverride\) : 0;/);
+  it("cycle colleges keep the flat fee at all three entry points, gated on usesCycles", () => {
+    /* place (1) + accept (urgent-cash branch + general surcharge = 2) +
+       walkIn (same shape = 2) = 5 call sites, each now gated so a per-piece
+       college's order never adds this flat fee on top of its per-item rate. */
+    expect(orders.match(/collegeExpressFee\((input|o)\.service, cfg\.collegeExpressOverride\)/g)?.length).toBe(5);
+    expect(orders).toMatch(/const surcharge = express && usesCycles \? collegeExpressFee\(input\.service, cfg\.collegeExpressOverride\) : 0;/);
+    expect(orders).toMatch(/const surcharge = o\.express && usesCycles \? collegeExpressFee\(o\.service, cfg\.collegeExpressOverride\) : 0;/);
+    expect(orders).toMatch(/const surcharge = input\.express && usesCycles \? collegeExpressFee\(input\.service, cfg\.collegeExpressOverride\) : 0;/);
+  });
+  it("per-piece colleges price the premium into each item's rate at all three entry points", () => {
+    expect(orders.match(/expressItemRate\(found\[1\]\)/g)?.length).toBe(3);
+  });
+  it("both apps apply the right model per college: flat fee for cycle colleges, per-piece premium otherwise", () => {
+    const ui = read("app/c/order/new/_components/OrderNewClient.tsx");
+    expect(ui).toMatch(/rate: express && !cycleBased \? expressItemRate\(rate\) : rate/);
+    expect(ui).toMatch(/const surcharge = express && cycleBased \? collegeExpressFee\(service, collegeExpressOverride\) : 0;/);
     expect(read("app/s/orders/[id]/_components/OrderClient.tsx")).toMatch(/flat same-day fee of ₹\{collegeExpressFee\(order\.service, collegeExpressOverride\)\}/);
   });
-  it("the walk-in counter form quotes the same flat fee", () => {
-    expect(read("app/s/customers/[id]/_components/CustomerClient.tsx")).toMatch(/collegeExpressFee\(wiService, collegeExpressOverride\)/);
+  it("the walk-in counter form prices the premium into wiSubtotal for per-piece colleges", () => {
+    const ui = read("app/s/customers/[id]/_components/CustomerClient.tsx");
+    expect(ui).toMatch(/const wiExpressPerPiece = wiExpress && !wiCycleBased;/);
+    expect(ui).toMatch(/wiExpressPerPiece \? expressItemRate\(price\) : price/);
+    expect(ui).toMatch(/collegeExpressFee\(wiService, collegeExpressOverride\)/);
   });
   it("terms page no longer promises 40%", () => {
     expect(read("app/terms/page.tsx")).not.toMatch(/40%/);

@@ -9,7 +9,7 @@ import { assignSubscription, upgradeSubscription, cancelSubscription, adjustCycl
 import { issueBag, retireBag, releaseBagCode, setBagCode, reissueBagSameCode } from "@/lib/actions/bags";
 import { walkInOrder } from "@/lib/actions/orders";
 import { sellCyclePack } from "@/lib/actions/subscription";
-import { CYCLE_RATES, CYCLE_KG_LIMIT, collegeUsesCycleBasedPricing, collegeExpressFee } from "@/lib/money";
+import { CYCLE_RATES, CYCLE_KG_LIMIT, collegeUsesCycleBasedPricing, collegeExpressFee, expressItemRate } from "@/lib/money";
 import { enqueueIntake, newIdemKey } from "@/lib/offline-queue";
 import { topUpCredits } from "@/lib/actions/ops";
 import { updateStudentPhone, updateStudentDetails } from "@/lib/actions/admin";
@@ -102,7 +102,10 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
   // sells washFold/washIron by the cycle — always itemized, like the
   // customer order screen. Mirrors OrderNewClient.tsx's cycleBased logic.
   const wiCycleBased = collegeUsesCycleBasedPricing(wiService, collegeHasRatesOverride);
-  const wiSubtotal = wiItems.reduce((s, [label, price]) => s + price * (wiQty[label] || 0), 0);
+  // Per-piece colleges (BVRIT) price express INTO each item's rate (50% more
+  // per garment) instead of a flat fee — see lib/money.ts's expressItemRate.
+  const wiExpressPerPiece = wiExpress && !wiCycleBased;
+  const wiSubtotal = wiItems.reduce((s, [label, price]) => s + (wiExpressPerPiece ? expressItemRate(price) : price) * (wiQty[label] || 0), 0);
   const wiPieces = wiItems.reduce((s, [label]) => s + (wiQty[label] || 0), 0);
   /* Bug fixed here: this quoted 40% of subtotal — the OLD express model,
      removed everywhere else in Sep 2026 in favor of a flat same-day fee. The
@@ -110,8 +113,9 @@ export default function StaffCustomerClient({ student, staffRole, plans, rates, 
      (and now, with per-college flat fees like BVRIT's ₹80/₹120, a very
      wrong one) even though the actual charge submitted to the server was
      always correct. Same function that bills it, per this codebase's own
-     rule for these previews. */
-  const wiExpressSurcharge = wiExpress && !wiUseCycle ? collegeExpressFee(wiService, collegeExpressOverride) : 0;
+     rule for these previews. Cycle colleges keep the flat fee; per-piece
+     colleges already priced the premium into wiSubtotal above. */
+  const wiExpressSurcharge = wiExpress && !wiUseCycle && wiCycleBased ? collegeExpressFee(wiService, collegeExpressOverride) : 0;
   const wiGst = wiUseCycle || wiNoGst || !gstEnabled ? 0 : Math.round((wiSubtotal + wiExpressSurcharge) * 0.18);
   const subHasCycles = !!student.subscription?.active;
 
@@ -856,7 +860,11 @@ Currently ${current}. Type the code printed on the bag they are being given.
             <div>
               <div className="h-sm">Urgent (same day)</div>
               <div className="muted" style={{ fontSize: "12px" }}>
-                {wiUseCycle ? `Cycle already covers the wash — only the flat ₹${collegeExpressFee(wiService, collegeExpressOverride)} same-day fee is charged, in cash` : `Flat ₹${collegeExpressFee(wiService, collegeExpressOverride)} — same-day turnaround`}
+                {wiUseCycle
+                  ? `Cycle already covers the wash — only the flat ₹${collegeExpressFee(wiService, collegeExpressOverride)} same-day fee is charged, in cash`
+                  : wiCycleBased
+                    ? `Flat ₹${collegeExpressFee(wiService, collegeExpressOverride)} — same-day turnaround`
+                    : "50% more per piece — same-day turnaround"}
               </div>
             </div>
             <Switch on={wiExpress} onToggle={() => setWiExpress(!wiExpress)} />

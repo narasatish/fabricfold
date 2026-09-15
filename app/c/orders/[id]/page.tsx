@@ -22,6 +22,18 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
     notFound();
   }
 
+  // Same customer ID everywhere: the bag code (if one is issued) is what
+  // staff look for, not the internal id — quoting the internal id here sent
+  // a student to the counter with a number staff had never seen (owner,
+  // Sep 2026: "one fixed customer ID", found via the home dashboard already
+  // using the bag code while this banner still quoted student.id).
+  const activeBag = await db.bag.findFirst({
+    where: { studentId: student.id, status: "active" },
+    orderBy: { issuedAt: "desc" },
+    select: { code: true },
+  });
+  const customerId = activeBag?.code ?? student.id;
+
   const appConfig = await db.appConfig.findUnique({ where: { id: "main" } });
   const rates = appConfig?.rates as unknown as Record<string, { label: string }>;
   const rateLabel = rates?.[order.service]?.label || order.service;
@@ -89,7 +101,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                   Not dropped off yet
                 </div>
                 <div style={{ color: "var(--amber)", fontSize: "12.5px", marginTop: "2px" }}>
-                  Show Order ID <b>#{order.id.slice(-4)}</b> + FabricFold ID <b>{student.id}</b> at the counter.
+                  Show Order ID <b>#{order.id.slice(-4)}</b> + FabricFold ID <b>{customerId}</b> at the counter.
                 </div>
               </div>
             </div>

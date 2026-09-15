@@ -89,18 +89,16 @@ export default async function CustomerHome() {
                   student carries, so it is the number staff read and the one
                   worth showing largest. Students without a bag yet still need
                   something to quote, so the internal reference stands in until
-                  a bag is issued. */}
+                  a bag is issued. One ID shown at a time — a "Ref" line used
+                  to show the internal id alongside the bag code, which read
+                  as two different customer IDs and confused students at the
+                  counter (owner, Sep 2026: "one fixed customer ID"). */}
               <div style={{ fontSize: "12px", opacity: 0.85, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em" }}>
                 Customer ID
               </div>
               <div className="big-num mono mt4" style={{ letterSpacing: ".06em" }}>
                 {activeBag?.code ?? student.id}
               </div>
-              {activeBag && (
-                <div className="mono" style={{ fontSize: "11.5px", opacity: 0.7, marginTop: 2 }}>
-                  Ref {student.id}
-                </div>
-              )}
             </div>
             <div
               style={{

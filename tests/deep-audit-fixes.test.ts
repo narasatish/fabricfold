@@ -755,3 +755,19 @@ describe("assignSubscription's bagError is surfaced to staff, not silently dropp
     expect(src).toMatch(/bag issue failed/);
   });
 });
+
+describe("/s/audit redirects a too-junior staff member instead of crashing", () => {
+  it("no longer calls the throwing requireStaff(3)", () => {
+    const src = read("app/s/audit/page.tsx");
+    // Strip comments first: the fix's own explanatory comment mentions the
+    // old call by name ("Was requireStaff(3), which THROWS...") — a plain
+    // substring check would trip on that prose, not just a real call site.
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    expect(code).not.toMatch(/requireStaff\(/);
+  });
+
+  it("checks the role explicitly and redirects to /s, matching admin and reports", () => {
+    const src = read("app/s/audit/page.tsx");
+    expect(src).toMatch(/if \(staff\.role < 3\) redirect\("\/s"\)/);
+  });
+});

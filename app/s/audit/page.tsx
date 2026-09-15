@@ -1,11 +1,20 @@
 import { redirect } from "next/navigation";
-import { requireStaff } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import StaffAuditClient from "./_components/AuditClient";
 
 export default async function StaffAuditPage() {
-  const staff = await requireStaff(3);
+  // Was requireStaff(3), which THROWS for role < 3 — every other role-gated
+  // page in this app (admin, reports) checks explicitly and redirects to
+  // /s instead, so a Counter/Manager landing here (a stale bookmark, a
+  // shared link) got the generic error boundary rather than a quiet bounce
+  // home like everywhere else.
+  const s = await getSession();
+  if (!s || s.mode !== "staff") redirect("/login");
+  const staff = await db.staff.findUnique({ where: { id: s.staffId } });
+  if (!staff || !staff.active) redirect("/login");
+  if (staff.role < 3) redirect("/s");
 
   /* CRITICAL campus-isolation gap, found 2026-09-05: AuditLog has no
      collegeId column at all — it only records a raw actor id (`by`) — so

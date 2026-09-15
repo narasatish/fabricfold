@@ -747,3 +747,11 @@ describe("two customer-facing reliability fixes", () => {
     expect(src).toMatch(/if \(order\.paid\) redirect\(`\/c\/orders\/\$\{order\.id\}`\)/);
   });
 });
+
+describe("assignSubscription's bagError is surfaced to staff, not silently dropped", () => {
+  it("CustomerClient reads r.bagError and warns instead of showing a plain success toast", () => {
+    const src = read("app/s/customers/[id]/_components/CustomerClient.tsx");
+    expect(src).toMatch(/if \(r\.bagError\)/);
+    expect(src).toMatch(/bag issue failed/);
+  });
+});

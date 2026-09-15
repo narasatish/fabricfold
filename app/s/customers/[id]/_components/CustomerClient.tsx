@@ -426,7 +426,11 @@ Currently ${current}. Type the code printed on the bag they are being given.
     try {
       const r = await assignSubscription(student.id, assignPlan.id, assignMethod, assignApplyCredits);
       if (!r.ok) return toast(r.error || "Failed", true);
-      toast("Plan activated");
+      if (r.bagError) {
+        toast(`Plan activated, but bag issue failed: ${r.bagError} — issue manually`, true);
+      } else {
+        toast("Plan activated");
+      }
       setShowAssign(false);
       router.refresh();
     } catch (e) {

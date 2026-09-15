@@ -105,13 +105,20 @@ export default function StaffOrderClient({
   const subCyclesLeft = order.student.subscription
     ? order.student.subscription.cyclesTotal - order.student.subscription.cyclesUsed
     : 0;
-  const canUseCycle = !!order.student.subscription?.active && subCyclesLeft > 0;
-
-  // Sheet state
   // College-aware, same as the customer order screen and staff walk-in sheet:
   // a college with its own rates override (BVRIT) never bills washFold/washIron
   // by the cycle — always itemized.
   const cycleBased = collegeUsesCycleBasedPricing(order.service, collegeHasRatesOverride);
+  /* Bug found live-testing (Sep 2026): canUseCycle used to ignore `cycleBased`
+     entirely, so a subscriber with cycles left on ANY service (e.g. a
+     faculty cycle pack that only covers Wash & Fold) got the "Use
+     subscription cycle" toggle defaulted ON for a completely unrelated
+     PER-PIECE order (Iron Only, Dry Clean) too. acceptOrder() then looked
+     for a bucket matching THIS order's service, found none, and threw —
+     the accept silently never went through, with no obvious reason why to
+     staff standing at the counter. The toggle must never even be offered
+     for a service this college doesn't bill by the cycle. */
+  const canUseCycle = !!order.student.subscription?.active && subCyclesLeft > 0 && cycleBased;
   const [acceptInput, setAcceptInput] = useState({ weightKg: order.weightKg || 0, cycles: Math.max(1, order.cyclesCount || 1), useCycle: canUseCycle, noGst: false, itemQtys: {} as Record<string, number> });
   /* The weight field holds a STRING while being typed — see the input below. */
   const [weightText, setWeightText] = useState(order.weightKg ? String(order.weightKg) : "");
@@ -896,7 +903,15 @@ export default function StaffOrderClient({
               </div>
             )}
           </div>
-          {order.student.subscription?.active && (
+          {/* cycleBased, not just subscription.active — same bug as canUseCycle
+              above: this switch used to be offered for ANY active
+              subscriber regardless of whether THIS order's service is one
+              their plan bills by the cycle at all. Flipping it on for a
+              per-piece service (Iron Only, Dry Clean) had nothing to burn
+              it against, and acceptOrder() would throw with no visible
+              explanation to staff — the accept just silently never
+              completed. */}
+          {order.student.subscription?.active && cycleBased && (
             <div className="chip-toggle" style={{ marginBottom: "16px" }}>
               <div>
                 <div className="h-sm">Use subscription cycle</div>

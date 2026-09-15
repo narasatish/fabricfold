@@ -159,6 +159,22 @@ describe("the screens quote what the server bills", () => {
     expect(read("app/s/orders/[id]/_components/OrderClient.tsx")).toMatch(/\{!acceptInput\.useCycle && !cycleBased && \(/);
     expect(read("app/s/customers/[id]/_components/CustomerClient.tsx")).toMatch(/!wiUseCycle && gstEnabled && !wiCycleBased && \(/);
   });
+  it("the accept sheet's 'Use subscription cycle' toggle never defaults on, or even shows, for a non-cycle service", () => {
+    /* Real bug found live-testing (Sep 2026): canUseCycle only checked that
+       the subscription was active with cycles left SOMEWHERE — not that
+       THIS order's service was one the plan bills by the cycle at all. A
+       subscriber whose plan only covers Wash & Fold got the toggle
+       defaulted ON for an unrelated Iron Only order too; acceptOrder()
+       found no matching bucket and threw, and the accept silently never
+       went through — three attempts, no obvious reason why to staff at the
+       counter. Both the default value AND the switch's visibility must be
+       gated on cycleBased, matching the walk-in screen (CustomerClient.tsx),
+       which never had this bug because its toggle was already `{wiCycleBased
+       && (...)}`-gated from the start. */
+    const ui = read("app/s/orders/[id]/_components/OrderClient.tsx");
+    expect(ui).toMatch(/const canUseCycle = !!order\.student\.subscription\?\.active && subCyclesLeft > 0 && cycleBased/);
+    expect(ui).toMatch(/\{order\.student\.subscription\?\.active && cycleBased && \(/);
+  });
   it("the pack card exists for any student, Manager+, with the 6-months example", () => {
     const ui = read("app/s/customers/[id]/_components/CustomerClient.tsx");
     expect(ui).toMatch(/\{staffRole >= 2 && \(/);

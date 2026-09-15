@@ -86,7 +86,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   const [pay, setPay] = useState({ ...config.payment });
   const [settings, setSettings] = useState({ reportEmail: config.settings.reportEmail || "", dailyEmail: !!config.settings.dailyEmail, sendHour: config.settings.sendHour ?? 21, openingFloat: config.settings.openingFloat ?? 0, garmentTagsEnabled: config.settings.garmentTagsEnabled === true });
   const [colEdit, setColEdit] = useState<{ id?: string; name: string; address: string; closedWeekday: number | null }>({ name: "", address: "", closedWeekday: null });
-  const [stEdit, setStEdit] = useState<{ id?: string; name: string; phone: string; role: number; active?: boolean; perms: Record<string, boolean> }>({ name: "", phone: "", role: 1, perms: {} });
+  const [stEdit, setStEdit] = useState<{ id?: string; name: string; phone: string; role: number; collegeId: string | null; active?: boolean; perms: Record<string, boolean> }>({ name: "", phone: "", role: 1, collegeId: colleges[0]?.id ?? null, perms: {} });
   const [impCollege, setImpCollege] = useState(colleges.find((c) => c.active)?.id || colleges[0]?.id || "");
   // Same staleness class as slip.staffId above — the dropdown option list is
   // now scoped to visibleColleges, so the previously-selected campus can
@@ -459,7 +459,7 @@ Students already registered there keep their records and can be restored with th
              past payslips and payments — and you need a way back if the wrong
              person was removed. */
           <button key={x.id} className="list-item tap" style={{ width: "100%", textAlign: "left", opacity: x.active ? 1 : 0.45 }}
-            onClick={() => { setStEdit({ id: x.id, name: x.name, phone: x.phone, role: x.role, active: x.active, perms: { ...x.perms } }); setSheet("staff"); }}>
+            onClick={() => { setStEdit({ id: x.id, name: x.name, phone: x.phone, role: x.role, collegeId: x.collegeId, active: x.active, perms: { ...x.perms } }); setSheet("staff"); }}>
             <div className="avatar" style={{ width: 38, height: 38, fontSize: 14 }}>{x.name[0]}</div>
             <div className="grow">
               <div className="h-sm">{x.name}</div>
@@ -469,7 +469,7 @@ Students already registered there keep their records and can be restored with th
           </button>
         ))}
       </div>
-      <button className="btn ghost mt12" onClick={() => { setStEdit({ name: "", phone: "", role: 1, perms: {} }); setSheet("staff"); }}>
+      <button className="btn ghost mt12" onClick={() => { setStEdit({ name: "", phone: "", role: 1, collegeId: colleges[0]?.id ?? null, perms: {} }); setSheet("staff"); }}>
         <Svg name="plus" size={17} /> Add staff
       </button>
 
@@ -693,6 +693,24 @@ Students already registered there keep their records and can be restored with th
             {currentRole >= 4 && <option value={4}>Owner</option>}
           </select>
         </div>
+        {/* Bug found live-testing (Sep 2026): this sheet always sent
+            collegeId: null on save, unconditionally — fine for an Owner
+            (global by design), but a campus-scoped Admin's own collegeId is
+            never null, so assertSameCollege(st, null) threw "different
+            campus" on EVERY save, add or edit — campus Admins could not add
+            or edit a single staff member through this UI. Only visible when
+            more than one campus is in scope (an Owner) and the role isn't
+            Owner (Owners are always global, matching every other Owner
+            account) — a scoped Admin has exactly one college to pick from
+            anyway, defaulted automatically when the sheet opens. */}
+        {stEdit.role < 4 && colleges.length > 1 && (
+          <div className="field">
+            <label>Campus</label>
+            <select className="input" value={stEdit.collegeId ?? ""} onChange={(e) => setStEdit({ ...stEdit, collegeId: e.target.value || null })}>
+              {colleges.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+        )}
         {/* Named tools: the role sets the default, these switches bend the
             person. Owners are exempt by design — no lockout footguns. */}
         {stEdit.role < 4 && (
@@ -712,7 +730,7 @@ Students already registered there keep their records and can be restored with th
             })}
           </div>
         )}
-        <button disabled={runBusy} className="btn" onClick={() => run(() => saveStaff({ ...stEdit, collegeId: null }), "Staff saved")}>{stEdit.id ? "Save" : "Create staff account"}</button>
+        <button disabled={runBusy} className="btn" onClick={() => run(() => saveStaff({ ...stEdit, collegeId: stEdit.role >= 4 ? null : stEdit.collegeId }), "Staff saved")}>{stEdit.id ? "Save" : "Create staff account"}</button>
         <div className="muted center mt8" style={{ fontSize: 12 }}>They sign in to the staff app with this mobile.</div>
 
         {/* Removal is a separate, explicit action — never a side effect of Save.

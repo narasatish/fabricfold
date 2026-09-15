@@ -133,6 +133,35 @@ describe("registration/staff-add races on a duplicate phone return a friendly er
   });
 });
 
+describe("the Add/Edit staff sheet sends the staffer's REAL campus, not a hardcoded null", () => {
+  /* Real bug found live-testing (Sep 2026): the Save button always sent
+     `collegeId: null` unconditionally, whether adding a new staffer or
+     editing an existing one. That's the right value ONLY for an Owner
+     (global by design) — saveStaff's own assertSameCollege(st,
+     input.collegeId) check then compares a campus-scoped Admin's own
+     (non-null) collegeId against that hardcoded null and throws "That's a
+     different campus — not yours to change" on EVERY save. A campus Admin
+     could not add or edit a single staff member through this UI at all —
+     confirmed live: three failed attempts before the server log named the
+     exact line. Fixed: stEdit now carries a real collegeId (defaulted to
+     the staffer's own on edit, colleges[0] on add, with a Campus picker
+     when an Owner has more than one campus in scope), and the Save button
+     only forces null for an Owner-role (4) account. */
+  it("Save forces collegeId null only for Owner-role accounts, otherwise sends stEdit.collegeId", () => {
+    const ui = read("app/s/admin/_components/AdminClient.tsx");
+    expect(ui).toMatch(/saveStaff\(\{ \.\.\.stEdit, collegeId: stEdit\.role >= 4 \? null : stEdit\.collegeId \}\)/);
+    expect(ui).not.toMatch(/saveStaff\(\{ \.\.\.stEdit, collegeId: null \}\)/);
+  });
+  it("editing an existing staffer carries their real collegeId into the form, not null", () => {
+    const ui = read("app/s/admin/_components/AdminClient.tsx");
+    expect(ui).toMatch(/setStEdit\(\{ id: x\.id, name: x\.name, phone: x\.phone, role: x\.role, collegeId: x\.collegeId,/);
+  });
+  it("adding a new staffer defaults to the first campus in scope, not null", () => {
+    const ui = read("app/s/admin/_components/AdminClient.tsx");
+    expect(ui).toMatch(/setStEdit\(\{ name: "", phone: "", role: 1, collegeId: colleges\[0\]\?\.id \?\? null, perms: \{\} \}\)/);
+  });
+});
+
 describe("bulkRegisterStudents isolates a bad row instead of aborting the whole import", () => {
   it("wraps the create in try/catch and keeps going", () => {
     const src = read("lib/actions/students.ts");

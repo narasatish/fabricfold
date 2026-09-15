@@ -78,6 +78,16 @@ export function shouldInvoiceOrder(o: { noGst?: boolean }, method: string, staff
    when billing a new order. */
 export const CYCLE_KG_LIMIT = 5;
 
+/* UI-only toggle (owner, Sep 2026: "remove the term tax and gst from the
+   total app itself... just hide them for now. No we dont need new... I
+   will inform if anything changes"). GST is still CALCULATED and stored
+   exactly as before — computeBill, Invoice rows, the ledger, every money
+   value — none of that changed; this only controls whether the customer-
+   and staff-facing screens render a "GST (…%)" line in a bill breakdown.
+   A single flag so turning it back on later is one line, not a hunt
+   through every order/bill screen again. */
+export const SHOW_GST_UI = false;
+
 /* No longer charged (management decision, Sep 2026) — excessWeightCharge
    always returns 0 now; see its own comment. Kept as exports rather than
    deleted since nothing currently reads them, but removing them outright

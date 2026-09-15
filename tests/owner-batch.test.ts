@@ -147,9 +147,13 @@ describe("the import route", () => {
   it("skips an existing mobile rather than overwriting", () => {
     expect(src).toMatch(/already registered/);
   });
-  it("bumps the allocator past every imported number", () => {
-    // otherwise "sell a bag" could mint a code the owner already printed
-    expect(src).toMatch(/row\.value < maxN/);
+  it("bumps the SHARED allocator past the highest imported number", () => {
+    // otherwise "sell a bag" could mint a code the owner already printed —
+    // now one shared number line across every letter (owner, Sep 2026:
+    // "S1001, F1002, G1003... continuous"), so this tracks the single
+    // highest imported number, not one per letter.
+    expect(src).toMatch(/row\.value < maxImported/);
+    expect(src).toMatch(/fyTag: "shared"/);
   });
   it("refuses a code already on someone's active bag", () => {
     expect(src).toMatch(/status: "active" \}, include: \{ student: true \}/);

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { Qr } from "@/components/qr";
 import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, upiLink } from "@/lib/format";
-import { CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, collegeUsesCycleBasedPricing } from "@/lib/money";
+import { CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, collegeUsesCycleBasedPricing, SHOW_GST_UI } from "@/lib/money";
 import { isOverdue } from "@/lib/money";
 import { useToast, Sheet, Seg, Switch } from "@/components/chrome";
 import {
@@ -544,10 +544,12 @@ export default function StaffOrderClient({
             <span className="mono">{fmt(Number(order.surcharge))}</span>
           </div>
         ) : null}
-        <div className="kv">
-          <span className="k">{order.noGst || order.usedCycle || order.gstPct === 0 ? "GST — not charged" : `GST (${order.gstPct}%)`}</span>
-          <span className="mono">{fmt(Number(order.gst))}</span>
-        </div>
+        {SHOW_GST_UI && (
+          <div className="kv">
+            <span className="k">{order.noGst || order.usedCycle || order.gstPct === 0 ? "GST — not charged" : `GST (${order.gstPct}%)`}</span>
+            <span className="mono">{fmt(Number(order.gst))}</span>
+          </div>
+        )}
         <div className="kv total">
           <span>Total</span>
           <span className="mono">{fmt(Number(order.total))}</span>
@@ -696,7 +698,7 @@ export default function StaffOrderClient({
         </button>
         {order.invoice && (
           <a href={`/api/export/invoice/${order.id}`} className="btn xs sec">
-            <Svg name="card" size={15} /> GST bill
+            <Svg name="card" size={15} /> Bill
           </a>
         )}
         <a href={`https://wa.me/91${order.student.phone}?text=${encodeURIComponent(order.status === "ready" ? `Your ${order.service} order #${order.id.slice(-4)} is ready for collection` : `Hi, about your ${order.service} order #${order.id.slice(-4)} (currently ${STATUS_LABEL[order.status] || order.status})…`)}`} target="_blank" className="btn xs sec" style={{ color: "#0f8a4d", borderColor: "#bfe6cf" }}>

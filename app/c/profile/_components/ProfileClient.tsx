@@ -320,7 +320,7 @@ export default function ProfileClient({ studentName, hasPasscode }: { studentNam
             <p className="muted mt4" style={{ fontSize: "13px" }}>Damaged, stained or missing garments are compensated as store credits (or cash at the manager's discretion) after counter verification. Free re-dos for unsatisfactory cleaning.</p>
             <div className="divider" />
             <div className="h-sm">Payments & refunds</div>
-            <p className="muted mt4" style={{ fontSize: "13px" }}>Pay by UPI, cash at the counter, or store credits. Refunds are returned the way you paid or as credits, with a GST credit note where an invoice was issued.</p>
+            <p className="muted mt4" style={{ fontSize: "13px" }}>Pay by UPI, cash at the counter, or store credits. Refunds are returned the way you paid or as credits.</p>
           </div>
           <button className="btn sec mt16" onClick={() => setShowTerms(false)}>Close</button>
         </div>

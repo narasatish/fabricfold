@@ -6,7 +6,7 @@ import { Seg, Switch } from "@/components/chrome";
 import { Svg } from "@/components/icons";
 import { fmt } from "@/lib/format";
 import { placeOrder } from "@/lib/actions/orders";
-import { collegeExpressFee, expressItemRate, CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService, collegeUsesCycleBasedPricing } from "@/lib/money";
+import { collegeExpressFee, expressItemRate, CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService, collegeUsesCycleBasedPricing, SHOW_GST_UI } from "@/lib/money";
 
 type EnabledService = { key: string; flag: string; label: string };
 type Slot = { startAt: string; endAt: string; dateStr: string; timeLabel: string; left: number; full: boolean };
@@ -282,7 +282,7 @@ export default function OrderNewClient({
             <span className="mono">{fmt(surcharge)}</span>
           </div>
         )}
-        {!cycleBased && gstPct > 0 && (
+        {SHOW_GST_UI && !cycleBased && gstPct > 0 && (
           <div className="kv">
             <span className="k">GST ({gstPct}%)</span>
             <span className="mono">{fmt(gst)}</span>

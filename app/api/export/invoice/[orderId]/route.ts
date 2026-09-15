@@ -26,6 +26,16 @@ export async function GET(_req: Request, ctx: { params: Promise<{ orderId: strin
   const money = (n: number) => "₹" + n.toLocaleString("en-IN");
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const pay = cfg.payment as { payeeName?: string };
+  // Same Customer ID as everywhere else (V/B/S/G/F, self-healing) — this
+  // used to print o.student.id, the raw internal reference, directly on a
+  // legal GST document under the label "FF ID" (a leftover from the old
+  // "FF"+digits order-id scheme, doubly misleading now that order ids are
+  // short sequential numbers instead). Found in the same sweep that caught
+  // the Sheet-sync instances of this bug (owner, Sep 2026: "I should not
+  // see any more bugs later").
+  const { customerIdFor } = await import("@/lib/bagcode");
+  const college = await db.college.findUnique({ where: { id: o.collegeId }, select: { name: true } });
+  const customerId = await customerIdFor(db, o.student, college?.name);
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${inv.number}</title>
 <style>body{font-family:-apple-system,'Segoe UI',sans-serif;max-width:640px;margin:32px auto;color:#12211c;padding:0 16px}
@@ -34,7 +44,7 @@ th{font-size:12px;text-transform:uppercase;color:#7a8a83}.r{text-align:right}.to
 .muted{color:#7a8a83;font-size:12.5px}@media print{button{display:none}}</style></head><body>
 <h1>FabricFold — Tax Invoice</h1>
 <div class="muted">${pay.payeeName || "FabricFold Laundry"} · Invoice <b>${inv.number}</b> · ${inv.at.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
-<div class="muted">Billed to: ${o.student.name} (FF ID ${o.student.id}) · Order #${o.id}</div>
+<div class="muted">Billed to: ${o.student.name} (Customer ID ${customerId}) · Order #${o.id}</div>
 <table><tr><th>Item</th><th class="r">Qty</th><th class="r">Rate</th><th class="r">Amount</th></tr>
 ${items.map((i) => `<tr><td>${i.label}</td><td class="r">${i.qty}</td><td class="r">${money(i.rate)}</td><td class="r">${money(i.rate * i.qty)}</td></tr>`).join("")}
 ${N(o.surcharge) ? `<tr><td>Express surcharge</td><td class="r"></td><td class="r"></td><td class="r">${money(N(o.surcharge))}</td></tr>` : ""}

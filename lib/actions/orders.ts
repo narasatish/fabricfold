@@ -13,8 +13,30 @@ import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit } from "../notify";
 import { notifyOwner } from "../mail";
 
+/* Random N-digit string — used for the pickup OTP code (not order ids,
+   see nextOrderId below, which used to share this helper before order ids
+   became sequential). */
 const rid = (n: number) => { let s = ""; for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10); return s; };
-const orderCode = () => "FF" + rid(6);
+
+/* Simple, ever-increasing order numbers (owner, Sep 2026: "make order
+   numbers simple not like FF563966 and make them unique everytime for both
+   colleges... should not be repeated anytime soon can start with 3 or 4
+   digit code and then continue so on"). ONE global sequence, not
+   per-college — the owner wants a single number line across both campuses,
+   the same table-and-pattern lib/bagcode.ts already uses for bag codes:
+   land on a baseline, then step PAST it, so the true first id is baseline+1
+   (1001, not 1000) — matches a bag code's own MINT_FROM convention.
+   Old "FF######" ids already in the database are untouched and permanent
+   (an id is a primary key, never renumbered); new orders just start using
+   the short form going forward — there is no format collision since digits
+   only vs "FF"-prefixed never overlap. */
+async function nextOrderId(client: Prisma.TransactionClient | typeof db): Promise<string> {
+  const KIND = "orderid", TAG = "global", BASELINE = 1000;
+  let row = await client.fySequence.findUnique({ where: { kind_fyTag: { kind: KIND, fyTag: TAG } } });
+  if (!row) row = await client.fySequence.create({ data: { kind: KIND, fyTag: TAG, value: BASELINE } });
+  row = await client.fySequence.update({ where: { kind_fyTag: { kind: KIND, fyTag: TAG } }, data: { value: { increment: 1 } } });
+  return String(row.value);
+}
 
 type Rates = Record<string, { label: string; items: [string, number][] }>;
 async function getConfig(collegeId?: string) {
@@ -110,7 +132,7 @@ export async function placeOrder(input: { service: string; items: { label: strin
       }
       return tx.order.create({
         data: {
-          id: orderCode(), studentId: stu.id, collegeId: stu.collegeId, service: input.service,
+          id: await nextOrderId(tx), studentId: stu.id, collegeId: stu.collegeId, service: input.service,
           items, declaredPieces: items.reduce((s, i) => s + i.qty, 0),
           cyclesCount, noGst: usesCycles,
           express, surcharge, status: "draft",
@@ -379,7 +401,7 @@ export async function walkInOrder(
       const noGst = !usedCycle && (usesCycles || !!input.noGst || !cfg.gstEnabled);
       const { gst, total } = computeBill(sub2, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });
       const declaredPieces = items.reduce((s, i) => s + i.qty, 0);
-      const id = orderCode();
+      const id = await nextOrderId(tx);
       let ti = 0;
       const tags = cfg.garmentTagsEnabled
         ? items.flatMap((it) => Array.from({ length: it.qty }, () => ({ code: id.slice(-6) + "-" + String(++ti).padStart(2, "0"), label: it.label })))
@@ -563,18 +585,27 @@ export async function collectOrder(orderId: string, code: string) {
   const v = (code || "").replace(/[^0-9]/g, "");
   const ok = (otp && v === otp.code) || v === o.id.slice(-4) || v === o.id.replace(/\D/g, "");
   if (!ok) return { ok: false as const, error: "Code / Order ID does not match" };
-  // Payment-timing rule (owner, Sep 2026, college-specific):
+  // Payment-timing rule (owner, Sep 2026):
   // "for bvrit payment is mandatory we cant deliver unless payment is done
-  // or recorded unless it is complaint order" — BVRIT ONLY: unpaid orders
-  // with a nonzero total cannot be collected. St Mary's keeps the earlier,
-  // explicit rule ("students and staff can pay before or after delivery, no
-  // restriction") — this is a per-college difference, not a reversal of that
-  // rule. A free re-do (compensation for a complaint) is created with
-  // `paid: true` already (see the redo branch above), so the "unless it is
-  // complaint order" carve-out falls out of the `!o.paid` check on its own —
-  // no separate flag needed.
-  const college = await db.college.findUnique({ where: { id: o.collegeId }, select: { name: true } });
-  if (college?.name.trim().toUpperCase() === "BVRIT" && !o.paid && Number(o.total) > 0) {
+  // or recorded unless it is complaint order" — BVRIT: unpaid orders with a
+  // nonzero total cannot be collected, no exceptions by kind.
+  // "payment is mandatory for st marys staff as we dont charge on
+  // subscription basis" — St Mary's FACULTY too: they buy cycle packs
+  // (pay-per-use, see sellCyclePack), not a subscription plan, so there is
+  // no "billed on the plan" cover the way a regular St Mary's STUDENT has.
+  // A regular St Mary's student keeps the earlier, explicit rule ("students
+  // and staff can pay before or after delivery, no restriction") — this is
+  // a college/kind-specific carve-out, not a reversal of that rule. A free
+  // re-do (compensation for a complaint) is created with `paid: true`
+  // already (see the redo branch above), so the "unless it is complaint
+  // order" exemption falls out of the plain `!o.paid` check with no
+  // separate flag needed.
+  const [college, orderStu] = await Promise.all([
+    db.college.findUnique({ where: { id: o.collegeId }, select: { name: true } }),
+    db.student.findUnique({ where: { id: o.studentId }, select: { kind: true } }),
+  ]);
+  const paymentMandatory = college?.name.trim().toUpperCase() === "BVRIT" || orderStu?.kind === "faculty";
+  if (paymentMandatory && !o.paid && Number(o.total) > 0) {
     return { ok: false as const, error: "Record payment before collection" };
   }
   // Collection is the last step of the lifecycle (received → processing →
@@ -789,7 +820,7 @@ export async function redoOrder(orderId: string): Promise<ActionResult> {
   }
   const n = await db.order.create({
     data: {
-      id: orderCode(), studentId: o.studentId, collegeId: o.collegeId, service: o.service,
+      id: await nextOrderId(db), studentId: o.studentId, collegeId: o.collegeId, service: o.service,
       items: o.items as object, declaredPieces: o.declaredPieces, actualPieces: o.actualPieces, weightKg: o.weightKg,
       express: false, surcharge: 0, status: "received", receivedAt: new Date(),
       subtotal: 0, gst: 0, gstPctSnapshot: cfg.gstPct, total: 0,

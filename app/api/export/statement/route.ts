@@ -25,9 +25,16 @@ export async function GET(req: Request) {
     db.creditUse.findMany({ where: { studentId: stu.id, at: { gte: from, lt: to } } }),
   ]);
 
+  // Same Customer ID as everywhere else (V/B/S/G/F, self-healing) — this
+  // used to print stu.id, the raw internal reference, in the statement's
+  // own header row. Found in the same sweep that caught the invoice export
+  // and both Sheet-sync instances of this bug.
+  const { customerIdFor } = await import("@/lib/bagcode");
+  const customerId = await customerIdFor(db, stu, stu.college?.name);
+
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Statement");
-  ws.addRow([`FabricFold statement — ${stu.name} (${stu.id}) — ${m}`]).font = { bold: true, size: 14 };
+  ws.addRow([`FabricFold statement — ${stu.name} (${customerId}) — ${m}`]).font = { bold: true, size: 14 };
   ws.addRow([]);
   ws.addRow(["ORDERS"]).font = { bold: true };
   ws.addRow(["Date", "Order", "Service", "Pieces", "Status", "Total", "Paid via"]).font = { bold: true };

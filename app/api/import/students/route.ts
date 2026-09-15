@@ -20,7 +20,7 @@ import ExcelJS from "exceljs";
 import { db } from "@/lib/db";
 import { rosterSoon } from "@/lib/sheets-sync";
 import { requireStaff, assertSameCollege, AuthError } from "@/lib/auth";
-import { parseBagCode, BAG_LETTER, type Tier } from "@/lib/bagcode";
+import { parseBagCode, type Tier } from "@/lib/bagcode";
 
 /* Mirrors the private helpers in lib/actions/subscription.ts — they live in a
    "use server" module, which may only export async functions, so they cannot
@@ -120,7 +120,11 @@ export async function POST(req: Request) {
   const skipped: string[] = [];
   const problems: string[] = [];
   const warnings: string[] = [];
-  const maxPerLetter = new Map<string, number>();
+  // One shared number line across every letter (see lib/bagcode.ts's
+  // allocateBagCode) — track the single highest imported number, not one
+  // per letter, so the post-import bump lands on the SAME sequence
+  // auto-minted codes draw from.
+  let maxImported = 0;
 
   for (let r = 2; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
@@ -191,22 +195,23 @@ export async function POST(req: Request) {
         });
       });
       added.push(`${name} — ${codeRaw}`);
-      const letter = BAG_LETTER[parsed.kind];
-      maxPerLetter.set(letter, Math.max(maxPerLetter.get(letter) ?? 0, parsed.n));
+      maxImported = Math.max(maxImported, parsed.n);
     } catch (e) {
       problems.push(`row ${r}: "${name}" — ${(e as Error).message.split("\n")[0].slice(0, 120)}`);
     }
   }
 
-  /* Bump the allocator past every imported number, per letter, so a future
-     "sell a bag" can never mint a code the owner has already printed. */
-  for (const [letter, maxN] of maxPerLetter) {
-    const row = await db.fySequence.findUnique({ where: { kind_fyTag: { kind: "bagcode", fyTag: letter } } });
-    if (!row || row.value < maxN) {
+  /* Bump the SHARED allocator (see lib/bagcode.ts) past the highest number
+     imported, regardless of letter, so a future "sell a bag" can never
+     mint a code the owner has already printed — and never repeats a number
+     under a different letter either. */
+  if (maxImported > 0) {
+    const row = await db.fySequence.findUnique({ where: { kind_fyTag: { kind: "bagcode", fyTag: "shared" } } });
+    if (!row || row.value < maxImported) {
       await db.fySequence.upsert({
-        where: { kind_fyTag: { kind: "bagcode", fyTag: letter } },
-        create: { kind: "bagcode", fyTag: letter, value: maxN },
-        update: { value: maxN },
+        where: { kind_fyTag: { kind: "bagcode", fyTag: "shared" } },
+        create: { kind: "bagcode", fyTag: "shared", value: maxImported },
+        update: { value: maxImported },
       });
     }
   }

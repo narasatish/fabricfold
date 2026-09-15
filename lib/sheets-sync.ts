@@ -303,9 +303,9 @@ function studentRow(st: {
   college: { name: string } | null;
   subscription: { active: boolean; plan: string; cyclesTotal: number; cyclesUsed: number } | null;
   createdAt: Date;
-}): (string | number)[] {
+}, resolvedCode?: string): (string | number)[] {
   return [
-    st.bags[0]?.code || st.id,
+    st.bags[0]?.code || resolvedCode || st.id,
     st.name,
     "'+91 " + st.phone, // leading apostrophe — see staffRows note above
     st.kind === "faculty" ? "Faculty" : "Student",
@@ -344,8 +344,26 @@ export async function writeStudentsTab(): Promise<{ ok: boolean; error?: string 
     db.college.findMany({ where: { active: true }, select: { id: true, name: true } }),
   ]);
 
+  /* Same self-healing as every other Customer-ID display in the app (see
+     customerIdFor in lib/bagcode.ts): a student with no bag yet — old seed
+     data, an old signup, a subscription activated before the bag step
+     existed — used to show their raw internal id here instead of a proper
+     V/B/S/G/F code, the exact inconsistency the owner asked to have checked
+     ("check whether sheet and database is matched and synced properly").
+     Resolved (and persisted) BEFORE building rows, one bag-less student at
+     a time, so the roster tab — which rebuilds on every registration/staff
+     change, not just nightly — doubles as the backfill for any gap still
+     left in the database; the next sync then finds an active bag and this
+     step is a no-op for that student. */
+  const { customerIdFor } = await import("./bagcode");
+  const resolved = new Map<string, string>();
+  for (const st of students) {
+    if (st.bags.length) continue;
+    resolved.set(st.id, await customerIdFor(db, st, st.college?.name));
+  }
+
   const rows: (string | number)[][] = [STUDENT_HEADER];
-  for (const st of students) rows.push(studentRow(st));
+  for (const st of students) rows.push(studentRow(st, resolved.get(st.id)));
   rows.push([], ["Total", students.length, "Faculty", students.filter((x) => x.kind === "faculty").length]);
   let result = await writeSheet("Students", rows);
   if (!result.ok) return result;
@@ -353,7 +371,7 @@ export async function writeStudentsTab(): Promise<{ ok: boolean; error?: string 
   for (const c of colleges) {
     const theirs = students.filter((st) => st.college?.id === c.id);
     const campusRows: (string | number)[][] = [STUDENT_HEADER];
-    for (const st of theirs) campusRows.push(studentRow(st));
+    for (const st of theirs) campusRows.push(studentRow(st, resolved.get(st.id)));
     campusRows.push([], ["Total", theirs.length, "Faculty", theirs.filter((x) => x.kind === "faculty").length]);
     // Sheet tab names can't carry "/" — campus names are free text elsewhere.
     result = await writeSheet(`Students — ${c.name}`.replace(/\//g, "-").slice(0, 100), campusRows);

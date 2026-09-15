@@ -240,29 +240,30 @@ describe("phone verification and account creation", () => {
     expect(again.ok).toBe(false);
   });
 
-  it("allocates V series customer IDs starting from V1001", async () => {
+  it("allocates V series customer IDs at or above 1001, from the SHARED number line", async () => {
+    // One shared FySequence row across every letter now (owner, Sep 2026:
+    // "S1001, F1002, G1003, F1004... it should be continuous"), not a
+    // separate "V" row — see lib/bagcode.ts's allocateBagCode.
     const college = await db.college.findFirst({ where: { name: "BVRIT" } });
     if (!college) return;
 
-    // Check if any V series bags exist
     const existing = await db.bag.findFirst({
       where: { code: { startsWith: "V" } },
       orderBy: { code: "desc" },
     });
-
     if (existing) {
-      // V codes are already being issued
       const parsed = parseBagCode(existing.code);
       expect(parsed?.kind).toBe("bvrit");
       expect(parsed?.n).toBeGreaterThanOrEqual(1001);
-    } else {
-      // First V code should be V1001
-      const seq = await db.fySequence.findUnique({
-        where: { kind_fyTag: { kind: "bagcode", fyTag: "V" } },
-      });
-      // If no sequence row exists yet, it will start at MINT_FROM (1000) and increment to 1001
-      expect(seq?.value === undefined || seq?.value === 1000 || seq?.value === 1001).toBe(true);
     }
+
+    const seq = await db.fySequence.findUnique({
+      where: { kind_fyTag: { kind: "bagcode", fyTag: "shared" } },
+    });
+    // If no sequence row exists yet, it will start at MINT_FROM (1000) and
+    // increment to 1001 on first real allocation — otherwise it's already
+    // been advanced (by V codes or any other letter) past that baseline.
+    expect(seq === null || seq.value >= 1000).toBe(true);
   });
 });
 

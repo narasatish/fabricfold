@@ -120,8 +120,19 @@ export async function allocateBagCode(tx: Prisma.TransactionClient, kind: BagKin
   const recycled = released.find((r) => !taken.has(r.code));
   if (recycled) return recycled.code;
 
-  /* Sequence starts at MINT_FROM: printed stock is numbered from 1000, and a
-     freshly minted B037 would clash with nothing in the database while
+  /* ONE shared number line across every letter (owner, Sep 2026: "there
+     cant be two 1001 like that so for example S1001, F1002, G1003, F1004...
+     it should be continuous so that we will have unique id to be written on
+     the bag and no confusion") — matches the owner's own real enrolment
+     sheet exactly (B1001, G1002, B1003, S1005, S1006... the NUMBER never
+     repeats regardless of letter). Each letter still has its own
+     free-standing meaning (the tier/kind), but the digits come from a
+     single pool, not a separate counter per letter — two bags never carry
+     the same number even with different letters, so a number alone
+     unambiguously identifies one bag.
+
+     Sequence starts at MINT_FROM: printed stock is numbered from 1000, and a
+     freshly minted #1037 would clash with nothing in the database while
      matching no bag anyone can hold. An existing sequence below that (from
      the 3-digit era) jumps forward once and never looks back.
 
@@ -129,22 +140,19 @@ export async function allocateBagCode(tx: Prisma.TransactionClient, kind: BagKin
      issue") — every path below ends with one unconditional increment before
      formatting the code, so MINT_FROM is a baseline to land ON, then step
      PAST, giving 1001 as the true first code — matching the owner's own
-     printed stock (B1001, G1002…), not 1000 itself.
-
-     Bug fixed here (Sep 2026): a brand-new letter, or an existing sequence
-     jumping up from below MINT_FROM, used to return MINT_FROM (1000) itself
-     as the first code — one short of what's actually printed on the bag. */
-  let row = await tx.fySequence.findUnique({ where: { kind_fyTag: { kind: "bagcode", fyTag: letter } } });
+     printed stock, not 1000 itself. */
+  const SHARED_TAG = "shared";
+  let row = await tx.fySequence.findUnique({ where: { kind_fyTag: { kind: "bagcode", fyTag: SHARED_TAG } } });
   if (!row) {
-    row = await tx.fySequence.create({ data: { kind: "bagcode", fyTag: letter, value: MINT_FROM } });
+    row = await tx.fySequence.create({ data: { kind: "bagcode", fyTag: SHARED_TAG, value: MINT_FROM } });
   } else if (row.value < MINT_FROM) {
     row = await tx.fySequence.update({
-      where: { kind_fyTag: { kind: "bagcode", fyTag: letter } },
+      where: { kind_fyTag: { kind: "bagcode", fyTag: SHARED_TAG } },
       data: { value: MINT_FROM },
     });
   }
   row = await tx.fySequence.update({
-    where: { kind_fyTag: { kind: "bagcode", fyTag: letter } },
+    where: { kind_fyTag: { kind: "bagcode", fyTag: SHARED_TAG } },
     data: { value: { increment: 1 } },
   });
   const code = formatBagCode(kind, row.value);

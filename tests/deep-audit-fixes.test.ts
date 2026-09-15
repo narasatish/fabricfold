@@ -494,6 +494,64 @@ describe("invoice export checks staff campus, not just customer ownership", () =
     expect(src).toMatch(/if \(s\.mode === "staff"\) \{/);
     expect(src).toMatch(/assertSameCollege\(st, inv\.order\.collegeId\)/);
   });
+
+  it("prints the real Customer ID (self-healing), not the raw internal student.id", () => {
+    // Used to print `(FF ID ${o.student.id})` directly on a legal GST
+    // document — the raw internal reference, leftover-labeled from the old
+    // "FF"-prefixed order-id scheme, and doubly wrong once order ids became
+    // short sequential numbers. Found in the same sweep that caught the
+    // Sheet-sync instances of this bug (owner, Sep 2026: "I should not see
+    // any more bugs later").
+    const src = read("app/api/export/invoice/[orderId]/route.ts");
+    expect(src).toMatch(/const \{ customerIdFor \} = await import\("@\/lib\/bagcode"\)/);
+    expect(src).toMatch(/Customer ID \$\{customerId\}/);
+    expect(src).not.toMatch(/FF ID \$\{o\.student\.id\}/);
+  });
+});
+
+describe("customer statement export prints the real Customer ID too", () => {
+  it("resolves via customerIdFor instead of the raw stu.id", () => {
+    const src = read("app/api/export/statement/route.ts");
+    expect(src).toMatch(/const \{ customerIdFor \} = await import\("@\/lib\/bagcode"\)/);
+    expect(src).toMatch(/\$\{stu\.name\} \(\$\{customerId\}\)/);
+    expect(src).not.toMatch(/\$\{stu\.name\} \(\$\{stu\.id\}\)/);
+  });
+});
+
+describe("order ids are simple, sequential, and never reused", () => {
+  /* Owner, Sep 2026: "make order numbers simple not like FF563966 and make
+     them unique everytime for both colleges. it should not be repeated
+     anytime soon can start with 3 or 4 dight code and then continue so on".
+     nextOrderId() replaced the old "FF" + 6 random digits scheme with a
+     single global FySequence counter (same table/pattern lib/bagcode.ts
+     uses for bag codes), starting at 1001. Old "FF######" ids already in
+     the database are untouched — an id is a primary key, never renumbered —
+     new orders just start using the short form going forward. */
+  it("uses one global FySequence counter, not per-college numbering", () => {
+    const src = read("lib/actions/orders.ts");
+    const fn = src.slice(src.indexOf("async function nextOrderId"), src.indexOf("async function nextOrderId") + 800);
+    expect(fn).toMatch(/const KIND = "orderid", TAG = "global", BASELINE = 1000/);
+    expect(fn).toMatch(/value: \{ increment: 1 \}/);
+  });
+
+  it("the old random 'FF' + digits generator is gone", () => {
+    const src = read("lib/actions/orders.ts");
+    expect(src).not.toMatch(/"FF" \+ rid\(6\)/);
+    expect(src).not.toMatch(/const orderCode = /);
+  });
+
+  it("all three order-creation call sites use nextOrderId, not the old generator", () => {
+    const src = read("lib/actions/orders.ts");
+    // placeOrder
+    const placeOrderFn = src.slice(src.indexOf("export async function placeOrder"), src.indexOf("export async function acceptOrder"));
+    expect(placeOrderFn).toMatch(/id: await nextOrderId\(tx\)/);
+    // walkInOrder
+    const walkInFn = src.slice(src.indexOf("export async function walkInOrder"), src.indexOf("export async function walkInOrder") + 6000);
+    expect(walkInFn).toMatch(/const id = await nextOrderId\(tx\)/);
+    // redoOrder
+    const redoFn = src.slice(src.indexOf("export async function redoOrder"), src.indexOf("export async function redoOrder") + 2000);
+    expect(redoFn).toMatch(/id: await nextOrderId\(db\)/);
+  });
 });
 
 describe("createPayslip can't double-pay a staff member for the same month", () => {
@@ -529,24 +587,28 @@ describe("collectOrder can't skip straight from received/processing to collected
   });
 });
 
-describe("collectOrder blocks an unpaid BVRIT order, but not St Mary's", () => {
-  /* Per-college payment-timing rule (owner, Sep 2026): "for bvrit payment
-     is mandatory we cant deliver unless payment is done or recorded unless
-     it is complaint order". St Mary's explicitly keeps the earlier rule
-     (pay before or after collection, no restriction) — this is a
-     college-specific carve-out, not a reversal of that. A free re-do
-     (complaint compensation) is created with paid: true already, so the
-     "unless it is complaint order" exemption falls out of the plain
-     `!o.paid` check with no separate flag needed. */
-  it("checks the order's OWN college — BVRIT only — before the ready-status check", () => {
+describe("collectOrder blocks an unpaid order for BVRIT or faculty, but not a regular St Mary's student", () => {
+  /* Payment-timing rule (owner, Sep 2026): "for bvrit payment is mandatory
+     we cant deliver unless payment is done or recorded unless it is
+     complaint order" AND "payment is mandatory for st marys staff as we
+     dont charge on subscription basis". A regular St Mary's STUDENT
+     explicitly keeps the earlier rule (pay before or after collection, no
+     restriction) — this is a college/kind-specific carve-out, not a
+     reversal of that. Faculty (any college) buy cycle packs, not a
+     subscription plan, so there is no "billed on the plan" cover a regular
+     subscribed student has — same reasoning as BVRIT's per-piece billing.
+     A free re-do (complaint compensation) is created with paid: true
+     already, so the "unless it is complaint order" exemption falls out of
+     the plain `!o.paid` check with no separate flag needed. */
+  it("checks BVRIT OR faculty kind before the ready-status check", () => {
     const src = read("lib/actions/orders.ts");
     const fn = src.slice(src.indexOf("export async function collectOrder"), src.indexOf("export async function payOrder"));
-    const bvritGate = fn.indexOf('college?.name.trim().toUpperCase() === "BVRIT"');
+    const gate = fn.indexOf('const paymentMandatory = college?.name.trim().toUpperCase() === "BVRIT" || orderStu?.kind === "faculty"');
     const readyCheck = fn.indexOf('if (o.status !== "ready")');
-    expect(bvritGate).toBeGreaterThan(-1);
+    expect(gate).toBeGreaterThan(-1);
     expect(readyCheck).toBeGreaterThan(-1);
-    expect(bvritGate).toBeLessThan(readyCheck); // the money check runs before the status check
-    expect(fn).toMatch(/&& !o\.paid && Number\(o\.total\) > 0\) \{\s*return \{ ok: false as const, error: "Record payment before collection" \};/);
+    expect(gate).toBeLessThan(readyCheck); // the money check runs before the status check
+    expect(fn).toMatch(/if \(paymentMandatory && !o\.paid && Number\(o\.total\) > 0\) \{\s*return \{ ok: false as const, error: "Record payment before collection" \};/);
   });
 });
 

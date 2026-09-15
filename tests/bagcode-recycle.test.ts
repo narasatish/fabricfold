@@ -56,14 +56,14 @@ describe("allocation prefers released codes", () => {
   });
 
   it("jumps a legacy sub-1000 sequence forward instead of colliding with print stock", async () => {
-    // a campus that minted B001–B037 in the 3-digit era must not mint B038
-    // once the owner's B1001-numbered bags exist
-    const tx = fakeTx([], { B: 37 });
+    // a campus that minted 001–037 (any letter) in the 3-digit era must not
+    // mint 038 once the owner's 1001-numbered bags exist
+    const tx = fakeTx([], { shared: 37 });
     expect(await allocateBagCode(tx, "bronze")).toBe("B1001");
   });
 
   it("reuses a released code instead of minting a new one", async () => {
-    const tx = fakeTx([{ code: "B004", status: "released" }], { B: 9 });
+    const tx = fakeTx([{ code: "B004", status: "released" }], { shared: 9 });
     expect(await allocateBagCode(tx, "bronze")).toBe("B004");
   });
 
@@ -82,7 +82,7 @@ describe("allocation prefers released codes", () => {
     const tx = fakeTx([
       { code: "B002", status: "released" },
       { code: "B002", status: "active" },
-    ], { B: 1004 });
+    ], { shared: 1004 });
     expect(await allocateBagCode(tx, "bronze")).toBe("B1005");
   });
 
@@ -90,23 +90,39 @@ describe("allocation prefers released codes", () => {
     /* The owner of a lost code keeps it — they get the same number on a new
        bag, via reissueBagSameCode, which bypasses this allocator entirely.
        What must never happen is the allocator giving that code to somebody else. */
-    const tx = fakeTx([{ code: "B1001", status: "lost" }], { B: 1001 });
+    const tx = fakeTx([{ code: "B1001", status: "lost" }], { shared: 1001 });
     expect(await allocateBagCode(tx, "bronze")).toBe("B1002");
   });
 
   it("never reuses a REPLACED code", async () => {
-    const tx = fakeTx([{ code: "B1001", status: "replaced" }], { B: 1001 });
+    const tx = fakeTx([{ code: "B1001", status: "replaced" }], { shared: 1001 });
     expect(await allocateBagCode(tx, "bronze")).toBe("B1002");
   });
 
-  it("keeps tiers in separate pools", async () => {
-    // a released Bronze code must not be handed out as a Gold one
+  it("a released code is never handed out under a DIFFERENT letter", async () => {
+    // a released Bronze code must not come back as a Gold one — the
+    // recycled-code search is scoped to codes starting with the target
+    // letter, even though the NUMBER sequence itself is shared (below)
     const tx = fakeTx([{ code: "B003", status: "released" }]);
     expect(await allocateBagCode(tx, "gold")).toBe("G1001");
   });
 
+  it("shares ONE number line across every letter — no two bags ever carry the same number", async () => {
+    /* Owner, Sep 2026: "there cant be two 1001 like that so for example
+       S1001, F1002, G1003, F1004... it should be continuous" — matches the
+       owner's own real enrolment sheet (B1001, G1002, B1003, S1005...).
+       Each letter still means its own tier/kind, but a bronze bag and a
+       gold bag minted back to back get CONSECUTIVE numbers, not each
+       restarting from 1001. */
+    const tx = fakeTx([], { shared: 1000 });
+    expect(await allocateBagCode(tx, "silver")).toBe("S1001");
+    expect(await allocateBagCode(tx, "faculty")).toBe("F1002");
+    expect(await allocateBagCode(tx, "gold")).toBe("G1003");
+    expect(await allocateBagCode(tx, "faculty")).toBe("F1004");
+  });
+
   it("recycles walk-in codes too", async () => {
-    const tx = fakeTx([{ code: "W002", status: "released" }], { W: 1008 });
+    const tx = fakeTx([{ code: "W002", status: "released" }], { shared: 1008 });
     expect(await allocateBagCode(tx, "walkin")).toBe("W002");
   });
 

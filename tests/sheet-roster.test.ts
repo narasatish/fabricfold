@@ -22,8 +22,17 @@ describe("the Students roster tab", () => {
     expect(sync).toMatch(/writeSheet\("Students", rows\)/);
     for (const col of ["Customer ID", "Phone", "Type", "Plan", "Cycles left"]) expect(sync).toContain(col);
   });
-  it("shows the ACTIVE bag code as the customer ID, falling back to the app id", () => {
-    expect(sync).toMatch(/st\.bags\[0\]\?\.code \|\| st\.id/);
+  it("shows the ACTIVE bag code as the customer ID, self-healing a missing one instead of falling back to the raw app id", () => {
+    // Used to be `st.bags[0]?.code || st.id` — a student with no bag yet
+    // showed their raw internal id in the owner's own register, the exact
+    // inconsistency the owner asked to have checked ("check whether sheet
+    // and database is matched and synced properly"). Now resolved via
+    // customerIdFor (self-healing, same as every other Customer-ID display
+    // in the app) before rows are built, and studentRow falls back to that
+    // resolved code rather than the id directly.
+    expect(sync).toMatch(/const \{ customerIdFor \} = await import\("\.\/bagcode"\)/);
+    expect(sync).toMatch(/st\.bags\[0\]\?\.code \|\| resolvedCode \|\| st\.id/);
+    expect(sync).not.toMatch(/st\.bags\[0\]\?\.code \|\| st\.id/);
   });
   it("counts faculty separately at the foot", () => {
     expect(sync).toMatch(/"Faculty", students\.filter\(\(x\) => x\.kind === "faculty"\)\.length/);

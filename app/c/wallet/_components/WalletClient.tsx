@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { Sheet } from "@/components/chrome";
 import { Svg } from "@/components/icons";
 import { fmt } from "@/lib/format";
+import { SHOW_GST_UI } from "@/lib/money";
 
 type Plan = {
   id: string; name: string; price: number; gross: number; gstApplies: boolean; gstPct: number;
@@ -46,7 +47,7 @@ export default function WalletClient({ plans, pending }: { plans: Plan[]; pendin
             <span className="pill">{fmt(p.gross)} / yr</span>
           </div>
           <div className="muted mt4" style={{ fontSize: "12px" }}>
-            {p.gstApplies ? `${fmt(p.price)} + ${p.gstPct}% GST` : fmt(p.price)}
+            {SHOW_GST_UI && p.gstApplies ? `${fmt(p.price)} + ${p.gstPct}% GST` : fmt(p.price)}
           </div>
           <div className="mt8">
             {p.buckets.map((b) => (

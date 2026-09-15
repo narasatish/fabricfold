@@ -47,8 +47,10 @@ describe("scenario: subscribed student wants it same-day (the flat urgent fee)",
     const urgent = expressFlatFee("washIron");
     const { total } = computeBill(180, urgent, 18, { usedCycle: true });
     expect(total === 0).toBe(false);
-    // collectOrder blocks while `!paid && total > 0`
-    expect(!false && total > 0).toBe(true);
+    // collectOrder no longer blocks on this (owner, Sep 2026: pay before or
+    // after collection, no restriction) — the point still stands elsewhere:
+    // a nonzero total must not silently auto-flip `paid` to true.
+    expect(total > 0).toBe(true);
   });
 
   it("regression: a cycle order's surcharge is never silently dropped", () => {

@@ -823,7 +823,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
           ) : (
             wiItems.map(([label, price]) => (
               <div key={label} className="between" style={{ padding: "7px 0" }}>
-                <span style={{ fontSize: 14 }}>{label} <span className="muted" style={{ fontSize: 12 }}>₹{price}</span></span>
+                <span style={{ fontSize: 14 }}>{label} <span className="muted" style={{ fontSize: 12 }}>₹{wiExpressPerPiece ? expressItemRate(price) : price}</span></span>
                 <div className="step"><div className="qty">
                   <button onClick={() => setWiQty({ ...wiQty, [label]: Math.max(0, (wiQty[label] || 0) - 1) })}>−</button>
                   <span>{wiQty[label] || 0}</span>

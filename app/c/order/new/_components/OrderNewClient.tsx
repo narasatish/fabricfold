@@ -171,7 +171,7 @@ export default function OrderNewClient({
               <div style={{ flex: 1 }}>
                 <div className="h-sm">{label}</div>
                 <div className="muted" style={{ fontSize: "12.5px" }}>
-                  {fmt(rate)} / piece
+                  {fmt(express && !cycleBased ? expressItemRate(rate) : rate)} / piece
                 </div>
               </div>
               <div className="step">

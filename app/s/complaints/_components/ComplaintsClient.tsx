@@ -22,7 +22,12 @@ type Complaint = {
 export default function StaffComplaintsClient({ complaints, staffRole }: { complaints: Complaint[]; staffRole: number }) {
   const router = useRouter();
   const toast = useToast();
-  const [filter, setFilter] = useState<"open" | "resolved" | "all">("open");
+  /* Defaulted to "open" before, so a complaint a staff member had just
+     resolved themselves would vanish from view the moment they closed it —
+     read as "complaints disappearing" rather than "filtered out". Defaulting
+     to "all" means nothing a staff member just acted on seems to vanish;
+     they can still narrow to "open" or "resolved" with the tabs below. */
+  const [filter, setFilter] = useState<"open" | "resolved" | "all">("all");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [resolveFor, setResolveFor] = useState<Complaint | null>(null);
   const [resText, setResText] = useState("");

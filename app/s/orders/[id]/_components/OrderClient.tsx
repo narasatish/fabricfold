@@ -635,26 +635,30 @@ export default function StaffOrderClient({
         </button>
       )}
 
-      {!isDraft && order.status !== "collected" && (
+      {!isDraft && (
         <>
-          {order.status !== "ready" && (
-            <button className="btn mt16" onClick={handleAdvance} disabled={advanceBusy}>
-              {advanceBusy ? "Processing…" : order.status === "received" ? "Start processing" : order.status === "processing" ? "Mark ready for collection" : "Verify & mark collected"}
-            </button>
+          {order.status !== "collected" && (
+            <>
+              {order.status !== "ready" && (
+                <button className="btn mt16" onClick={handleAdvance} disabled={advanceBusy}>
+                  {advanceBusy ? "Processing…" : order.status === "received" ? "Start processing" : order.status === "processing" ? "Mark ready for collection" : "Verify & mark collected"}
+                </button>
+              )}
+
+              {order.status === "ready" && (
+                <button className="btn mt16" onClick={() => setShowCollectSheet(true)}>
+                  <Svg name="check" size={18} /> Collect order
+                </button>
+              )}
+            </>
           )}
 
-          {order.status === "ready" && (
-            <button className="btn mt16" onClick={() => setShowCollectSheet(true)}>
-              <Svg name="check" size={18} /> Collect order
-            </button>
-          )}
-
-          {/* Gated on MONEY OWING, not on how the order was billed.
-              This used to read `!order.usedCycle`, which hid the button — and
-              with it the only route to the UPI QR — on every cycle order. That
-              was invisible while cycle orders came to ₹0, but a bag over the
-              7 kg allowance (or an urgent cycle premium) owes real money, and
-              there was no way to collect it in the app. */}
+          {/* Gated on MONEY OWING, not on how the order was billed, and NOT
+              on collection status — payment has no timing restriction (owner,
+              Sep 2026: pay before or after collection). This used to also be
+              gated on `status !== "collected"`, which hid the only route to
+              record a payment the moment an order was picked up unpaid —
+              exactly the "pay after" case the rule exists to allow. */}
           {!order.paid && Number(order.total) > 0 && (
             <button className="btn ghost mt10" onClick={() => setShowPaymentSheet(true)}>
               <Svg name="card" size={17} />{" "}

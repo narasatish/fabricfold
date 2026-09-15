@@ -529,6 +529,27 @@ describe("collectOrder can't skip straight from received/processing to collected
   });
 });
 
+describe("collectOrder blocks an unpaid BVRIT order, but not St Mary's", () => {
+  /* Per-college payment-timing rule (owner, Sep 2026): "for bvrit payment
+     is mandatory we cant deliver unless payment is done or recorded unless
+     it is complaint order". St Mary's explicitly keeps the earlier rule
+     (pay before or after collection, no restriction) — this is a
+     college-specific carve-out, not a reversal of that. A free re-do
+     (complaint compensation) is created with paid: true already, so the
+     "unless it is complaint order" exemption falls out of the plain
+     `!o.paid` check with no separate flag needed. */
+  it("checks the order's OWN college — BVRIT only — before the ready-status check", () => {
+    const src = read("lib/actions/orders.ts");
+    const fn = src.slice(src.indexOf("export async function collectOrder"), src.indexOf("export async function payOrder"));
+    const bvritGate = fn.indexOf('college?.name.trim().toUpperCase() === "BVRIT"');
+    const readyCheck = fn.indexOf('if (o.status !== "ready")');
+    expect(bvritGate).toBeGreaterThan(-1);
+    expect(readyCheck).toBeGreaterThan(-1);
+    expect(bvritGate).toBeLessThan(readyCheck); // the money check runs before the status check
+    expect(fn).toMatch(/&& !o\.paid && Number\(o\.total\) > 0\) \{\s*return \{ ok: false as const, error: "Record payment before collection" \};/);
+  });
+});
+
 describe("redoOrder refuses a draft or already-cancelled order", () => {
   it("checks status before creating the free re-do", () => {
     const src = read("lib/actions/orders.ts");

@@ -157,22 +157,32 @@ export async function allocateBagCode(tx: Prisma.TransactionClient, kind: BagKin
 }
 
 /** The Customer ID to show for a student: their active bag's code if they
-    have one, otherwise (BVRIT only) a freshly-minted V-series code issued
-    on the spot.
+    have one, otherwise a freshly-minted code issued on the spot — the
+    letter picked the same way registerStudent()/issueBag/import/
+    wa-register.ts already pick it: FACULTY carry the F series regardless
+    of college or what they've bought (same rule as issueBag — "the letter
+    tells the counter WHO this is"), BVRIT gets V, a subscriber gets their
+    PLAN's tier letter (bronze→B, silver→S, gold→G, per lib/bagcode.ts and
+    the owner's own enrolment sheet — imported bag codes are honoured
+    exactly, this only applies when there truly is no bag row yet).
 
-    registerStudent() and WhatsApp self-registration both issue a V-code up
-    front, but a student created before either of those existed (old seed
-    data, an old signup) has no bag row at all — and displaying student.id
-    for them shows a bare 6-digit number where every other BVRIT student
-    shows "V1001", which reads as two different ID schemes (owner, Sep 2026,
-    reported repeatedly). Every BVRIT student must show a V-code, so this
-    heals the gap the first time any screen asks for their Customer ID,
-    rather than requiring a separate migration. St Mary's has no such
-    fallback — a tierless St Mary's student legitimately has no bag and
-    falls back to student.id (a walk-in with no bag yet is expected there). */
+    A student created before their registration path issued a code (old
+    seed data, an old signup, a subscription activated without ever going
+    through sellSubscription's bag step) has no bag row at all — and
+    displaying student.id for them shows a bare internal number next to
+    every OTHER student's B/S/G/V/F code, which reads as a different, wrong
+    ID scheme (owner, Sep 2026, reported repeatedly: BVRIT V-codes, St
+    Mary's tier codes — "based on the plan chosen St Mary's students get
+    IDs G for gold, S for silver, B for bronze" — and faculty F-codes —
+    "we have given code as F ... it will be same like F1100"). This heals
+    the gap the first time any screen asks for the Customer ID, rather
+    than requiring a separate migration — a true walk-in with neither a
+    BVRIT account, faculty kind, nor an active subscription legitimately
+    has no bag yet and still falls back to student.id, which is correct
+    there. */
 export async function customerIdFor(
   db: typeof import("./db").db,
-  student: { id: string; collegeId: string },
+  student: { id: string; collegeId: string; kind?: string | null },
   collegeName: string | undefined,
 ): Promise<string> {
   const existing = await db.bag.findFirst({
@@ -181,12 +191,25 @@ export async function customerIdFor(
     select: { code: true },
   });
   if (existing) return existing.code;
-  if (collegeName?.trim().toUpperCase() !== "BVRIT") return student.id;
+
+  let kind: BagKind | null = null;
+  if (student.kind === "faculty") {
+    kind = "faculty";
+  } else if (collegeName?.trim().toUpperCase() === "BVRIT") {
+    kind = "bvrit";
+  } else {
+    const sub = await db.subscription.findUnique({
+      where: { studentId: student.id },
+      select: { active: true, planRef: { select: { tier: true } } },
+    });
+    if (sub?.active && isTier(sub.planRef?.tier)) kind = sub.planRef!.tier as Tier;
+  }
+  if (!kind) return student.id;
 
   return db.$transaction(async (tx: Prisma.TransactionClient) => {
-    const code = await allocateBagCode(tx, "bvrit");
+    const code = await allocateBagCode(tx, kind!);
     await tx.bag.create({
-      data: { code, studentId: student.id, tier: null, complimentary: true, issuedBy: "system", status: "active" },
+      data: { code, studentId: student.id, tier: isTier(kind) ? kind : null, complimentary: true, issuedBy: "system", status: "active" },
     });
     return code;
   });

@@ -654,11 +654,18 @@ export default function StaffOrderClient({
           )}
 
           {/* Gated on MONEY OWING, not on how the order was billed, and NOT
-              on collection status — payment has no timing restriction (owner,
-              Sep 2026: pay before or after collection). This used to also be
-              gated on `status !== "collected"`, which hid the only route to
-              record a payment the moment an order was picked up unpaid —
-              exactly the "pay after" case the rule exists to allow. */}
+              on collection status — payment has no timing restriction at
+              St Mary's (owner, Sep 2026: pay before or after collection).
+              BVRIT is the one exception: collectOrder() itself now refuses
+              to collect an unpaid BVRIT order (owner, Sep 2026: "for bvrit
+              payment is mandatory we cant deliver unless payment is done or
+              recorded"), so this button staying visible after "ready" is
+              what lets staff clear that block in place, without a second
+              collection-status-specific payment path to maintain. This used
+              to also be gated on `status !== "collected"`, which hid the
+              only route to record a payment the moment an order was picked
+              up unpaid — exactly the "pay after" case the St Mary's rule
+              exists to allow. */}
           {!order.paid && Number(order.total) > 0 && (
             <button className="btn ghost mt10" onClick={() => setShowPaymentSheet(true)}>
               <Svg name="card" size={17} />{" "}

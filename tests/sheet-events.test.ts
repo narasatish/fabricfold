@@ -112,8 +112,16 @@ describe("customer ID is resolved when the event happens", () => {
     expect(orders).toMatch(/await customerIdFor\(tx, /);
   });
 
-  it("falls back to the internal reference when there is no bag yet", () => {
-    expect(events).toMatch(/return bag\?\.code \?\? studentId/);
+  it("delegates to lib/bagcode.ts's self-healing customerIdFor, not its own copy of the fallback", () => {
+    // Used to have its own inline `return bag?.code ?? studentId` — the same
+    // non-healing fallback the in-app UI screens were fixed to stop using,
+    // meaning the owner's Sheet could show a bare digit id for a student who
+    // simply hadn't had a bag row created yet (owner, Sep 2026: "check sheet
+    // is reflected... well with these codes for both colleges"). Now it
+    // fetches the student and hands off to bagcode.ts's version, which mints
+    // the missing V/B/S/G/F code instead of falling back.
+    expect(events).toMatch(/const \{ customerIdFor: resolve \} = await import\("\.\/bagcode"\)/);
+    expect(events).not.toMatch(/return bag\?\.code \?\? studentId/);
   });
 });
 

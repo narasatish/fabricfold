@@ -38,6 +38,7 @@ export async function registerStudent(input: { name: string; phone: string; coll
   }
   const kind = input.kind === "faculty" ? "faculty" : "student";
   const isBvrit = college.name.trim().toUpperCase() === "BVRIT";
+  const isFaculty = kind === "faculty";
   let stu;
   let bagCode: string | null = null;
   try {
@@ -48,9 +49,16 @@ export async function registerStudent(input: { name: string; phone: string; coll
       // (wa-register.ts) — mirror that here so a BVRIT student added by
       // staff isn't left with no customer ID / bag code (found 2026-09-11:
       // the owner registered a test student this way and got no code).
-      if (isBvrit) {
+      //
+      // Faculty (any college) get an F-series code the same way — they buy
+      // cycle packs at the counter (sellCyclePack), not tiered plans, so
+      // there is no subscription step that would otherwise issue their
+      // bag; without this they'd be left with no customer ID until they
+      // happened to trigger issueBag (owner, Sep 2026: "we have given code
+      // as F ... it will be same like F1100").
+      if (isBvrit || isFaculty) {
         const { allocateBagCode } = await import("../bagcode");
-        const code = await allocateBagCode(tx, "bvrit");
+        const code = await allocateBagCode(tx, isBvrit && !isFaculty ? "bvrit" : "faculty");
         await tx.bag.create({
           data: { code, studentId: created.id, tier: null, complimentary: true, issuedBy: st.id, status: "active" },
         });

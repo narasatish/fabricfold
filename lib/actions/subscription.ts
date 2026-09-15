@@ -13,7 +13,7 @@ import { notifyOwner } from "../mail";
 import { syncBagToPlan } from "./bags";
 import { CYCLE_RATES } from "../money";
 import { featureOn } from "../features";
-import { enqueueSheetEvent, flushSoon, istStamp } from "../sheet-events";
+import { enqueueSheetEvent, customerIdFor, flushSoon, istStamp } from "../sheet-events";
 import { rosterSoon } from "../sheets-sync";
 
 const rid = (n: number) => { let s = ""; for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10); return s; };
@@ -547,8 +547,26 @@ export async function sellCyclePack(
         },
       });
     }
+    /* Row shape must match the "Payments" tab header exactly — [When, Order,
+       Customer ID, Student, Method, Amount, GST, Invoice] (see orders.ts's
+       payCore for the reference shape). This used to pass a completely
+       different, shorter shape (name where "Order" belongs, the pack
+       description where "Customer ID" belongs, price where "Student"
+       belongs…) — every cycle-pack sale landed on the Sheet with its
+       columns shifted and NO customer code at all, exactly the class of bug
+       the owner asked to have checked ("check sheet is reflected
+       simultaneously well with these codes for both colleges"). No GST on a
+       cycle pack (flat rate, no invoice minted — see the comment above), so
+       that column is 0 and Invoice is "—". */
     await enqueueSheetEvent(tx, "payment", [
-      istStamp(), stu.name, `Cycle pack ${cycles}× ${label}`, price, creditApplied > 0 ? (cash > 0 ? `${input.method}+credit` : "credit") : input.method, "—",
+      istStamp(),
+      `Cycle pack ${cycles}× ${label}`,
+      await customerIdFor(tx, studentId),
+      stu.name,
+      creditApplied > 0 ? (cash > 0 ? `${input.method}+credit` : "credit") : input.method,
+      price,
+      0,
+      "—",
     ]);
   }, { timeout: 15_000 }); // advisory lock can queue a concurrent caller past Prisma's 5s default — found 2026-09-11 when this exact scenario threw "commit on expired transaction" under test
 

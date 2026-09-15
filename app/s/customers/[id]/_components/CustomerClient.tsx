@@ -615,99 +615,130 @@ Currently ${current}. Type the code printed on the bag they are being given.
         </div>
       )}
 
-      {/* Orders */}
+      {/* Flexible cycle PACKS — the owner's "6 months x 4 a month" model for
+          faculty (any count — 1, 2, 10, 20…), and a top-up for any student
+          whose plan cycles have run out but the term hasn't. Manager+ takes
+          the money here.
+
+          Deliberately NOT nested inside `orders.length > 0` (bug found
+          2026-09-15 testing a freshly-registered faculty member): a brand
+          new student has zero orders by definition, so nesting this inside
+          that gate made it impossible to ever sell their FIRST cycle pack —
+          they need cycles to place an order, but the only place to buy
+          cycles only appeared after they'd already placed one. The Bag
+          section just below had the exact same bug — staff could not even
+          issue a brand-new student's bag without this split, since "Bag"
+          was nested in the same gate. Only Order history genuinely needs
+          `orders.length > 0` (nothing to list otherwise), so that's the
+          only one still gated on it, standalone, below. */}
+      {staffRole >= 2 && (
+        <>
+          <div className="sec-title mt20">Cycle pack (top-up)</div>
+          <div className="card pad mt10">
+            <div className="row gap8" style={{ flexWrap: "wrap", alignItems: "center" }}>
+              <select className="input" style={{ width: "auto" }} value={packSvc} onChange={(e) => setPackSvc(e.target.value as "washFold" | "washIron")}>
+                <option value="washFold">Wash &amp; Fold · ₹{CYCLE_RATES.washFold}/cycle</option>
+                <option value="washIron">Wash &amp; Iron · ₹{CYCLE_RATES.washIron}/cycle</option>
+              </select>
+              <div className="qty">
+                {/* Any count — 1, 2, 10, 20, whatever a faculty member wants
+                    to pay for at once (owner, Sep 2026: "faculty can buy any
+                    number of cycles even 1, 2, 10, 20 at once"). Was stepped
+                    by 4 only (the owner's OWN "6 months × 4/month" habit,
+                    from the comment above), which meant the +/− buttons
+                    literally could not reach 1, 2, or 10 from the default of
+                    16 — the direct number field is the actual fix; +/− now
+                    step by 1 so they still work for quick nudges. */}
+                <button onClick={() => setPackCycles((c) => Math.max(1, c - 1))}>−</button>
+                <input
+                  type="number"
+                  className="mono"
+                  style={{ width: "56px", textAlign: "center", border: "none", background: "transparent" }}
+                  min={1}
+                  max={200}
+                  value={packCycles}
+                  onChange={(e) => {
+                    const n = Math.floor(Number(e.target.value));
+                    setPackCycles(Number.isFinite(n) ? Math.min(200, Math.max(1, n)) : 1);
+                  }}
+                />
+                <button onClick={() => setPackCycles((c) => Math.min(200, c + 1))}>+</button>
+              </div>
+              <select className="input" style={{ width: "auto" }} value={packMethod} onChange={(e) => setPackMethod(e.target.value as "cash" | "upi")}>
+                <option value="cash">Cash</option>
+                <option value="upi">UPI</option>
+              </select>
+            </div>
+            <div className="muted mt8" style={{ fontSize: 12.5 }}>
+              Any number of cycles, e.g. 6 months × 4/month = 24. Top-ups ADD to unused cycles, never replace them.
+            </div>
+            {student.credits > 0 && (
+              <div className="chip-toggle mt10">
+                <div>
+                  <div className="h-sm">Apply credits</div>
+                  <div className="muted" style={{ fontSize: "12px" }}>{fmt(packCreditCover)}</div>
+                </div>
+                <Switch on={packApplyCredits} onToggle={() => setPackApplyCredits(!packApplyCredits)} />
+              </div>
+            )}
+            <button className="btn mt10" disabled={packBusy} onClick={doSellPack}>
+              {packBusy ? "Recording…" : `Sell ${packCycles} cycles — ₹${packCycles * CYCLE_RATES[packSvc] - (packApplyCredits ? packCreditCover : 0)}${packApplyCredits && packCreditCover > 0 ? " + credit" : ""}`}
+            </button>
+          </div>
+        </>
+      )}
+
+      <div className="sec-title mt20">Bag</div>
+      <div className="card pad mt10">
+        {activeBag ? (
+          <>
+            <div className="between">
+              <span className="h-sm mono" style={{ fontSize: 18 }}>{activeBag.code}</span>
+              <span className="pill">{activeBag.complimentary ? "Complimentary" : fmt(activeBag.price)}</span>
+            </div>
+            <div className="muted mt4" style={{ fontSize: 12 }}>Issued {dateStr(activeBag.issuedAt)}</div>
+            <div className="row gap8 mt12">
+              <button className="btn xs sec" disabled={editBagBusy} onClick={() => doEditBagCode(activeBag.id, activeBag.code)}>{editBagBusy ? "Updating…" : "Change ID"}</button>
+              <button className="btn xs sec" disabled={reissueBusy} onClick={() => doReissue(activeBag.id, activeBag.code)}>{reissueBusy ? "Reissuing…" : "Lost — reissue"}</button>
+              <button className="btn xs sec" disabled={releaseBusy} style={{ color: "var(--red)" }} onClick={() => doReleaseBag(activeBag.id, activeBag.code)}>
+                {releaseBusy ? "Releasing…" : "Student left"}
+              </button>
+            </div>
+            <div className="muted mt8" style={{ fontSize: 11.5 }}>
+              <strong>Lost — reissue</strong> prints a new bag with the same number: {activeBag.code} is
+              their customer ID and stays with them. If the old bag turns up, destroy it rather than
+              returning it to stock. <strong>Student left</strong> is the only action that frees
+              {" "}{activeBag.code} for somebody else.
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="muted" style={{ fontSize: 13 }}>
+              {bagIsFree
+                ? "No bag issued yet — complimentary with their plan."
+                : subscribedNow
+                  ? "No active bag. Issue a replacement below."
+                  : "No active bag. Walk-in bags are sold — the free one comes with a plan."}
+            </div>
+            <button className="btn xs mt12" onClick={() => setShowBag(true)}>
+              <Svg name="plus" size={13} /> {bagIsFree ? "Issue complimentary bag" : "Sell a bag"}
+            </button>
+          </>
+        )}
+        {student.bags.filter((b) => b.status !== "active").length > 0 && (
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
+            {student.bags.filter((b) => b.status !== "active").map((b) => (
+              <div key={b.id} className="kv">
+                <span className="k mono">{b.code}</span>
+                <span className="muted" style={{ fontSize: 12 }}>{b.status} · {dateStr(b.issuedAt)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {student.orders.length > 0 && (
         <>
-          {/* Flexible cycle PACKS — the owner's "6 months x 4 a month" model
-              for faculty, and a top-up for any student whose plan cycles
-              have run out but the term hasn't. Manager+ takes the money here. */}
-          {staffRole >= 2 && (
-            <>
-              <div className="sec-title mt20">Cycle pack (top-up)</div>
-              <div className="card pad mt10">
-                <div className="row gap8" style={{ flexWrap: "wrap", alignItems: "center" }}>
-                  <select className="input" style={{ width: "auto" }} value={packSvc} onChange={(e) => setPackSvc(e.target.value as "washFold" | "washIron")}>
-                    <option value="washFold">Wash &amp; Fold · ₹{CYCLE_RATES.washFold}/cycle</option>
-                    <option value="washIron">Wash &amp; Iron · ₹{CYCLE_RATES.washIron}/cycle</option>
-                  </select>
-                  <div className="qty">
-                    <button onClick={() => setPackCycles((c) => Math.max(1, c - 4))}>−</button>
-                    <span className="mono">{packCycles}</span>
-                    <button onClick={() => setPackCycles((c) => Math.min(200, c + 4))}>+</button>
-                  </div>
-                  <select className="input" style={{ width: "auto" }} value={packMethod} onChange={(e) => setPackMethod(e.target.value as "cash" | "upi")}>
-                    <option value="cash">Cash</option>
-                    <option value="upi">UPI</option>
-                  </select>
-                </div>
-                <div className="muted mt8" style={{ fontSize: 12.5 }}>
-                  e.g. 6 months × 4/month = 24 cycles. Steps of 4 — a month at a time. Top-ups ADD to unused cycles, never replace them.
-                </div>
-                {student.credits > 0 && (
-                  <div className="chip-toggle mt10">
-                    <div>
-                      <div className="h-sm">Apply credits</div>
-                      <div className="muted" style={{ fontSize: "12px" }}>{fmt(packCreditCover)}</div>
-                    </div>
-                    <Switch on={packApplyCredits} onToggle={() => setPackApplyCredits(!packApplyCredits)} />
-                  </div>
-                )}
-                <button className="btn mt10" disabled={packBusy} onClick={doSellPack}>
-                  {packBusy ? "Recording…" : `Sell ${packCycles} cycles — ₹${packCycles * CYCLE_RATES[packSvc] - (packApplyCredits ? packCreditCover : 0)}${packApplyCredits && packCreditCover > 0 ? " + credit" : ""}`}
-                </button>
-              </div>
-            </>
-          )}
-
-          <div className="sec-title mt20">Bag</div>
-          <div className="card pad mt10">
-            {activeBag ? (
-              <>
-                <div className="between">
-                  <span className="h-sm mono" style={{ fontSize: 18 }}>{activeBag.code}</span>
-                  <span className="pill">{activeBag.complimentary ? "Complimentary" : fmt(activeBag.price)}</span>
-                </div>
-                <div className="muted mt4" style={{ fontSize: 12 }}>Issued {dateStr(activeBag.issuedAt)}</div>
-                <div className="row gap8 mt12">
-                  <button className="btn xs sec" disabled={editBagBusy} onClick={() => doEditBagCode(activeBag.id, activeBag.code)}>{editBagBusy ? "Updating…" : "Change ID"}</button>
-                  <button className="btn xs sec" disabled={reissueBusy} onClick={() => doReissue(activeBag.id, activeBag.code)}>{reissueBusy ? "Reissuing…" : "Lost — reissue"}</button>
-                  <button className="btn xs sec" disabled={releaseBusy} style={{ color: "var(--red)" }} onClick={() => doReleaseBag(activeBag.id, activeBag.code)}>
-                    {releaseBusy ? "Releasing…" : "Student left"}
-                  </button>
-                </div>
-                <div className="muted mt8" style={{ fontSize: 11.5 }}>
-                  <strong>Lost — reissue</strong> prints a new bag with the same number: {activeBag.code} is
-                  their customer ID and stays with them. If the old bag turns up, destroy it rather than
-                  returning it to stock. <strong>Student left</strong> is the only action that frees
-                  {" "}{activeBag.code} for somebody else.
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="muted" style={{ fontSize: 13 }}>
-                  {bagIsFree
-                    ? "No bag issued yet — complimentary with their plan."
-                    : subscribedNow
-                      ? "No active bag. Issue a replacement below."
-                      : "No active bag. Walk-in bags are sold — the free one comes with a plan."}
-                </div>
-                <button className="btn xs mt12" onClick={() => setShowBag(true)}>
-                  <Svg name="plus" size={13} /> {bagIsFree ? "Issue complimentary bag" : "Sell a bag"}
-                </button>
-              </>
-            )}
-            {student.bags.filter((b) => b.status !== "active").length > 0 && (
-              <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
-                {student.bags.filter((b) => b.status !== "active").map((b) => (
-                  <div key={b.id} className="kv">
-                    <span className="k mono">{b.code}</span>
-                    <span className="muted" style={{ fontSize: 12 }}>{b.status} · {dateStr(b.issuedAt)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
           <div className="sec-title mt20">Order history</div>
           {student.orders.slice(0, 12).map((o) => (
             <button key={o.id} className="card-btn mt10" onClick={() => router.push(`/s/orders/${o.id}`)}>

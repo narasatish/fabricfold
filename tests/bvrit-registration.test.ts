@@ -322,6 +322,76 @@ describe("customerIdFor self-heals a legacy BVRIT student with no bag", () => {
     expect(id).toBe(walkin.id);
     expect(await db.bag.findFirst({ where: { studentId: walkin.id } })).toBeNull();
   });
+
+  it("mints the PLAN's tier letter for a subscriber with no bag — B/S/G, not a raw id or V", async () => {
+    /* The same bug, same fix, for St Mary's: "based on the plan chosen St
+       Mary's students get IDs G for gold, S for silver, B for bronze...
+       not [a raw digit id]" (owner, Sep 2026). A subscription activated
+       the normal way (lib/actions/subscription.ts) already issues a bag —
+       this covers a subscription that predates that, or was created
+       directly (old seed data, a manual DB fix). */
+    const stMarys = await db.college.findFirst({ where: { name: "St Mary's" } });
+    if (!stMarys) return;
+    const { customerIdFor } = await import("../lib/bagcode");
+
+    const phone = "9876500197";
+    const prior = await db.student.findUnique({ where: { phone } });
+    if (prior) {
+      await db.subscription.deleteMany({ where: { studentId: prior.id } });
+      await db.bag.deleteMany({ where: { studentId: prior.id } });
+      await db.student.delete({ where: { id: prior.id } });
+    }
+    await db.plan.deleteMany({ where: { collegeId: stMarys.id, name: "Test Silver Plan" } });
+    const plan = await db.plan.create({
+      data: { collegeId: stMarys.id, name: "Test Silver Plan", tier: "silver", price: 5500, buckets: [{ service: "washFold", cycles: 20, kgPerCycle: 7 }] },
+    });
+    const subscriber = await db.student.create({
+      data: { id: "999197", phone, name: "Legacy Subscriber, No Bag", collegeId: stMarys.id },
+    });
+    await db.subscription.create({
+      data: { studentId: subscriber.id, active: true, plan: plan.name, planId: plan.id, cyclesTotal: 20, kgPerCycle: 7 },
+    });
+    expect(await db.bag.findFirst({ where: { studentId: subscriber.id } })).toBeNull();
+
+    const id = await customerIdFor(db, subscriber, stMarys.name);
+    expect(id).toMatch(/^S\d{4}$/); // silver → S, never a bare digit id or a V-code
+    expect(id).not.toBe(subscriber.id);
+
+    const bag = await db.bag.findFirst({ where: { studentId: subscriber.id, status: "active" } });
+    expect(bag?.tier).toBe("silver");
+  });
+
+  it("mints an F-code for faculty with no bag, at ANY college, ahead of the BVRIT/tier checks", async () => {
+    /* "for staff in st marys we have given code as F ... it will be same
+       like F1100" (owner, Sep 2026). Faculty carry the F series regardless
+       of college or subscription — same rule issueBag already applies —
+       so this must win even for a BVRIT faculty member, ahead of the V
+       check, and even for a faculty member who also happens to hold a
+       tiered subscription. registerStudent() now issues this bag directly
+       at registration (admin.ts) for any faculty; this covers the same
+       legacy-data gap as the other customerIdFor cases. */
+    const bvrit = await db.college.findFirst({ where: { name: "BVRIT" } });
+    if (!bvrit) return;
+    const { customerIdFor } = await import("../lib/bagcode");
+
+    const phone = "9876500196";
+    const prior = await db.student.findUnique({ where: { phone } });
+    if (prior) {
+      await db.bag.deleteMany({ where: { studentId: prior.id } });
+      await db.student.delete({ where: { id: prior.id } });
+    }
+    const faculty = await db.student.create({
+      data: { id: "999196", phone, name: "Legacy Faculty, No Bag", collegeId: bvrit.id, kind: "faculty" },
+    });
+    expect(await db.bag.findFirst({ where: { studentId: faculty.id } })).toBeNull();
+
+    const id = await customerIdFor(db, faculty, bvrit.name);
+    expect(id).toMatch(/^F\d{4}$/); // faculty → F, not V even though the college is BVRIT
+    expect(id).not.toBe(faculty.id);
+
+    const bag = await db.bag.findFirst({ where: { studentId: faculty.id, status: "active" } });
+    expect(bag?.tier).toBeNull();
+  });
 });
 
 describe("bag code format and parsing", () => {

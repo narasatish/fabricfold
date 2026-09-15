@@ -563,9 +563,20 @@ export async function collectOrder(orderId: string, code: string) {
   const v = (code || "").replace(/[^0-9]/g, "");
   const ok = (otp && v === otp.code) || v === o.id.slice(-4) || v === o.id.replace(/\D/g, "");
   if (!ok) return { ok: false as const, error: "Code / Order ID does not match" };
-  // No payment-timing restriction (owner, explicit correction, Sep 2026):
-  // students and staff can pay before or after collection, their choice —
-  // this used to block collection on an unpaid order, contradicting that.
+  // Payment-timing rule (owner, Sep 2026, college-specific):
+  // "for bvrit payment is mandatory we cant deliver unless payment is done
+  // or recorded unless it is complaint order" — BVRIT ONLY: unpaid orders
+  // with a nonzero total cannot be collected. St Mary's keeps the earlier,
+  // explicit rule ("students and staff can pay before or after delivery, no
+  // restriction") — this is a per-college difference, not a reversal of that
+  // rule. A free re-do (compensation for a complaint) is created with
+  // `paid: true` already (see the redo branch above), so the "unless it is
+  // complaint order" carve-out falls out of the `!o.paid` check on its own —
+  // no separate flag needed.
+  const college = await db.college.findUnique({ where: { id: o.collegeId }, select: { name: true } });
+  if (college?.name.trim().toUpperCase() === "BVRIT" && !o.paid && Number(o.total) > 0) {
+    return { ok: false as const, error: "Record payment before collection" };
+  }
   // Collection is the last step of the lifecycle (received → processing →
   // ready → collected) — every other transition enforces its starting state
   // explicitly, this one didn't, so an order could be marked collected

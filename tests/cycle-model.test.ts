@@ -162,7 +162,12 @@ describe("the screens quote what the server bills", () => {
   it("the pack card exists for any student, Manager+, with the 6-months example", () => {
     const ui = read("app/s/customers/[id]/_components/CustomerClient.tsx");
     expect(ui).toMatch(/\{staffRole >= 2 && \(/);
-    expect(ui).toMatch(/6 months × 4\/month = 24 cycles/);
+    // Copy changed (owner, Sep 2026: "faculty can buy any number of cycles
+    // even 1, 2, 10, 20 at once") — the 6-months figure stays as an example,
+    // but the card no longer implies only multiples of 4 are sellable; the
+    // quantity control itself changed from a stepper limited to steps of 4
+    // to a free-entry number field for exactly this reason.
+    expect(ui).toMatch(/Any number of cycles, e\.g\. 6 months × 4\/month = 24\./);
   });
 });
 

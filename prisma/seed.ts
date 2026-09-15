@@ -81,10 +81,24 @@ async function main() {
     });
   }
 
+  // Linked to a real tiered Plan (not just a name snapshot) so the seed
+  // reproduces what customerIdFor() relies on to self-heal a missing bag
+  // code for a subscriber: Plan.tier → the bag letter (owner, Sep 2026:
+  // "based on the plan chosen St Mary's students get IDs G for gold, S for
+  // silver, B for bronze"). A subscription created without a planId (as
+  // this one was before) has no tier to heal from — exactly the gap that
+  // let a real subscribed student's Customer ID stay a raw internal number.
+  const goldPlan = await db.plan.create({
+    data: {
+      collegeId: c1.id, name: "Annual Plan", tier: "gold", price: 6500,
+      buckets: [{ service: "washIron", cycles: 34, kgPerCycle: 7 }],
+    },
+  });
+
   // Aarav's active subscription with dated cycle log
   const sub = await db.subscription.create({
     data: {
-      studentId: "482913", active: true, plan: "Annual Plan",
+      studentId: "482913", active: true, plan: "Annual Plan", planId: goldPlan.id,
       startedAt: new Date(t0 - 40 * DAY), expiresAt: new Date(t0 + 325 * DAY),
       cyclesTotal: 34, cyclesUsed: 12, kgPerCycle: 7,
     },

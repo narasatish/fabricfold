@@ -58,18 +58,26 @@ export function istStamp(d: Date = new Date()) {
  * attribute a March order to whoever inherited the number in September. The
  * row records who it was on the day.
  *
- * Falls back to the internal reference for students who have no bag yet.
- */
+ * Delegates to lib/bagcode.ts's customerIdFor — the same self-healing logic
+ * the customer/staff UI uses (BVRIT→V, faculty→F, subscriber's plan tier→
+ * B/S/G), so the Sheet never shows a raw internal id for a student who
+ * simply hasn't had a bag row created yet. Before this delegation, this
+ * function had its own copy of the OLD, non-healing fallback (`bag?.code ??
+ * studentId`) — meaning the owner's Sheet could show a bare digit id for
+ * exactly the same students the in-app screens were just fixed to show a
+ * proper code for (owner, Sep 2026: "check sheet is reflected... well with
+ * these codes for both colleges"). */
 export async function customerIdFor(
   client: Prisma.TransactionClient | typeof db,
   studentId: string,
 ): Promise<string> {
-  const bag = await client.bag.findFirst({
-    where: { studentId, status: "active" },
-    orderBy: { issuedAt: "desc" },
-    select: { code: true },
+  const stu = await client.student.findUnique({
+    where: { id: studentId },
+    select: { id: true, collegeId: true, kind: true, college: { select: { name: true } } },
   });
-  return bag?.code ?? studentId;
+  if (!stu) return studentId;
+  const { customerIdFor: resolve } = await import("./bagcode");
+  return resolve(client as typeof db, stu, stu.college?.name);
 }
 
 /**

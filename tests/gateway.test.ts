@@ -171,6 +171,36 @@ describe("payment gateway webhook â€” auto-confirmation", () => {
     expect(await db.invoice.count({ where: { orderId: o.id } })).toBe(0);
   });
 
+  it("two GENUINELY CONCURRENT deliveries of the same capture still land only one payment", async () => {
+    /* The sequential "replaying" test above is caught by the cheap `if
+       (o.paid) return` early exit — it never proves anything about a real
+       race, since the second call always sees the first's committed write.
+       Razorpay explicitly retries webhook deliveries, and two retries CAN
+       arrive concurrently: both read `paid: false` under Postgres's default
+       READ COMMITTED isolation before either commits. For an order that also
+       needs a GST invoice, Invoice.orderId's own unique constraint happens
+       to abort the second transaction — but a noGst order (every cycle-based
+       order, by design) never attempts an invoice at all, so it had no such
+       accident to save it. Found live 2026-09-16: this class of order really
+       did land two Payment rows for one real transaction before
+       payment_gateway_ref_uniq (ensure-guards.mjs) — and Payment.gatewayRef
+       @unique in schema.prisma, added the same day — closed it. Promise.all,
+       not two awaited calls, is what actually exercises the race. */
+    const o = await mkOrder("GWRACE01", { noGst: true });
+    const req = () => signedRequest(capturedEvent(o.id, "pay_RACE_GWRACE01"));
+    const [r1, r2] = await Promise.all([POST(req()), POST(req())]);
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    const bodies = await Promise.all([r1.json(), r2.json()]);
+    // one delivery wins outright, the other reports the duplicate — either
+    // order, since which one commits first is a genuine race
+    expect(bodies.some((b) => b.duplicate === true)).toBe(true);
+
+    expect(await db.payment.count({ where: { orderId: o.id } })).toBe(1);
+    const after = await db.order.findUniqueOrThrow({ where: { id: o.id } });
+    expect(after.paid).toBe(true);
+  });
+
   it("only charges the balance when wallet credit was applied", async () => {
     const o = await mkOrder("GWCREDIT", { creditApplied: 77 });
     await POST(signedRequest(capturedEvent(o.id, "pay_TEST456")));

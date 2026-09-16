@@ -367,7 +367,24 @@ model Payment {
   student    Student? @relation(fields: [studentId], references: [id])
   note       String?
   refundVia  String? // upi | cash | credit (when method = refund)
-  gatewayRef String? // Razorpay payment id when auto-captured
+  // Razorpay payment id when auto-captured. @unique on a nullable column
+  // permits any number of NULLs (cash/credit/other payments all have one) —
+  // Postgres only enforces uniqueness among the non-null values, which is
+  // exactly what's needed here.
+  //
+  // Found 2026-09-16: the webhook route's own comment claimed "the real
+  // defence [against a duplicate delivery] is the unique index on
+  // Payment.gatewayRef" — but no such index existed. Razorpay explicitly
+  // retries webhook deliveries, and two retries landing concurrently would
+  // both pass the route's in-transaction "already paid" check under
+  // Postgres's default READ COMMITTED isolation, both insert a Payment row,
+  // and both succeed — UNLESS the order also happens to need a GST invoice,
+  // in which case Invoice.orderId's real unique constraint accidentally
+  // aborts the second transaction. Any noGst order (every cycle-based order,
+  // by design) has no invoice at all, so it had no such accident to save it
+  // — a real, unguarded double-payment-recording race for exactly those
+  // orders. This constraint makes the route's own claim true.
+  gatewayRef String? @unique
 
   @@index([collegeId, at])
   /**

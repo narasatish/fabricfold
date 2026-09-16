@@ -54,6 +54,13 @@ export async function submitCompensation(input: { studentId: string; orderId?: s
       }
     });
   } catch (e) {
+    // Backstop for the findFirst-inside-the-transaction check above: that read
+    // can lose a genuine concurrent-double-tap race under Read Committed
+    // isolation, but the DB-level compensation_dupe_uniq index (ensure-guards.mjs)
+    // cannot, and reports the same collision here as a P2002.
+    if ((e as { code?: string }).code === "P2002") {
+      return { ok: false as const, error: "This compensation was already issued" };
+    }
     return { ok: false as const, error: (e as Error).message };
   }
 

@@ -255,6 +255,40 @@ try {
       }
     }
   }
+  const compTable = await client.query(
+    `select 1 from information_schema.tables where table_schema=$1 and table_name='Compensation'`, [SCHEMA]);
+  if (compTable.rowCount) {
+    /* submitCompensation's own duplicate guard (a findFirst inside the same
+       $transaction as the create) is a plain read-then-write: under Postgres's
+       default Read Committed isolation, two genuinely concurrent double-taps
+       can both pass that read before either commits. Every other money-writing
+       path in this app (payment_gateway_ref_uniq, order_idem_key_uniq, ...) has
+       a real unique index as the backstop; this one didn't. Applies only when
+       an order or complaint ties the payout to something concrete — a bare
+       "manual" goodwill comp with neither is legitimately repeatable. */
+    const idx = "compensation_dupe_uniq";
+    const hasIdx = await client.query(
+      `select 1 from pg_indexes where schemaname=$1 and indexname=$2`, [SCHEMA, idx]);
+    if (hasIdx.rowCount) {
+      console.log(`[guards] ${SCHEMA}.Compensation.${idx}: already present`);
+    } else {
+      const dupes = await client.query(
+        `select count(*)::int n from (
+           select "studentId", "orderId", "complaintId", kind from "${SCHEMA}"."Compensation"
+           where "orderId" is not null or "complaintId" is not null
+           group by "studentId", "orderId", "complaintId", kind having count(*) > 1
+         ) d`);
+      if (dupes.rows[0].n > 0) {
+        console.warn(`[guards] ${SCHEMA}.Compensation.${idx}: ${dupes.rows[0].n} duplicate group(s) already exist — index NOT added, investigate before real money flows`);
+      } else {
+        await client.query(
+          `CREATE UNIQUE INDEX "${idx}" ON "${SCHEMA}"."Compensation"("studentId", "orderId", "complaintId", kind)
+             WHERE "orderId" IS NOT NULL OR "complaintId" IS NOT NULL`);
+        console.log(`[guards] ${SCHEMA}.Compensation.${idx}: index ADDED`);
+      }
+    }
+  }
+
   /* ---- Row Level Security: ON for every table, with NO policies. ----
 
      Supabase auto-exposes a REST API (PostgREST) over every table, and with

@@ -57,7 +57,7 @@ export default function Contact() {
                 <p style={{ fontSize: 15, color: "var(--ink-2)", lineHeight: 1.6, marginTop: 8 }}>
                   For order-specific help, log in and raise it under Help &amp; complaints — it goes straight to the counter staff and you can follow the conversation in the app.
                 </p>
-                <Link href="/login" className="btn mt16" style={{ width: "auto", padding: "0 22px" }}>Open the app</Link>
+                <Link href="/get" className="btn mt16" style={{ width: "auto", padding: "0 22px" }}>Open the app</Link>
               </div>
             </div>
           </div>

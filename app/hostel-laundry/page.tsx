@@ -185,7 +185,7 @@ export default function HostelLaundry() {
           </p>
           <p>
             If you&apos;re a student or resident at a campus we already serve, the fastest way to start is to{" "}
-            <Link href="/login">log in with your phone number</Link> and pick your campus. If you want to see the mechanics
+            <Link href="/get">get the app and sign in with your phone number</Link>. If you want to see the mechanics
             first, <Link href="/how-it-works">how it works</Link> walks through the whole thing step by step, and our{" "}
             <Link href="/refunds">refunds and compensation policy</Link> spells out exactly what happens if something goes
             wrong.
@@ -197,7 +197,7 @@ export default function HostelLaundry() {
               Book from your room, every garment tagged, collect with a code. See your campus&apos;s rates the moment you
               log in.
             </p>
-            <Link href="/login" className="btn mt16" style={{ width: "auto", padding: "0 26px" }}>Log in to get started</Link>
+            <Link href="/get" className="btn mt16" style={{ width: "auto", padding: "0 26px" }}>Get started</Link>
           </div>
         </div>
       </section>

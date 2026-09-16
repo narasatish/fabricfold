@@ -28,7 +28,7 @@ export default function MarketingShell({ active, children }: { active?: string; 
               <Link key={n.href} href={n.href} className={active === n.href ? "on" : ""}>{n.label}</Link>
             ))}
           </div>
-          <Link href="/login" className="btn sm m-nav-cta">Open the app</Link>
+          <Link href="/get" className="btn sm m-nav-cta">Open the app</Link>
           <MobileNav active={active} />
         </div>
       </nav>
@@ -60,7 +60,7 @@ export default function MarketingShell({ active, children }: { active?: string; 
               <h4>Get in touch</h4>
               <a href={WHATSAPP} target="_blank" rel="noreferrer">WhatsApp {SUPPORT_PHONE_DISPLAY}</a>
               <a href="mailto:support@fabricfold.in">support@fabricfold.in</a>
-              <Link href="/login">Student &amp; staff login</Link>
+              <Link href="/get">Student &amp; staff login</Link>
             </div>
           </div>
           <div className="base">

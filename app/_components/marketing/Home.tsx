@@ -28,7 +28,7 @@ export default function Home() {
             so nothing goes missing and no one waits around wondering when it&apos;s done.
           </p>
           <div className="m-cta">
-            <Link href="/login" className="btn">Open the app</Link>
+            <Link href="/get" className="btn">Open the app</Link>
             <Link href="/partners" className="btn ghost">Bring us to your campus</Link>
           </div>
           <div className="m-proof">

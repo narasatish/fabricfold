@@ -748,6 +748,29 @@ describe("two customer-facing reliability fixes", () => {
   });
 });
 
+describe("sessions last a year, not 30 days, but the epoch kill-switch still works", () => {
+  const src = read("lib/auth.ts");
+
+  it("createSession mints a 365-day token and cookie", () => {
+    expect(src).toMatch(/const SESSION_LIFETIME = "365d"/);
+    expect(src).toMatch(/const SESSION_MAX_AGE = 60 \* 60 \* 24 \* 365/);
+    expect(src).toMatch(/\.setExpirationTime\(SESSION_LIFETIME\)/);
+    expect(src).toMatch(/maxAge: SESSION_MAX_AGE/);
+  });
+
+  it("the WhatsApp claim-cookie TTLs (a different, short-lived mechanism) are untouched", () => {
+    const waLogin = read("lib/actions/wa-login.ts");
+    const waRegister = read("lib/actions/wa-register.ts");
+    expect(waLogin).toMatch(/maxAge: Math\.ceil\(TTL_MS \/ 1000\)/);
+    expect(waRegister).toMatch(/maxAge: Math\.ceil\(TTL_MS \/ 1000\)/);
+  });
+
+  it("deactivation/role-change/sign-out-everywhere still ends access immediately regardless of token life", () => {
+    expect(src).toMatch(/\(s\.epoch \?\? 0\) !== stu\.sessionEpoch/);
+    expect(src).toMatch(/\(s\.epoch \?\? 0\) !== st\.sessionEpoch/);
+  });
+});
+
 describe("assignSubscription's bagError is surfaced to staff, not silently dropped", () => {
   it("CustomerClient reads r.bagError and warns instead of showing a plain success toast", () => {
     const src = read("app/s/customers/[id]/_components/CustomerClient.tsx");
@@ -787,5 +810,106 @@ describe("the daily report cron guards a retry, but never swallows a deliberate 
 
   it("the guard only applies when guardRetries is true", () => {
     expect(src).toMatch(/if \(guardRetries && lastSent/);
+  });
+});
+
+describe("campus QR sign-in pages (Sep 2026): both colleges get one URL that works for staff and customers alike", () => {
+  it("/join/bvrit and /join/stmarys both send an already-logged-in visitor straight to their app", () => {
+    for (const p of ["app/join/bvrit/page.tsx", "app/join/stmarys/page.tsx"]) {
+      const src = read(p);
+      expect(src).toMatch(/if \(s\?\.mode === "customer"\) redirect\("\/c"\)/);
+      expect(src).toMatch(/if \(s\?\.mode === "staff"\) redirect\("\/s"\)/);
+    }
+  });
+
+  it("both pages reuse startWhatsAppLogin/checkWhatsAppLogin UNCHANGED for staff and returning customers — no second copy of that logic, no campus parameter that could scope it wrong", () => {
+    for (const p of ["app/join/bvrit/_components/RegisterForm.tsx", "app/join/stmarys/_components/SignInForm.tsx"]) {
+      const src = read(p);
+      expect(src).toMatch(/import \{ startWhatsAppLogin, checkWhatsAppLogin \} from "@\/lib\/actions\/wa-login"/);
+      // Neither call ever threads a collegeId through — startWhatsAppLogin takes
+      // only a customer/staff mode, so an Admin (collegeId: null on their Staff
+      // row) signing in from either campus page still gets full cross-campus
+      // access, exactly as if they'd used /login.
+      expect(src).not.toMatch(/startWhatsAppLogin\([^)]*collegeId/);
+    }
+  });
+
+  it("BVRIT's registration form offers a 'sign in instead' fallback when the phone is already registered, rather than a dead end", () => {
+    const src = read("app/join/bvrit/_components/RegisterForm.tsx");
+    expect(src).toMatch(/sign in instead/i);
+    expect(src).toMatch(/showSignInOffer/);
+    expect(src).toMatch(/handleWhatsAppSignIn\("customer"\)/);
+  });
+
+  it("St Mary's page has no self-registration path — it only ever calls startWhatsAppLogin, matching the counter-only registration model", () => {
+    const src = read("app/join/stmarys/_components/SignInForm.tsx");
+    expect(src).not.toMatch(/startWhatsAppRegister/);
+    expect(src).toMatch(/Visit your campus counter to get registered/);
+  });
+
+  it("both pages offer a staff-mode toggle using the same corner-link pattern as /login", () => {
+    for (const p of ["app/join/bvrit/_components/RegisterForm.tsx", "app/join/stmarys/_components/SignInForm.tsx"]) {
+      const src = read(p);
+      expect(src).toMatch(/Staff sign-in/);
+      expect(src).toMatch(/startWhatsAppLogin\(/);
+    }
+  });
+
+  it("public marketing CTAs point at /get (install-first), not directly at /login — /login is hidden from discovery but still reachable", () => {
+    const marketingFiles = [
+      "app/_components/marketing/Shell.tsx",
+      "app/_components/marketing/MobileNav.tsx",
+      "app/_components/marketing/Home.tsx",
+      "app/contact/page.tsx",
+      "app/hostel-laundry/page.tsx",
+      "app/how-it-works/page.tsx",
+    ];
+    for (const p of marketingFiles) {
+      const src = read(p);
+      expect(src).not.toMatch(/href="\/login"/);
+    }
+    // /get itself still offers /login as InstallButton's launch-the-installed-app
+    // fallback, and now also links to both campus sign-in pages directly.
+    const getPage = read("app/get/page.tsx");
+    expect(getPage).toMatch(/href="\/join\/bvrit"/);
+    expect(getPage).toMatch(/href="\/join\/stmarys"/);
+  });
+});
+
+describe("sessions extended to 1 year (Sep 2026, owner: 'should stay until user logout')", () => {
+  // Covered in the "sessions last a year" describe block above (lib/auth.ts);
+  // this block locks in the campus-page-specific angle: neither new page
+  // mints its own session or duplicates createSession's expiry logic.
+  it("neither campus page calls createSession directly — session minting stays centralized in wa-login.ts/wa-register.ts", () => {
+    for (const p of ["app/join/bvrit/_components/RegisterForm.tsx", "app/join/stmarys/_components/SignInForm.tsx"]) {
+      expect(read(p)).not.toMatch(/createSession/);
+    }
+  });
+});
+
+describe("account erasure now refreshes the Sheet roster immediately, matching registration's own behavior", () => {
+  const src = read("lib/actions/privacy.ts");
+
+  it("imports rosterSoon from the same module registerStudent uses", () => {
+    expect(src).toMatch(/import \{ rosterSoon \} from "\.\.\/sheets-sync"/);
+  });
+
+  it("eraseMyData (self-service) calls rosterSoon after anonymising", () => {
+    const fn = src.slice(src.indexOf("export async function eraseMyData"), src.indexOf("export async function eraseStudentData"));
+    const anonAt = fn.indexOf("anonymisedFields(stu.id)");
+    const rosterAt = fn.indexOf("rosterSoon()");
+    expect(rosterAt).toBeGreaterThan(anonAt); // fires AFTER the write commits
+  });
+
+  it("eraseStudentData (staff/Admin) calls rosterSoon after anonymising", () => {
+    const fn = src.slice(src.indexOf("export async function eraseStudentData"));
+    const anonAt = fn.indexOf("anonymisedFields(stu.id)");
+    const rosterAt = fn.indexOf("rosterSoon()");
+    expect(rosterAt).toBeGreaterThan(anonAt);
+  });
+
+  it("writeStudentsTab already excludes anonymised rows — the fix was purely about WHEN that takes effect, not what it excludes", () => {
+    const sync = read("lib/sheets-sync.ts");
+    expect(sync).toMatch(/where: \{ anonymisedAt: null \}/);
   });
 });

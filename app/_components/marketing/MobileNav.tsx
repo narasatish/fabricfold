@@ -26,7 +26,7 @@ export default function MobileNav({ active }: { active?: string }) {
             {NAV.map((n) => (
               <Link key={n.href} href={n.href} className={active === n.href ? "on" : ""} onClick={() => setOpen(false)}>{n.label}</Link>
             ))}
-            <Link href="/login" className="btn" onClick={() => setOpen(false)} style={{ marginTop: 8 }}>Open the app</Link>
+            <Link href="/get" className="btn" onClick={() => setOpen(false)} style={{ marginTop: 8 }}>Open the app</Link>
           </div>
         </>
       )}

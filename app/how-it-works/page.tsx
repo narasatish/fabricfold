@@ -71,7 +71,7 @@ export default function HowItWorks() {
                 <p style={{ fontSize: 15, color: "var(--ink-2)", lineHeight: 1.6, marginTop: 8 }}>
                   Your campus&apos;s exact rate card lives inside the app — you&apos;ll see it once you log in and select your college or community, because pricing is set per site.
                 </p>
-                <Link href="/login" className="btn mt16" style={{ width: "auto", padding: "0 22px" }}>Log in to see your rates</Link>
+                <Link href="/get" className="btn mt16" style={{ width: "auto", padding: "0 22px" }}>Get the app to see your rates</Link>
               </div>
             </div>
           </div>

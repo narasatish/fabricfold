@@ -32,11 +32,17 @@ export default function GetAppPage() {
 
         <PlatformInstructions />
 
-        <Link className="btn mt16" href="/login">
-          Sign in now
-        </Link>
+        <div className="mt16" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <Link className="btn" href="/join/bvrit">
+            Sign in — BVRIT
+          </Link>
+          <Link className="btn sec" href="/join/stmarys">
+            Sign in — St Mary&apos;s
+          </Link>
+        </div>
         <p className="muted mt12" style={{ fontSize: 12.5 }}>
-          Not registered yet? Visit your campus counter first — it takes a minute.
+          Not registered yet at St Mary&apos;s? Visit your campus counter first — it takes a minute.
+          BVRIT students can register instantly on the BVRIT button above.
         </p>
       </div>
     </div>

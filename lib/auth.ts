@@ -9,10 +9,21 @@ export type Session =
   | { mode: "customer"; studentId: string; epoch?: number }
   | { mode: "staff"; staffId: string; role: number; epoch?: number };
 
+// Owner, Sep 2026: "once students logged in it should stay until user
+// logout" — a signed-in device should keep working for the long haul, not
+// quietly bounce someone to /login weeks later. 365d rather than something
+// unbounded: the JWT still carries a real expiry (a forever-valid token is a
+// forever-valid credential if it's ever intercepted), and requireStaff/
+// requireStudent already re-check the DB on every request — deactivation,
+// a role change, or "sign out everywhere" (sessionEpoch) still end access
+// immediately regardless of how much of the year is left on the token.
+const SESSION_LIFETIME = "365d";
+const SESSION_MAX_AGE = 60 * 60 * 24 * 365;
+
 export async function createSession(s: Session) {
   const jwt = await new SignJWT(s as unknown as Record<string, unknown>)
     .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime("30d")
+    .setExpirationTime(SESSION_LIFETIME)
     .sign(SECRET);
   const jar = await cookies();
   jar.set(COOKIE, jwt, {
@@ -20,7 +31,7 @@ export async function createSession(s: Session) {
     sameSite: "lax",              // not sent on cross-site POSTs (CSRF hardening)
     secure: process.env.NODE_ENV === "production", // HTTPS-only in production
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: SESSION_MAX_AGE,
   });
 }
 

@@ -19,6 +19,7 @@
 import { db } from "../db";
 import { requireStudent, requireStaff, assertSameCollege, clearSession } from "../auth";
 import { audit } from "../notify";
+import { rosterSoon } from "../sheets-sync";
 
 /** Everything held about the signed-in student, as plain JSON. */
 export async function exportMyData() {
@@ -106,6 +107,13 @@ export async function eraseMyData(confirmation: string) {
   });
 
   await audit("Data erased (student request)", `student ${stu.id} anonymised`, "self-service");
+  // Found live 2026-09-16: registerStudent (ADD) already calls this for an
+  // immediate roster refresh, but erasure (DELETE) never did — an erased
+  // account kept showing its old name in the owner's Sheet register for up
+  // to an hour, until the next scheduled cron-sheets-sync run caught up.
+  // writeStudentsTab already excludes anonymised rows correctly; the gap
+  // was purely in WHEN that exclusion took effect.
+  rosterSoon();
   await clearSession();
   return { ok: true as const };
 }
@@ -141,5 +149,6 @@ export async function eraseStudentData(studentId: string, reason: string) {
   });
 
   await audit("Data erased (staff)", `${stu.name} (${stu.id}) anonymised — ${note}`, st.id);
+  rosterSoon();
   return { ok: true as const };
 }

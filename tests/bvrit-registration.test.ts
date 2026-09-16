@@ -393,6 +393,41 @@ describe("customerIdFor self-heals a legacy BVRIT student with no bag", () => {
     const bag = await db.bag.findFirst({ where: { studentId: faculty.id, status: "active" } });
     expect(bag?.tier).toBeNull();
   });
+
+  it("does NOT re-mint a code for a student whose bag was deliberately released — falls back to student.id", async () => {
+    /* Found live 2026-09-16: releasing a bag (Student left) puts a student
+       into exactly the same "no active bag" state the self-heal above
+       exists to fix — and the OLD code couldn't tell the two apart, so the
+       very next screen that resolved this student's Customer ID (their own
+       profile re-rendering after the release) silently re-minted them a
+       fresh bag seconds later, burning a new code on someone who had just
+       been released and defeating the entire point of "Student left" (see
+       lib/bagcode.ts's own module comment: "RECYCLED, but only
+       deliberately... Reuse happens only through that explicit release").
+       The fix: only self-heal when the student has NO bag row at all, ever
+       — a released row (even with no active bag) means this state is
+       deliberate and must be left alone. */
+    const college = await db.college.findFirst({ where: { name: "BVRIT" } });
+    if (!college) return;
+    const { customerIdFor } = await import("../lib/bagcode");
+
+    const phone = "9876500195";
+    const prior = await db.student.findUnique({ where: { phone } });
+    if (prior) {
+      await db.bag.deleteMany({ where: { studentId: prior.id } });
+      await db.student.delete({ where: { id: prior.id } });
+    }
+    const left = await db.student.create({
+      data: { id: "999195", phone, name: "Released BVRIT Student", collegeId: college.id },
+    });
+    await db.bag.create({
+      data: { code: "V9195", studentId: left.id, complimentary: true, issuedBy: "test", status: "released", releasedAt: new Date() },
+    });
+
+    const id = await customerIdFor(db, left, college.name);
+    expect(id).toBe(left.id); // NOT a freshly minted V-code
+    expect(await db.bag.findFirst({ where: { studentId: left.id, status: "active" } })).toBeNull();
+  });
 });
 
 describe("bag code format and parsing", () => {

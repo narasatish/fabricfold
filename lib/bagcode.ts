@@ -200,6 +200,22 @@ export async function customerIdFor(
   });
   if (existing) return existing.code;
 
+  /* Found live 2026-09-16: this used to auto-mint for ANY student with no
+     ACTIVE bag, which does not distinguish "never had a code" (the real gap
+     this heal exists for) from "a Manager deliberately released their code
+     because the student left" — releaseBagCode leaves exactly this state on
+     purpose. A departed student's profile re-rendering (router.refresh()
+     after the release) called this function, saw no active bag, and
+     immediately re-minted them a fresh one — burning a new code on someone
+     who was just released, seconds after release, defeating the entire
+     point of "Student left" and silently reactivating an account that was
+     meant to free its slot. Only heal when the student has NO bag row at
+     all, ever (truly never touched by the code system) — any row, even a
+     released/lost one, means this state is deliberate and must not be
+     auto-corrected. */
+  const everHadABag = await db.bag.findFirst({ where: { studentId: student.id }, select: { id: true } });
+  if (everHadABag) return student.id;
+
   let kind: BagKind | null = null;
   if (student.kind === "faculty") {
     kind = "faculty";

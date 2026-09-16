@@ -117,3 +117,54 @@ describe("bulk cycle-selling actions respect a college's per-piece rates overrid
     if (!assignResult.ok) expect(assignResult.error).toMatch(/BVRIT bills per piece/);
   });
 });
+
+describe("sellCyclePack does not corrupt a subscription that predates the bucket model", () => {
+  /* Found live 2026-09-16: a subscription tracked the OLD way — flat
+     cyclesTotal/cyclesUsed, buckets empty — is a real, reachable state
+     (walkInOrder's own consumption check has a fallback branch for exactly
+     this). sellCyclePack used to compute cyclesTotal as ONLY the sum of the
+     fresh bucket array it was about to write, discarding the real
+     cyclesTotal — a student with a real 34-cycle plan (20 used) who bought
+     a 2-cycle top-up ended up with cyclesTotal=2 while cyclesUsed stayed at
+     20, an invalid state. The plan's real NAME was overwritten to "Cycle
+     pack — X" too, as if the named plan had been replaced by a walk-up
+     pack. */
+  it("preserves cyclesTotal, cyclesUsed, and the plan name for a bucket-less (legacy) subscription", async () => {
+    await db.student.create({ data: { id: "444444", phone: "9999900004", name: "Legacy Plan Student", collegeId: "cyclebased", credits: 0 } });
+    await db.subscription.create({
+      data: { studentId: "444444", active: true, plan: "Annual Plan", cyclesTotal: 34, cyclesUsed: 20, buckets: [], kgPerCycle: 7 },
+    });
+
+    await loginAs("staffcb");
+    const r = await sub.sellCyclePack("444444", { service: "washFold", cycles: 2, method: "cash" });
+    expect(r.ok).toBe(true);
+
+    const after = await db.subscription.findUniqueOrThrow({ where: { studentId: "444444" } });
+    expect(after.plan).toBe("Annual Plan"); // NOT renamed to "Cycle pack — Wash & Fold"
+    expect(after.cyclesTotal).toBe(36); // 34 + 2, NOT reset to 2
+    expect(after.cyclesUsed).toBe(20); // untouched — cyclesUsed must never exceed cyclesTotal
+    expect((after.buckets as unknown[]).length).toBe(0); // stays in flat-counter mode, not force-migrated
+  });
+
+  it("a subscription that already uses buckets still adds to them normally (unaffected by the legacy-mode fix)", async () => {
+    await db.student.create({ data: { id: "555555", phone: "9999900005", name: "Bucketed Student", collegeId: "cyclebased", credits: 0 } });
+    await db.subscription.create({
+      data: {
+        studentId: "555555", active: true, plan: "Silver",
+        buckets: [{ service: "washFold", cycles: 10, used: 3, kgPerCycle: 7 }],
+        cyclesTotal: 10, cyclesUsed: 3, kgPerCycle: 7,
+      },
+    });
+
+    await loginAs("staffcb");
+    const r = await sub.sellCyclePack("555555", { service: "washFold", cycles: 5, method: "cash" });
+    expect(r.ok).toBe(true);
+
+    const after = await db.subscription.findUniqueOrThrow({ where: { studentId: "555555" } });
+    expect(after.plan).toBe("Silver"); // named plan preserved here too
+    const buckets = after.buckets as { service: string; cycles: number; used: number }[];
+    expect(buckets.find((b) => b.service === "washFold")?.cycles).toBe(15); // 10 + 5
+    expect(buckets.find((b) => b.service === "washFold")?.used).toBe(3); // usage untouched
+    expect(after.cyclesTotal).toBe(15);
+  });
+});

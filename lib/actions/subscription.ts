@@ -517,11 +517,33 @@ export async function sellCyclePack(
        on studentId, which works whether or not the row exists. */
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`subscription|${studentId}`}))`;
     const existing = await tx.subscription.findUnique({ where: { studentId } });
-    const buckets: Bucket[] = ((existing?.buckets as unknown as Bucket[] | null) ?? []).map((b) => ({ ...b }));
-    const idx = buckets.findIndex((b) => b.service === input.service);
-    if (idx >= 0) buckets[idx] = { ...buckets[idx], cycles: buckets[idx].cycles + cycles };
-    else buckets.push({ service: input.service, cycles, used: 0, kgPerCycle: 5 });
-    const cyclesTotal = buckets.reduce((n, b) => n + b.cycles, 0);
+    const existingBuckets = (existing?.buckets as unknown as Bucket[] | null) ?? [];
+    /* Found live 2026-09-16: a subscription with cycles tracked the OLD way
+       — flat cyclesTotal/cyclesUsed, no buckets array — is a real, reachable
+       state (walkInOrder's own consumption check has a fallback branch for
+       exactly this: `if (buckets && buckets.length) {...} else { check
+       cyclesUsed against cyclesTotal }`, so the app already treats "no
+       buckets" as a supported mode, not a data error). This function used
+       to compute cyclesTotal as ONLY the sum of the bucket array it was
+       about to write, discarding whatever cyclesTotal already held — a
+       student with a real 34-cycle Annual Plan (20 used) who bought a
+       2-cycle top-up ended up with cyclesTotal=2 while cyclesUsed stayed at
+       20, an invalid state that looks like they've used 18 cycles more
+       than they have. Their existing allocation was never per-service
+       tracked, so there is no honest way to split it into the new bucket —
+       the safe fix is to leave a bucket-less subscription in flat-counter
+       mode and just extend the total, rather than lossily "upgrading" it
+       to buckets on their behalf. */
+    const wasBucketless = existingBuckets.length === 0 && Number(existing?.cyclesTotal ?? 0) > 0;
+    const buckets: Bucket[] = existingBuckets.map((b) => ({ ...b }));
+    if (!wasBucketless) {
+      const idx = buckets.findIndex((b) => b.service === input.service);
+      if (idx >= 0) buckets[idx] = { ...buckets[idx], cycles: buckets[idx].cycles + cycles };
+      else buckets.push({ service: input.service, cycles, used: 0, kgPerCycle: 5 });
+    }
+    const cyclesTotal = wasBucketless
+      ? Number(existing!.cyclesTotal) + cycles
+      : buckets.reduce((n, b) => n + b.cycles, 0);
 
     await tx.subscription.upsert({
       where: { studentId },
@@ -530,7 +552,17 @@ export async function sellCyclePack(
         buckets: buckets as unknown as object, cyclesTotal, kgPerCycle: 5, startedAt: new Date(),
       },
       update: {
-        active: true, plan: existing?.plan?.startsWith("Cycle pack") ? existing.plan : `Cycle pack — ${label}`,
+        active: true,
+        // ANY existing subscription — bucket-based or not — keeps its real
+        // name. Found live 2026-09-16 alongside the cyclesTotal bug above:
+        // this used to rename EVERY top-up target to "Cycle pack — X"
+        // unless the name already started with "Cycle pack", so a tiered
+        // Bronze/Silver/Gold subscriber (assignSubscription always
+        // populates buckets, so this wasn't limited to the bucket-less
+        // case) buying extra cycles had their real plan name overwritten
+        // too. Only a brand-new subscription (the `create` branch, no
+        // existing row at all) gets the generic "Cycle pack — X" name.
+        plan: existing?.plan ?? `Cycle pack — ${label}`,
         buckets: buckets as unknown as object, cyclesTotal,
         cancelledAt: null, cancelledReason: null, cancelledBy: null,
       },

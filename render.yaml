@@ -229,3 +229,68 @@ services:
           type: web
           name: fabricfold
           property: hostport
+
+  # In-app watchdog (2026-09-16): every 5 minutes, not once a day like
+  # cron-error-digest above — a real server exception at 2am should reach the
+  # Owner within minutes, not wait for the 6am rollup. Marks what it reports
+  # `seen`, so the daily digest doesn't repeat it.
+  - type: cron
+    name: cron-watchdog
+    runtime: node
+    plan: starter
+    region: singapore
+    schedule: "*/5 * * * *"
+    buildCommand: "echo no build needed"
+    startCommand: 'curl -sf -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/watchdog"'
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+      - key: APP_URL
+        fromService:
+          type: web
+          name: fabricfold
+          property: hostport
+
+  # External uptime probe (2026-09-16): deliberately does NOT call into the
+  # app at all for the alert itself — every OTHER cron above depends on the
+  # app being up to do anything, including cron-watchdog just above, whose
+  # own endpoint is unreachable in exactly the scenario ("the app is fully
+  # down") that matters most. This one emails Resend directly with curl, so
+  # it still fires when fabricfold.in itself is completely unreachable.
+  # RESEND_API_KEY/MAIL_FROM/OWNER_EMAIL are the same secrets the app's own
+  # lib/mail.ts uses — set once in the Render dashboard, reused here.
+  - type: cron
+    name: cron-uptime-watchdog
+    runtime: node
+    plan: starter
+    region: singapore
+    schedule: "*/5 * * * *"
+    buildCommand: "echo no build needed"
+    startCommand: |
+      sh -c '
+        if curl -sf --max-time 15 -o /dev/null "$APP_URL/login"; then
+          exit 0
+        fi
+        if [ -z "$RESEND_API_KEY" ] || [ -z "$OWNER_EMAIL" ]; then
+          echo "fabricfold.in/login did not respond, and RESEND_API_KEY/OWNER_EMAIL are not set — cannot alert"
+          exit 1
+        fi
+        curl -s -X POST https://api.resend.com/emails \
+          -H "Authorization: Bearer $RESEND_API_KEY" \
+          -H "Content-Type: application/json" \
+          -d "{\"from\":\"${MAIL_FROM:-FabricFold <onboarding@resend.dev>}\",\"to\":[\"$OWNER_EMAIL\"],\"subject\":\"FabricFold: site not responding\",\"text\":\"fabricfold.in/login did not return 200 within 15 seconds. Check the Render dashboard now: https://dashboard.render.com\"}" \
+          -o /dev/null
+        exit 1
+      '
+    envVars:
+      - key: APP_URL
+        fromService:
+          type: web
+          name: fabricfold
+          property: hostport
+      - key: RESEND_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: OWNER_EMAIL
+        sync: false

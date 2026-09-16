@@ -120,12 +120,33 @@ export async function topUpCredits(studentId: string, amount: number, method: "c
   if (!stu) return { ok: false as const, error: "Student not found" };
   assertSameCollege(st, stu.collegeId);
 
-  await db.$transaction(async (tx) => {
-    await tx.student.update({ where: { id: studentId }, data: { credits: { increment: amount } } });
-    await tx.payment.create({ data: { method, amount, collegeId: stu.collegeId, studentId, note: "Wallet top-up" } });
-    // appears in the student's wallet ledger as money added
-    await tx.compensation.create({ data: { studentId, kind: "topup", amount, method: "credit", comment: `Top-up (${method})`, by: st.id } });
-  });
+  try {
+    await db.$transaction(async (tx) => {
+      /* Unlike every other money-writing action in this file (clockIn,
+         clockOut, closeDay), a top-up has no natural key to hang a real
+         unique index on — the SAME student legitimately tops up the SAME
+         amount by the SAME method more than once in a day, so a blanket
+         constraint would block genuine repeats. But a double-tap (or a
+         retried request on a flaky counter connection) lands within
+         moments of the same STAFF MEMBER's own click — something a second,
+         later, genuine top-up from that staff member essentially never
+         does. Lock on studentId (same technique as bags.ts's bag-issue
+         lock) and refuse an identical top-up from the same staff member
+         inside a short window, closing the double-tap gap other money
+         paths get from a unique index, without blocking a real repeat. */
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`topup|${studentId}`}))`;
+      const recent = await tx.payment.findFirst({
+        where: { studentId, method, amount, note: "Wallet top-up", at: { gte: new Date(Date.now() - 10_000) } },
+      });
+      if (recent) throw new Error("This top-up was just recorded — check the wallet before adding it again");
+      await tx.student.update({ where: { id: studentId }, data: { credits: { increment: amount } } });
+      await tx.payment.create({ data: { method, amount, collegeId: stu.collegeId, studentId, note: "Wallet top-up" } });
+      // appears in the student's wallet ledger as money added
+      await tx.compensation.create({ data: { studentId, kind: "topup", amount, method: "credit", comment: `Top-up (${method})`, by: st.id } });
+    });
+  } catch (e) {
+    return { ok: false as const, error: (e as Error).message };
+  }
   await audit("Wallet top-up", `${stu.name} · ₹${amount} (${method})`, st.id);
   void notifyOwner("Wallet top-up", `${stu.name} added ₹${amount} by ${method.toUpperCase()} (taken by ${st.name}).`);
   return { ok: true as const };

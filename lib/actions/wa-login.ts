@@ -138,6 +138,14 @@ export async function checkWhatsAppLogin(code: string) {
   });
   if (won.count !== 1) return { ok: false as const, status: "claimed" as const, error: "That sign-in was already used — start again." };
 
+  // Same fix as verifyOtp (lib/actions/auth.ts, found live 2026-09-16): a
+  // WhatsApp sign-in proves phone possession at least as strongly as OTP
+  // does, so a stale passcode lockout must not survive it — leaving it
+  // armed only punishes the legitimate owner's next passcode attempt for
+  // no remaining security benefit.
+  if (stu.pwFailedAttempts || stu.pwLockedUntil) {
+    await db.student.update({ where: { id: stu.id }, data: { pwFailedAttempts: 0, pwLockedUntil: null } });
+  }
   await createSession({ mode: "customer", studentId: stu.id, epoch: stu.sessionEpoch });
   /* Same record as every other sign-in path — the login is the event that
      starts every other event, so it must not be invisible in the audit log. */

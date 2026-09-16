@@ -119,3 +119,40 @@ describe("loginWithPasscode's failed-attempt counter can't be evaded by concurre
     expect(correct.ok).toBe(true);
   });
 });
+
+describe("a stronger sign-in channel clears a stale passcode lockout (found live 2026-09-16)", () => {
+  /* verifyOtp's own next comment calls OTP "the root of trust: it proves
+     possession of the phone, which is the only thing we can actually
+     verify. A passcode is a convenience on top." loginWithPasscode already
+     clears pwFailedAttempts/pwLockedUntil the moment its OWN success path
+     runs — but verifyOtp's success path left a lockout armed even for the
+     SAME student who had just proven their identity through the stronger
+     channel, needlessly blocking their next passcode attempt (possibly on
+     another device) for up to LOCKOUT_MS more. Someone who can complete
+     OTP is not the attacker the lockout exists to slow down, so clearing
+     it costs nothing in security. */
+  it("a successful OTP sign-in clears an existing passcode lockout", async () => {
+    await mkStudentWithPasscode("999903", "9999900903", "5218");
+    await db.student.update({ where: { id: "999903" }, data: { pwFailedAttempts: 3, pwLockedUntil: new Date(Date.now() + 10 * 60_000) } });
+
+    await db.otp.create({ data: { phone: "9999900903", purpose: "login", code: "482913", expiresAt: new Date(Date.now() + 5 * 60_000) } });
+    const r = await authActions.verifyOtp("9999900903", "482913", "customer");
+    expect(r.ok).toBe(true);
+
+    const stu = await db.student.findUniqueOrThrow({ where: { id: "999903" } });
+    expect(stu.pwFailedAttempts).toBe(0);
+    expect(stu.pwLockedUntil).toBeNull();
+  });
+
+  it("a WRONG OTP does NOT clear the lockout — only a successful sign-in does", async () => {
+    await mkStudentWithPasscode("999904", "9999900904", "6329");
+    await db.student.update({ where: { id: "999904" }, data: { pwFailedAttempts: 4, pwLockedUntil: new Date(Date.now() + 10 * 60_000) } });
+
+    await db.otp.create({ data: { phone: "9999900904", purpose: "login", code: "111222", expiresAt: new Date(Date.now() + 5 * 60_000) } });
+    const r = await authActions.verifyOtp("9999900904", "000000", "customer");
+    expect(r.ok).toBe(false);
+
+    const stu = await db.student.findUniqueOrThrow({ where: { id: "999904" } });
+    expect(stu.pwLockedUntil).not.toBeNull(); // still locked — a failed guess proves nothing
+  });
+});

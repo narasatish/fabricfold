@@ -398,6 +398,20 @@ export async function verifyOtp(
     return { ok: false as const, error: "This number isn't registered yet — please visit the counter to be registered." };
   }
   await db.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
+  /* Found live 2026-09-16: a passcode lockout (loginWithPasscode's own
+     brute-force defense) stayed in place even after the SAME student signed
+     in successfully via OTP moments later — a channel this file's own next
+     comment calls "the root of trust," proving phone possession more
+     directly than a 4-digit passcode does. Someone who can complete OTP
+     is not the attacker the lockout exists to slow down, so leaving it
+     armed serves no security purpose — it only punishes the legitimate
+     owner on their next passcode attempt, possibly on another device,
+     for up to 15 more minutes. loginWithPasscode already clears stale
+     lockout state on its own success; OTP success is at least as strong
+     a proof and deserves the same treatment. */
+  if (stu.pwFailedAttempts || stu.pwLockedUntil) {
+    await db.student.update({ where: { id: stu.id }, data: { pwFailedAttempts: 0, pwLockedUntil: null } });
+  }
   await createSession({ mode: "customer", studentId: stu.id, epoch: stu.sessionEpoch });
   await recordSignIn("student", stu.id, stu.name, "otp");
   return { ok: true as const };

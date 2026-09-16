@@ -771,3 +771,21 @@ describe("/s/audit redirects a too-junior staff member instead of crashing", () 
     expect(src).toMatch(/if \(staff\.role < 3\) redirect\("\/s"\)/);
   });
 });
+
+describe("the daily report cron guards a retry, but never swallows a deliberate manual send", () => {
+  const src = read("app/api/report/daily/route.ts");
+
+  it("the cron GET path passes guardRetries=true", () => {
+    const fn = src.slice(src.indexOf("export async function GET"), src.indexOf("async function run"));
+    expect(fn).toMatch(/return run\(true\)/);
+  });
+
+  it("the manual POST path passes guardRetries=false — a staff click must always go through", () => {
+    const fn = src.slice(src.indexOf("export async function POST"), src.indexOf("export async function GET"));
+    expect(fn).toMatch(/return run\(false\)/);
+  });
+
+  it("the guard only applies when guardRetries is true", () => {
+    expect(src).toMatch(/if \(guardRetries && lastSent/);
+  });
+});

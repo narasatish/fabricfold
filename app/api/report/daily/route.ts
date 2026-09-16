@@ -14,7 +14,10 @@ export async function POST() {
   } catch {
     return new Response("unauthorized", { status: 401 });
   }
-  return run();
+  // A staff member clicking "Email today's report" is a deliberate, one-off
+  // request for the report right now — it must always go through, even
+  // minutes after the automated cron already sent one today.
+  return run(false);
 }
 
 /* Vercel Cron calls GET with the CRON_SECRET Authorization header. */
@@ -22,12 +25,22 @@ export async function GET(req: Request) {
   if (!isCronRequest(req)) {
     return new Response("unauthorized", { status: 401 });
   }
-  return run();
+  return run(true);
 }
 
-async function run() {
+async function run(guardRetries: boolean) {
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const settings = cfg.settings as { reportEmail?: string; dailyEmail?: boolean; lastSent?: string | null };
+  // Guards a retried cron trigger (Render retrying a failed run) from
+  // double-emailing the owner within the same firing — collection-reminders
+  // and error-digest already guard their own sends this way; weekly-digest
+  // got the same fix earlier. Scoped to the CRON path only (short window):
+  // the manual "Email today's report" button in Reports is a deliberate
+  // request and must never be silently swallowed by this guard.
+  const lastSent = settings.lastSent ? new Date(settings.lastSent) : null;
+  if (guardRetries && lastSent && Date.now() - lastSent.getTime() < 15 * 60_000) {
+    return Response.json({ ok: true, skipped: "already sent moments ago" });
+  }
   const text = await dailyEmailReport();
   const to = settings.reportEmail || "owner@fabricfold.in";
   await sendMail(to, "FabricFold — daily report", text);

@@ -2,6 +2,21 @@ import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 import { db } from "./db";
 
+/* Found live 2026-09-17: falling back to a public, hardcoded string when
+   AUTH_SECRET is unset fails OPEN — every staff and student session is
+   signed with the exact same well-known string, forgeable by anyone who
+   reads this file (it's open source in the sense that anyone with repo
+   access, or a decompiled build, can read "dev-secret"). Compare
+   lib/cron-auth.ts's isCronRequest(), which correctly fails CLOSED (rejects
+   every request) when its own secret is unset — the same class of
+   misconfiguration (a forgotten Render env var) should never have a WORSE
+   outcome for the session cookie that gates every /s and /c page than it
+   does for a cron endpoint. A missing secret in development still falls
+   back (nobody wants local dev blocked on setting a real secret), but
+   production refuses to boot with a forgeable session key at all. */
+if (process.env.NODE_ENV === "production" && !process.env.AUTH_SECRET) {
+  throw new Error("AUTH_SECRET is not set — refusing to start with a forgeable session-signing key in production.");
+}
 const SECRET = new TextEncoder().encode(process.env.AUTH_SECRET || "dev-secret");
 const COOKIE = "ff_session";
 

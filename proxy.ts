@@ -16,6 +16,14 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
+// Same guard as lib/auth.ts (found live 2026-09-17): this file independently
+// derives its own SECRET to verify the session cookie at the edge, so an
+// unset AUTH_SECRET in production must fail here too, not just in the
+// server-action layer — otherwise the route boundary itself would accept a
+// cookie forged with the well-known "dev-secret" fallback.
+if (process.env.NODE_ENV === "production" && !process.env.AUTH_SECRET) {
+  throw new Error("AUTH_SECRET is not set — refusing to start with a forgeable session-signing key in production.");
+}
 const SECRET = new TextEncoder().encode(process.env.AUTH_SECRET || "dev-secret");
 
 async function sessionMode(req: NextRequest): Promise<"customer" | "staff" | null> {

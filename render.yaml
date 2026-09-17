@@ -28,6 +28,21 @@ services:
         fromDatabase:
           name: fabricfold-db
           property: connectionString
+      # Found live 2026-09-17 via scripts/load-test.ts: 300 concurrent users
+      # produced a 92.56% error rate ("timeout exceeded when trying to
+      # connect") — lib/db.ts's pool defaults to 4 connections for the whole
+      # app, comment-justified by Supabase's transaction pooler recycling
+      # connections per-query, a reasoning that no longer applies now that
+      # production runs on Render's OWN direct Postgres (fabricfold-db
+      # above), not Supabase. 10 is a conservative bump, not a researched
+      # ceiling — Render's own connection-limit-per-plan table wasn't
+      # fetchable from here (JS-rendered pricing page), so this is sized to
+      # be safely within reach of even a small paid Postgres plan while
+      # meaningfully raising headroom, not a claim that 10 is optimal.
+      # Override here (no code change needed, see lib/db.ts) once the
+      # actual plan connection limit is confirmed on Render's dashboard.
+      - key: DB_POOL_MAX
+        value: "10"
       - key: NODE_ENV
         value: production
       # Secrets below: NOT set here. Fill in the actual values in the Render

@@ -285,9 +285,13 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       "received",
     ]);
     return updated;
-    }, { timeout: 15_000 }); // was the default 5s — the new SELECT...FOR UPDATE lock on a
-    // busy subscription can legitimately queue behind another accept/walk-in, and 5s was
-    // already tight for this transaction's normal run of sequential awaited queries.
+    }, { timeout: 25_000 }); // was 15s: found live 2026-09-17 (cycle-consume-race-behavioral.test.ts)
+    // that 15s itself was not always enough — the SELECT...FOR UPDATE lock can queue
+    // this transaction behind another accept/walk-in on the SAME subscription, and that
+    // wait eats into this transaction's own budget before its sequential awaited queries
+    // (an extra college lookup, cycleUse rows, the Sheets outbox write) even start. Two
+    // counters ringing up the same student's cycles at once is a real, plausible scenario,
+    // not just a test artifact.
   } catch (e) {
     // A deliberately-thrown `new Error("...")` (no .code) is always one of
     // this function's own business-validation messages — every throw inside
@@ -440,7 +444,9 @@ export async function walkInOrder(
         "received (walk-in)",
       ]);
       return o;
-    }, { timeout: 15_000 }); // see acceptOrder's identical comment — the Subscription lock can queue
+    }, { timeout: 25_000 }); // see acceptOrder's identical comment (found live 2026-09-17) — the
+    // Subscription row lock can queue this transaction behind a concurrent accept/walk-in
+    // on the same subscription, and that wait alone was enough to exceed the old 15s budget.
   } catch (e) {
     /* Two replays racing each other: the lookup above found nothing for both,
        then the index rejected the loser. The order exists, so this is success. */

@@ -139,18 +139,32 @@ export async function writeSheet(tab: string, rows: (string | number)[][]) {
     body: JSON.stringify({ requests: [{ addSheet: { properties: { title: tab } } }] }),
   }).catch(() => {});
 
-  // Clear then write, so a shrinking dataset doesn't leave stale rows behind.
-  const range = encodeURIComponent(`${tab}!A1:Z1000`);
-  const clear = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${range}:clear`, {
-    method: "POST", headers: auth, body: "{}",
-  });
-  if (!clear.ok) return { ok: false as const, error: `clear failed (${clear.status}): ${(await clear.text()).slice(0, 200)}` };
-
+  /* Write the new data FIRST, then clear only what's left over — not
+     clear-then-write. This tab is the Owner's live operational view (Live,
+     Students, Plans, ...), read at any moment, not just right after a sync.
+     Clear-then-write has a real window where the tab is genuinely EMPTY: if
+     the process dies, times out, or Google's API hiccups between the clear
+     succeeding and the write landing (any one of the many syncs this
+     function serves, several times a day), the Owner opens a blank tab with
+     nothing to show until the next sync succeeds — for the hourly aggregate
+     sync, up to an hour of "the Sheet is broken". Writing first means a
+     failure at worst leaves stale-but-present data (self-correcting on the
+     next successful sync) rather than a black hole. */
+  const dataRange = encodeURIComponent(`${tab}!A1:Z${Math.max(rows.length, 1)}`);
   const put = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${range}?valueInputOption=USER_ENTERED`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${dataRange}?valueInputOption=USER_ENTERED`,
     { method: "PUT", headers: auth, body: JSON.stringify({ values: rows }) },
   );
   if (!put.ok) return { ok: false as const, error: `write failed (${put.status}): ${(await put.text()).slice(0, 200)}` };
+
+  // Trim any rows a SHRINKING dataset left behind, below the data just
+  // written. A failure here leaves harmless stale trailing rows, not a
+  // blank tab — the asymmetry is the whole point of this ordering.
+  const trimRange = encodeURIComponent(`${tab}!A${rows.length + 1}:Z1000`);
+  const clear = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${trimRange}:clear`, {
+    method: "POST", headers: auth, body: "{}",
+  });
+  if (!clear.ok) return { ok: false as const, error: `trim failed (${clear.status}): ${(await clear.text()).slice(0, 200)}` };
 
   return { ok: true as const, rows: rows.length };
 }

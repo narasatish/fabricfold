@@ -143,7 +143,7 @@ export async function topUpCredits(studentId: string, amount: number, method: "c
       await tx.payment.create({ data: { method, amount, collegeId: stu.collegeId, studentId, note: "Wallet top-up" } });
       // appears in the student's wallet ledger as money added
       await tx.compensation.create({ data: { studentId, kind: "topup", amount, method: "credit", comment: `Top-up (${method})`, by: st.id } });
-    });
+    }, { timeout: 15_000 }); // advisory lock can queue a concurrent caller past Prisma's 5s default — same class as bags.ts/subscription.ts
   } catch (e) {
     return { ok: false as const, error: (e as Error).message };
   }

@@ -92,7 +92,17 @@ export async function computeReport(p: Period, collegeId?: string | null) {
   const gstCollected = invoices.reduce((s, x) => s + N(x.gst), 0);
   const cnGst = creditNotes.reduce((s, x) => s + N(x.gst), 0);
   const netGst = gstCollected - cnGst;
-  const nonGstBucket = cash + credit;
+  /* NOT simply cash + credit: credit is never invoiced, but cash CAN be —
+     "GST bill for cash" is a deliberate staff override (recordPay's
+     staffInvoice flag), so a cash order can carry a real Invoice row just
+     like a UPI one. Lumping ALL cash into "outside GST" would double-count
+     that portion — it already sits inside taxable/gstCollected above via
+     the invoices query — and the Reports page shows this figure captioned
+     literally "are outside GST", a claim that must match what was actually
+     invoiced (found live 2026-09-17: money-rules-sacred applies to what the
+     report SAYS, not only to what it moves). */
+  const cashInvoiced = invoices.filter((x) => x.method === "cash").reduce((s, x) => s + N(x.total), 0);
+  const nonGstBucket = Math.max(0, cash - cashInvoiced) + credit;
 
   // operations
   const done = orders.filter((o) => o.status === "collected");

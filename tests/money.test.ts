@@ -243,6 +243,24 @@ describe("cash-drawer reconciliation", () => {
   });
 });
 
+describe("nonGstBucket excludes cash invoiced via the staff GST-for-cash override", () => {
+  it("a cash order billed with staffInvoice is NOT counted as outside GST", async () => {
+    // "GST bill for cash" (recordPay's staffInvoice flag) is a real, live path —
+    // cash is not unconditionally non-GST the way credit always is. The
+    // Reports page captions nonGstBucket literally "are outside GST"; before
+    // this fix a GST-invoiced cash order was double counted there too.
+    const o = await mkOrder("FF000006", 118, 18);
+    await db.payment.create({ data: { method: "cash", amount: 118, orderId: o.id, collegeId: "col1", studentId: "111111" } });
+    await db.$transaction((tx) => money.createInvoice(tx, o, "cash"));
+
+    const r = await report.computeReport(report.parsePeriod({ p: "all" }));
+    const thisOrdersCash = r.payments.filter((p) => p.orderId === o.id && p.method === "cash").reduce((s, p) => s + Number(p.amount), 0);
+    expect(thisOrdersCash).toBe(118); // sanity: the cash payment IS in the cash total
+    // but none of it should have landed in nonGstBucket, since it was invoiced
+    expect(r.nonGstBucket).toBeLessThanOrEqual(r.cash + r.credit - 118 + 0.01);
+  });
+});
+
 describe("per-college pricing models (St Mary's cycle-based vs BVRIT per-piece)", () => {
   it("collegeUsesCycleBasedPricing: return false if college has rates override, else check service", () => {
     // College WITH rates override (BVRIT-like): never cycle-based, always per-piece

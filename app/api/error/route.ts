@@ -36,7 +36,22 @@ export async function POST(req: Request) {
   const message = String(body.message || "Unknown error").slice(0, 500);
   const stack = body.stack ? String(body.stack).slice(0, 4000) : null;
   const url = body.url ? String(body.url).slice(0, 500) : null;
-  const kind = body.kind === "server" ? "server" : "client";
+  /* Found live 2026-09-17: this is a public, unauthenticated endpoint, and
+     `kind` used to come straight from the client-submitted body — trusting
+     it as "server" whenever the caller claimed so. Every real caller
+     (components/error-reporter.tsx, the only place in this codebase that
+     POSTs here) always sends kind:"client"; a genuine server-side error is
+     logged directly via db.errorLog.create() from trusted server code
+     (e.g. notify.ts's logWaFailure), never through this HTTP route. So a
+     "server" claim arriving here has no legitimate source — only an
+     attacker forging the field. That distinction now matters more than it
+     used to: the new fast watchdog (app/api/cron/watchdog/route.ts) alerts
+     the Owner immediately on any unseen kind:"server" row, so trusting the
+     client here let anyone spam urgent "production is broken" alerts, or
+     just bloat ErrorLog, from an endpoint that needs no session at all.
+     This route can only ever ATTEST to a client-side error, so it forces
+     that regardless of what the caller sends. */
+  const kind = "client" as const;
 
   const s = await getSession().catch(() => null);
   const who = s ? (s.mode === "staff" ? `staff:${s.staffId}` : `student:${s.studentId}`) : null;

@@ -69,3 +69,4 @@ describe("the public error-report endpoint is rate-limited per IP", () => {
     expect(capped.length).toBe(5);
   }, 120_000);
 });
+

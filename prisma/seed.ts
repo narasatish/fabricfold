@@ -5,6 +5,24 @@ import { PrismaClient } from "../lib/generated/prisma/client";
 
 // Same adapter-by-URL logic as lib/db.ts so the seed runs on SQLite (dev) or Postgres (Supabase).
 const url = process.env.DATABASE_URL || "file:./dev.db";
+
+/* Found 2026-09-21: this seed WIPES tables (one deleteMany at a time, no
+   transaction) before inserting demo people. Pointed at production it would
+   delete complaints, notifications, credit history and compensations before
+   the ledger triggers finally stopped it — a partial, unrecoverable wipe —
+   and README's deploy steps even told the reader to run `npm run seed`.
+   Refuse when the target looks like Render's production Postgres (internal
+   `dpg-…` host or a *.render.com host) or NODE_ENV=production. Local dev
+   (Supabase dev project / SQLite) is unaffected. To remove demo rows from a
+   real database use scripts/cleanup-demo-data.mjs instead. */
+{
+  const host = /^postgres(ql)?:\/\//.test(url) ? new URL(url).hostname : "";
+  if (process.env.NODE_ENV === "production" || /^dpg-/.test(host) || /\.render\.com$/.test(host)) {
+    console.error(`Refusing to seed: target host "${host || "(unknown)"}" looks like production. The seed deletes data. Use scripts/cleanup-demo-data.mjs to remove demo rows instead.`);
+    process.exit(1);
+  }
+}
+
 function makeAdapter() {
   if (/^postgres(ql)?:\/\//.test(url)) {
     const { PrismaPg } = require("@prisma/adapter-pg");

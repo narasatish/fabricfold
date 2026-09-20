@@ -33,7 +33,7 @@ npm test   # GST split, invoice numbering, refund credit notes, credit split, dr
 2. `npm i @prisma/adapter-pg` ; in `prisma/schema.prisma` set `provider = "postgresql"`;
    in `lib/db.ts` swap `PrismaBetterSqlite3` for `PrismaPg` (same one-line shape).
 3. Set `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` in `.env` / Vercel.
-4. `npx prisma migrate deploy && npm run seed`.
+4. `npx prisma migrate deploy`. Do NOT run `npm run seed` on a production database — it wipes tables and inserts demo people (the seed now refuses Render/production hosts). To remove demo rows from a real database use `scripts/cleanup-demo-data.mjs` (dry run first).
 5. Create a private storage bucket named `receipts`.
 
 ## Deploy (Vercel free)

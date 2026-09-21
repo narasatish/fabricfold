@@ -93,3 +93,31 @@ describe("saveStaff input checks", () => {
     expect((await edit("wrk1", { name: "Worker Renamed", phone: "9222222222", role: 2, collegeId: "col1" })).ok).toBe(true);
   });
 });
+
+describe("saveCollege input checks", () => {
+  const college = (over: Record<string, unknown> = {}) =>
+    admin.saveCollege({ name: "Test Campus", address: "Somewhere", closedWeekday: 4, ...over } as never);
+  const bad: [string, Record<string, unknown>][] = [
+    ["closed weekday 9", { closedWeekday: 9 }], ["closed weekday 2.5", { closedWeekday: 2.5 }], ["closed weekday NaN", { closedWeekday: NaN }],
+    ["closed weekday -1", { closedWeekday: -1 }], ["300-char name", { name: "C".repeat(300) }], ["blank name", { name: "  " }],
+    ["500-char address", { address: "a".repeat(500) }],
+  ];
+  for (const [label, over] of bad) {
+    it(`rejects ${label}`, async () => {
+      await as("own1", 4);
+      const before = await db.college.count();
+      const r = await college(over);
+      expect(r.ok, label).toBe(false);
+      expect(await db.college.count()).toBe(before);
+    });
+  }
+  it("an unknown college id returns an error instead of throwing", async () => {
+    await as("own1", 4);
+    const r = await college({ id: "does-not-exist" });
+    expect(r.ok).toBe(false);
+  });
+  it("still adds a normal college, and accepts 'no closed day'", async () => {
+    await as("own1", 4);
+    expect((await college({ name: "Real Campus", closedWeekday: null })).ok).toBe(true);
+  });
+});

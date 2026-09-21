@@ -337,14 +337,19 @@ const DEFAULT_FEATURES = { ...FEATURE_DEFAULTS };
 
 export async function saveCollege(input: { id?: string; name: string; address: string; closedWeekday?: number | null }) {
   const st = await requireStaff(4); // Owner only add/edit
-  const name = input.name.trim();
-  if (!name) return { ok: false as const, error: "Name required" };
+  const name = String(input.name ?? "").trim();
+  if (!name || name.length > 80) return { ok: false as const, error: "Name required (up to 80 characters)" };
+  const address = String(input.address ?? "").trim();
+  if (address.length > 300) return { ok: false as const, error: "Address is too long (300 characters max)" };
   const closedWeekday = input.closedWeekday === undefined || input.closedWeekday === null ? null : Number(input.closedWeekday);
+  // Sunday=0 .. Saturday=6; NaN or a fraction would fail the Int column and crash.
+  if (closedWeekday !== null && (!Number.isInteger(closedWeekday) || closedWeekday < 0 || closedWeekday > 6)) return { ok: false as const, error: "Pick a weekday, or none" };
   if (input.id) {
-    await db.college.update({ where: { id: input.id }, data: { name, address: input.address.trim(), closedWeekday } });
+    if (!(await db.college.findUnique({ where: { id: input.id }, select: { id: true } }))) return { ok: false as const, error: "College not found" };
+    await db.college.update({ where: { id: input.id }, data: { name, address, closedWeekday } });
     await audit("College updated", name, st.id);
   } else {
-    await db.college.create({ data: { name, address: input.address.trim(), closedWeekday, features: DEFAULT_FEATURES } });
+    await db.college.create({ data: { name, address, closedWeekday, features: DEFAULT_FEATURES } });
     await audit("College added", name, st.id);
   }
   return { ok: true as const };

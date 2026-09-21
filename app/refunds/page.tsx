@@ -47,7 +47,7 @@ export default function Refunds() {
           <h2 className="m-h2">Damaged, lost or missing garments</h2>
           <p>
             Report it within <strong>48 hours</strong> of collection (or as soon as you notice a garment is missing from
-            an order). We check the order — every garment is QR-tagged, and we photograph existing damage when you hand
+            an order). We check the order — every garment is counted at drop-off, and we can photograph existing damage when you hand
             clothes in, so we can usually establish quickly what happened.
           </p>
           <p>

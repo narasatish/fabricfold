@@ -24,7 +24,7 @@ export default function Home() {
           <h1 className="m-h1">Laundry, handled for your <em>whole campus</em></h1>
           <p className="m-lead">
             We run the laundry counter on your campus or community — students and residents book from their phone,
-            drop their clothes, and collect them washed, ironed and folded. Every garment is tagged and tracked,
+            drop their clothes, and collect them washed, ironed and folded. Every garment is counted and tracked,
             so nothing goes missing and no one waits around wondering when it&apos;s done.
           </p>
           <div className="m-cta">
@@ -33,7 +33,7 @@ export default function Home() {
           </div>
           <div className="m-proof">
             <div><b>48 hrs</b><span>standard turnaround</span></div>
-            <div><b>Every piece</b><span>QR-tagged &amp; tracked</span></div>
+            <div><b>Every piece</b><span>counted &amp; tracked</span></div>
             <div><b>Live</b><span>status on your phone</span></div>
           </div>
         </div>
@@ -80,7 +80,7 @@ export default function Home() {
           <p className="m-sub">Book from your room, drop between classes, collect when it&apos;s ready.</p>
           <div className="m-grid c3">
             <div className="m-card"><div className="n">1</div><h3>Book on your phone</h3><p>Pick a service and count your pieces. You get an order ID to show at the counter.</p></div>
-            <div className="m-card"><div className="n">2</div><h3>Drop at the counter</h3><p>Our staff check the count with you and tag every garment with its own QR code.</p></div>
+            <div className="m-card"><div className="n">2</div><h3>Drop at the counter</h3><p>Our staff count every garment with you and log it against your order.</p></div>
             <div className="m-card"><div className="n">3</div><h3>Collect with a code</h3><p>You get a notification and a pickup code the moment your laundry is ready.</p></div>
           </div>
           <div className="m-cta center"><Link href="/how-it-works" className="btn ghost">See how it works in detail</Link></div>
@@ -92,11 +92,11 @@ export default function Home() {
         <div className="mx">
           <h2 className="m-h2 center">The details that make it actually work</h2>
           <div className="m-grid c3">
-            <div className="m-card"><div className="ic"><Ic d={I.tag} /></div><h3>A tag on every garment</h3><p>Each piece gets a scannable QR tag at drop-off, so ten orders of white shirts never turn into one confusing pile.</p></div>
+            <div className="m-card"><div className="ic"><Ic d={I.tag} /></div><h3>Counted twice</h3><p>Every piece is counted with you at drop-off and again before it goes on the shelf, so ten orders of white shirts never turn into one confusing pile.</p></div>
             <div className="m-card"><div className="ic"><Ic d={I.track} /></div><h3>Live order tracking</h3><p>Received, processing, ready — the status updates on the student&apos;s phone in real time, with an alert when it&apos;s done.</p></div>
-            <div className="m-card"><div className="ic"><Ic d={I.file} /></div><h3>Proper digital records</h3><p>Every order, payment and GST invoice is recorded. Colleges get a vendor with a clean paper trail, not a cash box.</p></div>
+            <div className="m-card"><div className="ic"><Ic d={I.file} /></div><h3>Proper digital records</h3><p>Every order and payment is recorded, with GST invoices where GST billing applies. Colleges get a vendor with a clean paper trail, not a cash box.</p></div>
             <div className="m-card"><div className="ic"><Ic d={I.gift} /></div><h3>Compensation &amp; free re-dos</h3><p>Damaged or unsatisfactory? We compensate as store credit and re-clean at no charge. Fair, and on record.</p></div>
-            <div className="m-card"><div className="ic"><Ic d={I.card} /></div><h3>Pay how you like</h3><p>UPI, cash at the counter, or store credit. UPI payments come with a downloadable GST invoice.</p></div>
+            <div className="m-card"><div className="ic"><Ic d={I.card} /></div><h3>Pay how you like</h3><p>UPI, cash at the counter, or store credit. Every payment is recorded, with a GST invoice where GST billing applies.</p></div>
             <div className="m-card"><div className="ic"><Ic d={I.chat} /></div><h3>Complaints that get answered</h3><p>Raise an issue in the app and chat directly with staff until it&apos;s sorted — every complaint tracked to resolution.</p></div>
           </div>
         </div>

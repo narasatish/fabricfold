@@ -194,7 +194,7 @@ export default function HostelLaundry() {
           <div className="m-panel" style={{ marginTop: 28, textAlign: "center" }}>
             <h3 style={{ margin: 0 }}>Laundry that&apos;s actually tracked</h3>
             <p style={{ fontSize: 15, color: "var(--ink-2)", lineHeight: 1.6, margin: "10px auto 0", maxWidth: 520 }}>
-              Book from your room, every garment tagged, collect with a code. See your campus&apos;s rates the moment you
+              Book from your room, every piece counted, collect with a code. See your campus&apos;s rates the moment you
               log in.
             </p>
             <Link href="/get" className="btn mt16" style={{ width: "auto", padding: "0 26px" }}>Get started</Link>

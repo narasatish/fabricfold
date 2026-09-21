@@ -5,7 +5,7 @@ import { SUPPORT_PHONE } from "@/lib/contact";
 export const metadata: Metadata = {
   title: "FabricFold — Campus & Community Laundry Service",
   description:
-    "FabricFold runs the laundry counter on campuses, hostels and communities. Students book from their phone, every garment is QR-tagged, orders are tracked live, and pickup is by one-time code. Bring FabricFold to your campus.",
+    "FabricFold runs the laundry counter on campuses, hostels and communities. Students book from their phone, every piece is counted, orders are tracked live, and pickup is by one-time code. Bring FabricFold to your campus.",
   keywords: ["campus laundry service", "college laundry", "hostel laundry", "community laundry", "laundry counter on campus", "student laundry Telangana", "laundry vendor for colleges"],
   alternates: { canonical: "https://fabricfold.in" },
   openGraph: {
@@ -34,7 +34,7 @@ const jsonLd = {
   url: "https://fabricfold.in",
   logo: "https://fabricfold.in/icon-512.png",
   image: "https://fabricfold.in/icon-512.png",
-  description: "Campus and community laundry & dry-cleaning service. On-site counter, QR-tagged garments, live order tracking, and digital records for colleges, hostels and communities.",
+  description: "Campus and community laundry & dry-cleaning service. On-site counter, piece-by-piece counting, live order tracking, and digital records for colleges, hostels and communities.",
   areaServed: { "@type": "State", name: "Telangana", containedInPlace: { "@type": "Country", name: "India" } },
   address: { "@type": "PostalAddress", addressRegion: "Telangana", addressCountry: "IN" },
   telephone: `+91${SUPPORT_PHONE}`,

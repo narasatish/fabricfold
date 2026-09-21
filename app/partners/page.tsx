@@ -10,8 +10,8 @@ export const metadata: Metadata = {
 const SETUP = [
   ["An on-site counter", "We set up a staffed drop-off and collection point inside your campus or community — no one has to leave the premises."],
   ["Trained staff", "FabricFold hires and manages the counter staff. You don't take on any laundry payroll or supervision."],
-  ["Garment tagging & the app", "Every item is QR-tagged and every order tracked in the FabricFold app your students and residents already use."],
-  ["Transparent records", "You get a real vendor with digital records of every order, payment and GST invoice — not an untraceable cash arrangement."],
+  ["Counted & tracked in the app", "Every item is counted at drop-off and every order tracked in the FabricFold app your students and residents already use."],
+  ["Transparent records", "You get a real vendor with digital records of every order and payment, with GST invoices where GST billing applies — not an untraceable cash arrangement."],
 ];
 
 const PARTNER_STEPS = [

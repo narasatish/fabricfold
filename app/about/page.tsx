@@ -25,7 +25,7 @@ export default function About() {
           </p>
           <p>
             FabricFold was built to fix exactly that. We don&apos;t just wash clothes — we run the whole laundry operation
-            on-site, with the kind of tracking and records that make it dependable. Every garment gets a tag. Every order
+            on-site, with the kind of tracking and records that make it dependable. Every garment is counted and logged. Every order
             is booked, priced and tracked in an app. Every payment produces a proper record. Students always know what
             they&apos;re paying and when their clothes will be ready, and the colleges we work with get a real vendor
             instead of an informal cash arrangement.
@@ -33,14 +33,14 @@ export default function About() {
 
           <h2 className="m-h2">What we care about</h2>
           <p>
-            <strong>Reliability.</strong> If we say 48 hours, we mean it. If something isn&apos;t right, we re-do it free.
+            <strong>Reliability.</strong> We work to a 48-hour turnaround and tell you if that changes. If something isn&apos;t right, we re-do it free.
           </p>
           <p>
             <strong>Transparency.</strong> No hidden charges, no guessing. Prices are set per campus and shown in the app,
             and every order and invoice is on record.
           </p>
           <p>
-            <strong>Care for your clothes.</strong> QR tagging keeps orders separate, and our compensation policy means a
+            <strong>Care for your clothes.</strong> Counting every piece at drop-off keeps orders separate, and our compensation policy means a
             damaged or lost item is made right, not shrugged off.
           </p>
 

@@ -508,6 +508,12 @@ export async function advanceStatusBatch(orderIds: string[]) {
 
 export async function advanceStatus(orderId: string, input?: { countedPieces?: number | null }) {
   const st = await requireStaff(1);
+  // A typed count must be a real whole number. Clamping a typo (-2, NaN) to 0
+  // silently stored "counted 0" and raised a false piece-shortfall alert.
+  const typed = input?.countedPieces;
+  if (typed !== null && typed !== undefined && (!Number.isInteger(typed) || typed < 0 || typed > 500)) {
+    return { ok: false as const, error: "Enter the number of pieces you counted (a whole number, 0–500)" };
+  }
   const cfg = await getConfig();
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId }, include: { student: true } });
   assertSameCollege(st, o.collegeId);

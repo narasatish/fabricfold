@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useToast, Sheet, Switch, toggleTheme } from "@/components/chrome";
 import { Svg } from "@/components/icons";
 import { logout, updateName, setPasscode, changePasscode, signOutEverywhere } from "@/lib/actions/auth";
+import { clearOfflineCaches } from "@/lib/client-cache";
 import { exportMyData, eraseMyData } from "@/lib/actions/privacy";
 
 export default function ProfileClient({ studentName, hasPasscode }: { studentName: string; hasPasscode: boolean }) {
@@ -76,6 +77,7 @@ export default function ProfileClient({ studentName, hasPasscode }: { studentNam
     setLoading(true);
     try {
       await logout();
+      await clearOfflineCaches();
     } catch {
       // The cookie may already be half-cleared server-side even if this
       // throws — leaving the user stuck on a "logged in" screen that no
@@ -119,6 +121,7 @@ export default function ProfileClient({ studentName, hasPasscode }: { studentNam
     setSignOutAllBusy(true);
     try {
       await signOutEverywhere();
+      await clearOfflineCaches();
     } catch {
       // Same reasoning as handleLogout — the cookie may already be cleared
       // even if this throws, so send them to /login regardless.

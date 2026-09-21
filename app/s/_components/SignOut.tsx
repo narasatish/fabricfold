@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { useToast } from "@/components/chrome";
 import { logout } from "@/lib/actions/auth";
+import { clearOfflineCaches } from "@/lib/client-cache";
 
 export default function SignOut() {
   const router = useRouter();
@@ -19,6 +20,7 @@ export default function SignOut() {
     setLoading(true);
     try {
       await logout();
+      await clearOfflineCaches();
       toast("Signed out");
       router.push("/login");
     } catch {

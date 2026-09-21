@@ -17,9 +17,21 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const type = url.searchParams.get("type") || "full";
   const p = parsePeriod(Object.fromEntries(url.searchParams) as Record<string, string>);
-  const r = await computeReport(p, me.collegeId);
-  const staff = await db.staff.findMany(me.collegeId ? { where: { collegeId: me.collegeId } } : undefined);
-  const students = await db.student.findMany(me.collegeId ? { where: { collegeId: me.collegeId } } : undefined);
+  /* Which college's books: a campus-scoped account always gets its own (?c= is
+     ignored, so editing the URL can't reach another campus); an owner-level
+     account gets the college picked on the Reports page (?c=), or the combined
+     view when none is picked. Without this an owner viewing BVRIT downloaded a
+     file with both colleges mixed together. */
+  let scopeId = me.collegeId;
+  const asked = url.searchParams.get("c");
+  if (!scopeId && asked) {
+    if (!(await db.college.findUnique({ where: { id: asked }, select: { id: true } }))) return new Response("unknown college", { status: 400 });
+    scopeId = asked;
+  }
+  const scopeName = scopeId ? (await db.college.findUnique({ where: { id: scopeId }, select: { name: true } }))?.name ?? scopeId : "All colleges";
+  const r = await computeReport(p, scopeId);
+  const staff = await db.staff.findMany(scopeId ? { where: { collegeId: scopeId } } : undefined);
+  const students = await db.student.findMany(scopeId ? { where: { collegeId: scopeId } } : undefined);
   const byId = (id: string | null | undefined, list: { id: string; name: string }[]) => list.find((x) => x.id === id)?.name || id || "";
   const N = (x: unknown) => Number(x || 0);
 
@@ -30,6 +42,7 @@ export async function GET(req: Request) {
     const ws = wb.addWorksheet("Summary");
     ws.columns = [{ width: 32 }, { width: 18 }];
     const rows: [string, number | string][] = [
+      ["College", scopeName],
       ["Period", p.label],
       ["Cash received", r.cash],
       ["UPI received", r.upi],
@@ -91,7 +104,7 @@ export async function GET(req: Request) {
   else addSummary();
 
   const buf = await wb.xlsx.writeBuffer();
-  const fname = `fabricfold-${type}-${p.label.replace(/[^\w]+/g, "-").toLowerCase()}.xlsx`;
+  const fname = `fabricfold-${scopeId ? scopeName.replace(/[^\w]+/g, "-").toLowerCase() + "-" : ""}${type}-${p.label.replace(/[^\w]+/g, "-").toLowerCase()}.xlsx`;
   return new Response(buf as ArrayBuffer, {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

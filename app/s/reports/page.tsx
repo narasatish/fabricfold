@@ -78,7 +78,7 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
   const cohortPct = subRevenueApprox + payRevenue > 0 ? Math.round((subRevenueApprox / (subRevenueApprox + payRevenue)) * 100) : 0;
 
   const qs = (over: Record<string, string>) => {
-    const params = new URLSearchParams({ p: period.kind, ...(sp.d ? { d: sp.d } : {}), ...(sp.m ? { m: sp.m } : {}), ...(sp.y ? { y: sp.y } : {}), ...over });
+    const params = new URLSearchParams({ p: period.kind, ...(sp.d ? { d: sp.d } : {}), ...(sp.m ? { m: sp.m } : {}), ...(sp.y ? { y: sp.y } : {}), ...(selectedCollegeId ? { c: selectedCollegeId } : {}), ...over });
     return params.toString();
   };
 

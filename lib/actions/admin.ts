@@ -11,6 +11,7 @@ import { audit } from "../notify";
 import { publish } from "../realtime";
 import { notifyOwner } from "../mail";
 import { isTier } from "../bagcode";
+import { PAYMENT_KEYS, ratesProblem, expressProblem, gstProblem, paymentProblem, emailProblem } from "../config-validation";
 
 /* ----- Register a student at the counter (any staff) -----
    St Mary's students can only be added this way — verifyOtp() rejects an
@@ -244,6 +245,8 @@ const MAX_MONEY = 10_000_000;
 export async function saveRates(rates: Record<string, { label: string; items: [string, number][] }>, gstPct: number, gstEnabled?: boolean) {
   const st = await requireStaff(3);
   assertGlobalScope(st);
+  const problem = ratesProblem(rates) ?? gstProblem(gstPct);
+  if (problem) return { ok: false as const, error: problem };
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const settings = { ...(cfg.settings as Record<string, unknown>), ...(gstEnabled === undefined ? {} : { gstEnabled }) };
   await db.appConfig.update({ where: { id: "main" }, data: { rates: rates as object, gstPct, settings } });
@@ -255,6 +258,7 @@ export async function saveRates(rates: Record<string, { label: string; items: [s
 export async function saveCollegeRates(collegeId: string, rates: Record<string, { label: string; items: [string, number][] }> | null) {
   const st = await requireStaff(3);
   assertSameCollege(st, collegeId);
+  if (rates !== null) { const problem = ratesProblem(rates); if (problem) return { ok: false as const, error: problem }; }
   const college = await db.college.findUniqueOrThrow({ where: { id: collegeId } });
   // For nullable Json fields, Prisma.JsonNull is used to clear; undefined to skip
   await db.college.update({
@@ -271,6 +275,7 @@ export async function saveCollegeRates(collegeId: string, rates: Record<string, 
 export async function saveCollegeExpressRates(collegeId: string, expressRates: Record<string, number> | null) {
   const st = await requireStaff(3);
   assertSameCollege(st, collegeId);
+  if (expressRates !== null) { const problem = expressProblem(expressRates); if (problem) return { ok: false as const, error: problem }; }
   const college = await db.college.findUniqueOrThrow({ where: { id: collegeId } });
   // For nullable Json fields, Prisma.JsonNull is used to clear; undefined to skip
   await db.college.update({
@@ -287,6 +292,10 @@ export async function saveCollegeExpressRates(collegeId: string, expressRates: R
 export async function savePaymentConfig(payment: { upiId: string; payeeName: string; bankName: string; accountName: string; accountNo: string; ifsc: string; gatewayKey: string }) {
   const st = await requireStaff(3);
   assertGlobalScope(st);
+  const problem = paymentProblem(payment);
+  if (problem) return { ok: false as const, error: problem };
+  // Store all seven fields, trimmed, so a partial first save still reads back complete.
+  payment = Object.fromEntries(PAYMENT_KEYS.map((k) => [k, String((payment as Record<string, unknown>)[k] ?? "").trim()])) as typeof payment;
   await db.appConfig.update({ where: { id: "main" }, data: { payment } });
   await audit("Payment details updated", payment.upiId, st.id);
   return { ok: true as const };
@@ -296,6 +305,7 @@ export async function savePaymentConfig(payment: { upiId: string; payeeName: str
 export async function saveSettings(settings: Record<string, unknown>) {
   const st = await requireStaff(3);
   assertGlobalScope(st);
+  if ("reportEmail" in settings) { const problem = emailProblem(settings.reportEmail); if (problem) return { ok: false as const, error: problem }; }
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const merged = { ...(cfg.settings as Record<string, unknown>), ...settings };
   await db.appConfig.update({ where: { id: "main" }, data: { settings: JSON.parse(JSON.stringify(merged)) } });

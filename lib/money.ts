@@ -270,3 +270,9 @@ export function isOverdue(o: { status: string; receivedAt: Date | null; express:
 export function loyaltyTier(lifetimePieces: number) {
   return lifetimePieces >= 150 ? "Gold" : lifetimePieces >= 50 ? "Silver" : "Bronze";
 }
+
+/** A bag weight typed at the counter: absent is fine; otherwise a real,
+ *  non-negative number no bigger than 500 kg (NaN / Infinity / negatives are typos or abuse). */
+export function validWeight(w: unknown): boolean {
+  return w == null || (typeof w === "number" && Number.isFinite(w) && w >= 0 && w <= 500);
+}

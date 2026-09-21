@@ -7,7 +7,7 @@ import { featureOn, serviceOn } from "../features";
 import { enqueueSheetEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff, requireStaffPerm, assertSameCollege } from "../auth";
-import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, expressFlatFee, collegeExpressFee, expressItemRate, isCycleService, collegeUsesCycleBasedPricing, resolveCollegeRates } from "../money";
+import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, expressFlatFee, collegeExpressFee, expressItemRate, isCycleService, collegeUsesCycleBasedPricing, resolveCollegeRates, validWeight } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit } from "../notify";
@@ -160,6 +160,7 @@ export async function placeOrder(input: { service: string; items: { label: strin
 /* ---------- Staff: verify & accept (receive) ---------- */
 export async function acceptOrder(orderId: string, input: { weightKg: number | null; useCycle: boolean; noGst?: boolean; waiveExcess?: boolean; cycles?: number; items?: { label: string; qty: number }[]; intakePhotos?: string[] }) {
   const st = await requireStaff(1);
+  if (!validWeight(input.weightKg)) return { ok: false as const, error: "Enter a valid weight (0–500 kg)" };
 
   // Fetch the order first to get collegeId so we can get the right config
   const draftOrder = await db.order.findUniqueOrThrow({ where: { id: orderId }, select: { collegeId: true } });
@@ -187,7 +188,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       items = input.items.filter((i) => i.qty > 0).map((i) => {
         const found = rate.items.find((r) => r[0] === i.label);
         if (!found) throw new Error("Unknown item " + i.label);
-        return { label: found[0], rate: o.express ? expressItemRate(found[1]) : found[1], qty: Math.floor(i.qty) };
+        return { label: found[0], rate: o.express ? expressItemRate(found[1]) : found[1], qty: Math.min(99, Math.floor(i.qty)) };
       });
     }
     const declaredPieces = items.reduce((s, i) => s + i.qty, 0);
@@ -330,6 +331,7 @@ export async function walkInOrder(
   input: { service: string; items: { label: string; qty: number }[]; cycles?: number; weightKg: number | null; useCycle: boolean; noGst?: boolean; waiveExcess?: boolean; express?: boolean; idemKey?: string | null },
 ) {
   const st = await requireStaff(1);
+  if (!validWeight(input.weightKg)) return { ok: false as const, error: "Enter a valid weight (0–500 kg)" };
 
   /* An offline intake carries a key from the device that captured it. If that
      key is already on an order, this is a REPLAY — the previous attempt

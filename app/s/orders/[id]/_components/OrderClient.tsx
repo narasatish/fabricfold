@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { Qr } from "@/components/qr";
 import { fmt, dateStr, initials, STATUS_LABEL, upiLink } from "@/lib/format";
-import { CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, collegeUsesCycleBasedPricing, SHOW_GST_UI } from "@/lib/money";
+import { CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, collegeUsesCycleBasedPricing, gstLineVisible } from "@/lib/money";
 import { isOverdue } from "@/lib/money";
 import { useToast, Sheet, Seg, Switch } from "@/components/chrome";
 import {
@@ -552,7 +552,7 @@ export default function StaffOrderClient({
             <span className="mono">{fmt(Number(order.surcharge))}</span>
           </div>
         ) : null}
-        {SHOW_GST_UI && (
+        {gstLineVisible(Number(order.gst)) && (
           <div className="kv">
             <span className="k">{order.noGst || order.usedCycle || order.gstPct === 0 ? "GST — not charged" : `GST (${order.gstPct}%)`}</span>
             <span className="mono">{fmt(Number(order.gst))}</span>

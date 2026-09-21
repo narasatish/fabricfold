@@ -10,7 +10,7 @@ import { assignSubscription, upgradeSubscription, cancelSubscription, adjustCycl
 import { issueBag, retireBag, releaseBagCode, setBagCode, reissueBagSameCode } from "@/lib/actions/bags";
 import { walkInOrder } from "@/lib/actions/orders";
 import { sellCyclePack } from "@/lib/actions/subscription";
-import { CYCLE_RATES, CYCLE_KG_LIMIT, collegeUsesCycleBasedPricing, collegeExpressFee, expressItemRate, SHOW_GST_UI } from "@/lib/money";
+import { CYCLE_RATES, CYCLE_KG_LIMIT, collegeUsesCycleBasedPricing, collegeExpressFee, expressItemRate } from "@/lib/money";
 import { enqueueIntake, newIdemKey } from "@/lib/offline-queue";
 import { topUpCredits } from "@/lib/actions/ops";
 import { updateStudentPhone, updateStudentDetails } from "@/lib/actions/admin";
@@ -1065,7 +1065,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
               {assignPlan.buckets.map((b) => (
                 <div key={b.service} className="kv"><span className="k">{b.label}</span><span className="mono">{b.cycles} × {b.kgPerCycle} kg</span></div>
               ))}
-              <div className="kv total"><span>To collect{SHOW_GST_UI && assignPlan.gstApplies ? " (incl. GST)" : ""}</span><span className="mono">{fmt(assignPlan.gross)}</span></div>
+              <div className="kv total"><span>To collect{assignPlan.gstApplies ? " (incl. GST)" : ""}</span><span className="mono">{fmt(assignPlan.gross)}</span></div>
             </div>
           )}
           <div className="field mt16">

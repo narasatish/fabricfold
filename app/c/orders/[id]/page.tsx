@@ -2,7 +2,7 @@ import { requireStudent } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { fmt, timeAgo, dateStr, STATUS_LABEL } from "@/lib/format";
-import { orderDueAt, SHOW_GST_UI } from "@/lib/money";
+import { orderDueAt, gstLineVisible } from "@/lib/money";
 import { dayLabel, hhmm, istDateStr, istMinutes } from "@/lib/slots";
 import Link from "next/link";
 import { Svg } from "@/components/icons";
@@ -216,7 +216,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               <span className="mono">{fmt(Number(order.surcharge ?? 0))}</span>
             </div>
           )}
-          {SHOW_GST_UI && (
+          {gstLineVisible(Number(order.gst)) && (
             <div className="kv">
               <span className="k">{order.noGst || order.usedCycle || Number(order.gstPctSnapshot) === 0 ? "GST — not charged" : `GST (${Number(order.gstPctSnapshot)}%)`}</span>
               <span className="mono">{fmt(Number(order.gst))}</span>

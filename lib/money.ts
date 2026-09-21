@@ -88,6 +88,14 @@ export const CYCLE_KG_LIMIT = 5;
    through every order/bill screen again. */
 export const SHOW_GST_UI = false;
 
+/** Show a GST line only when GST is actually charged. SHOW_GST_UI hides the line
+ *  while GST billing is off (today); once GST billing is switched on the money code
+ *  ADDS GST on top of per-piece prices, so the line must appear or students would
+ *  pay more than the rate they were shown with nothing explaining it. */
+export function gstLineVisible(gstAmount: number): boolean {
+  return SHOW_GST_UI || (Number.isFinite(gstAmount) && gstAmount > 0);
+}
+
 /* No longer charged (management decision, Sep 2026) — excessWeightCharge
    always returns 0 now; see its own comment. Kept as exports rather than
    deleted since nothing currently reads them, but removing them outright

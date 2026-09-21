@@ -49,7 +49,7 @@ export async function submitComplaint(text: string, orderId?: string | null, pho
     t.slice(0, 200),
     pics.length,
     "student",
-  ]);
+  ], stu.collegeId);
   publish([`orders:${stu.collegeId}`], { type: "complaint.message", payload: { complaintId: c.id } });
   void notifyOwner("New complaint", `${stu.name} (${stu.college.name}): "${t.slice(0, 160)}"${orderId ? ` — order #${orderId.slice(-4)}` : ""}`);
   flushSoon();
@@ -119,7 +119,7 @@ export async function reportOrderDamage(orderId: string, input: { comment: strin
     comment.slice(0, 200),
     pics.length,
     st.name,
-  ]);
+  ], o.collegeId);
   publish([`student:${o.studentId}`, `orders:${o.collegeId}`], { type: "complaint.message", payload: { complaintId: c.id } });
   flushSoon();
   return { ok: true as const, id: c.id };

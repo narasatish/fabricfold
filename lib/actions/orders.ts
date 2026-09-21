@@ -283,7 +283,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       updated.paymentMethod ?? (usedCycle ? "cycle" : "unpaid"),
       usedCycle ? "yes" : "no",
       "received",
-    ]);
+    ], o.collegeId);
     return updated;
     }, { timeout: 25_000 }); // was 15s: found live 2026-09-17 (cycle-consume-race-behavioral.test.ts)
     // that 15s itself was not always enough — the SELECT...FOR UPDATE lock can queue
@@ -442,7 +442,7 @@ export async function walkInOrder(
         o.paymentMethod ?? (usedCycle ? "cycle" : "unpaid"),
         usedCycle ? "yes" : "no",
         "received (walk-in)",
-      ]);
+      ], stu.collegeId);
       return o;
     }, { timeout: 25_000 }); // see acceptOrder's identical comment (found live 2026-09-17) — the
     // Subscription row lock can queue this transaction behind a concurrent accept/walk-in
@@ -645,7 +645,7 @@ export async function collectOrder(orderId: string, code: string) {
         stu.name,
         o.actualPieces || 0,
         st.name,
-      ]);
+      ], o.collegeId);
     }, { timeout: 15_000 }); // enqueueSheetEvent makes a real Google Sheets API call inside the transaction
   } catch (e) {
     return { ok: false as const, error: (e as Error).message };
@@ -708,7 +708,7 @@ async function payInner(orderId: string, method: "upi" | "cash", creditApplied: 
       total,
       Number(updated.gst) || 0,
       (invoice as { number?: string } | null)?.number ?? "—",
-    ]);
+    ], o.collegeId);
     return updated;
   }, { timeout: 15_000 }); // enqueueSheetEvent makes a real Google Sheets API call inside the transaction
 }
@@ -851,7 +851,7 @@ export async function redoOrder(orderId: string): Promise<ActionResult> {
     "free re-do",
     "no",
     `re-do of #${o.id.slice(-6)}`,
-  ]);
+  ], o.collegeId);
   bcast(n, "order.created");
   flushSoon();
   return { ok: true as const, id: n.id };

@@ -249,6 +249,9 @@ model Bag {
 model SheetOutbox {
   id      String   @id @default(cuid())
   kind    String // order | payment | complaint | collection
+  // Which campus the row belongs to — picks the per-college log tab. Null on
+  // legacy rows and events with no campus, which go to the combined tab.
+  collegeId String?
   at      DateTime @default(now())
   payload Json // the finished row, resolved at enqueue time
 

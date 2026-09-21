@@ -599,7 +599,7 @@ export async function sellCyclePack(
       price,
       0,
       "—",
-    ]);
+    ], stu.collegeId);
   }, { timeout: 15_000 }); // advisory lock can queue a concurrent caller past Prisma's 5s default — found 2026-09-11 when this exact scenario threw "commit on expired transaction" under test
 
   const paidNote = creditApplied > 0 ? (cash > 0 ? `₹${cash} ${input.method} + ₹${creditApplied} credit` : `₹${creditApplied} credit`) : `₹${price} ${input.method}`;

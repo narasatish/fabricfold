@@ -129,7 +129,7 @@ describe("cost and quota", () => {
   it("groups queued rows into one append per tab", () => {
     // twenty orders in ten minutes must not be twenty Google calls
     expect(events).toMatch(/const byKind = new Map/);
-    expect(events).toMatch(/for \(const \[kind, rows\] of byKind\)/);
+    expect(events).toMatch(/for \(const \[key, rows\] of byKind\)/);
   });
 
   it("appends rather than rewriting the tab", () => {

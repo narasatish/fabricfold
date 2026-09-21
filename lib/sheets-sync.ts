@@ -109,18 +109,32 @@ async function runSheetsSyncUnsafe() {
   // 1) Pull any owner edits from the Config tab and apply them (validated + audited).
   const applied = await applyConfigEdits();
 
+  /* Every aggregate tab is written once combined (the owner's overview, tab
+     name unchanged) and once PER COLLEGE ("Live — BVRIT"). The two campuses
+     are separate businesses: each gets its own revenue, live view, daily
+     figures, complaints and staff so nothing is mixed on the way to a
+     campus manager. */
+  const scopeColleges = await db.college.findMany({ where: { active: true }, select: { id: true, name: true } });
+  const scopes: { cid: string | null; sfx: string; label: string }[] = [
+    { cid: null, sfx: "", label: "All colleges" },
+    ...scopeColleges.map((c) => ({ cid: c.id, sfx: ` — ${c.name}`.replace(/\//g, "-"), label: c.name })),
+  ];
+  let result: Awaited<ReturnType<typeof writeSheet>>;
+
+  for (const { cid, sfx, label } of scopes) {
   /* ---- Live ---- */
-  const today = await computeReport(parsePeriod({ p: "day" }));
-  const month = await computeReport(parsePeriod({ p: "month" }));
+  const today = await computeReport(parsePeriod({ p: "day" }), cid);
+  const month = await computeReport(parsePeriod({ p: "month" }), cid);
+  const byCollege = cid ? { collegeId: cid } : {};
   const [activeOrders, readyOrders, activePlans, openComplaints] = await Promise.all([
-    db.order.count({ where: { status: { in: ["received", "processing"] } } }),
-    db.order.count({ where: { status: "ready" } }),
-    db.subscription.count({ where: { active: true } }),
-    db.complaint.count({ where: { status: "open" } }),
+    db.order.count({ where: { ...byCollege, status: { in: ["received", "processing"] } } }),
+    db.order.count({ where: { ...byCollege, status: "ready" } }),
+    db.subscription.count({ where: { active: true, ...(cid ? { student: { collegeId: cid } } : {}) } }),
+    db.complaint.count({ where: { ...byCollege, status: "open" } }),
   ]);
 
-  let result = await writeSheet("Live", [
-    ["FabricFold — Live", `updated ${stamp}`],
+  result = await writeSheet("Live" + sfx, [
+    [`FabricFold — Live · ${label}`, `updated ${stamp}`],
     [],
     ["TODAY", ""],
     ["Orders received", today.ordersIn],
@@ -149,7 +163,7 @@ async function runSheetsSyncUnsafe() {
     ["Avg turnaround (hrs)", Math.round(month.avgTurnaround * 10) / 10],
     ["Avg rating", Math.round(month.avgRating * 10) / 10],
   ]);
-  if (!result.ok) throw new Error(`Live tab write failed: ${result.error}`);
+  if (!result.ok) throw new Error(`Live${sfx} tab write failed: ${result.error}`);
 
   /* ---- Daily (last 30 days) ---- */
   const daily: (string | number)[][] = [[
@@ -158,15 +172,16 @@ async function runSheetsSyncUnsafe() {
   ]];
   for (let i = 0; i < 30; i++) {
     const d = istDate(i);
-    const r = await computeReport(parsePeriod({ p: "day", d }));
+    const r = await computeReport(parsePeriod({ p: "day", d }), cid);
     if (r.ordersIn === 0 && r.total === 0 && i > 6) continue;
     daily.push([
       d, r.ordersIn, r.ordersDone, money(r.cash), money(r.upi), money(r.credit),
       money(r.total), money(r.refunds), money(r.expTotal), money(r.net), money(r.netGst),
     ]);
   }
-  result = await writeSheet("Daily", daily);
-  if (!result.ok) throw new Error(`Daily tab write failed: ${result.error}`);
+  result = await writeSheet("Daily" + sfx, daily);
+  if (!result.ok) throw new Error(`Daily${sfx} tab write failed: ${result.error}`);
+  }
 
   /* ---- Plans ---- */
   const [colleges, plansAll] = await Promise.all([
@@ -202,8 +217,10 @@ async function runSheetsSyncUnsafe() {
      rather than buried in the app. Student NAMES are included here because
      this sheet is the owner's own operational record; no phone numbers or
      addresses, matching the no-PII-beyond-necessity rule elsewhere. */
+  for (const { cid, sfx } of scopes) {
   const [complaints, complaintColleges] = await Promise.all([
     db.complaint.findMany({
+      where: cid ? { collegeId: cid } : {},
       orderBy: { at: "desc" },
       take: 200,
       include: { student: { select: { name: true } } },
@@ -238,13 +255,19 @@ async function runSheetsSyncUnsafe() {
   }
   const openCount = complaints.filter((c) => c.status === "open").length;
   compRows.push([], ["Open", openCount, "Resolved", complaints.length - openCount]);
-  result = await writeSheet("Complaints", compRows);
-  if (!result.ok) throw new Error(`Complaints tab write failed: ${result.error}`);
+  result = await writeSheet("Complaints" + sfx, compRows);
+  if (!result.ok) throw new Error(`Complaints${sfx} tab write failed: ${result.error}`);
+  }
 
   /* ---- Staff (attendance + day-close) ---- */
   const m = istDate().slice(0, 7);
-  const staff = await db.staff.findMany({ select: { id: true, name: true, phone: true, role: true, active: true } });
+  const allStaff = await db.staff.findMany({ select: { id: true, name: true, phone: true, role: true, active: true, collegeId: true } });
   const ROLE: Record<number, string> = { 1: "Counter", 2: "Manager", 3: "Admin", 4: "Owner" };
+  for (const { cid, sfx } of scopes) {
+  /* A campus tab lists that campus's staff plus owners/admins with no campus
+     (they work both). Day-close is one cash count per date for the whole
+     business, so it stays on the combined tab only. */
+  const staff = cid ? allStaff.filter((x) => x.collegeId === cid || (!x.collegeId && x.role >= 3)) : allStaff;
   const staffRows: (string | number)[][] = [["Staff", "Phone", "Role", "Active", "Days present this month", "Last clock-in"]];
   for (const s of staff) {
     const att = await db.attendance.findMany({
@@ -256,13 +279,16 @@ async function runSheetsSyncUnsafe() {
        formula and shows #ERROR! instead of the phone number. */
     staffRows.push([s.name, "'+91 " + s.phone, ROLE[s.role] || String(s.role), s.active ? "yes" : "removed", att.length, att[0]?.date || "—"]);
   }
-  staffRows.push([], ["DAY CLOSE — cash counted vs expected"], ["Date", "Expected", "Counted", "Variance", "Note"]);
-  const closes = await db.dayClose.findMany({ orderBy: { date: "desc" }, take: 30 });
-  for (const c of closes) {
-    staffRows.push([c.date, money(N(c.expectedCash)), money(N(c.countedCash)), money(N(c.variance)), c.note || ""]);
+  if (!cid) {
+    staffRows.push([], ["DAY CLOSE — cash counted vs expected"], ["Date", "Expected", "Counted", "Variance", "Note"]);
+    const closes = await db.dayClose.findMany({ orderBy: { date: "desc" }, take: 30 });
+    for (const c of closes) {
+      staffRows.push([c.date, money(N(c.expectedCash)), money(N(c.countedCash)), money(N(c.variance)), c.note || ""]);
+    }
   }
-  result = await writeSheet("Staff", staffRows);
-  if (!result.ok) throw new Error(`Staff tab write failed: ${result.error}`);
+  result = await writeSheet("Staff" + sfx, staffRows);
+  if (!result.ok) throw new Error(`Staff${sfx} tab write failed: ${result.error}`);
+  }
 
   /* ---- Config (editable) — the current live values, ready to change ---- */
   const fresh = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
@@ -288,7 +314,7 @@ async function runSheetsSyncUnsafe() {
   result = await writeSheet("Config", cfgRows);
   if (!result.ok) throw new Error(`Config tab write failed: ${result.error}`);
 
-  return { ok: true as const, at: stamp, tabs: ["Live", "Daily", "Plans", "Students", "Complaints", "Staff", "Config"], applied };
+  return { ok: true as const, at: stamp, tabs: ["Live", "Daily", "Plans", "Students", "Complaints", "Staff", "Config", ...scopes.filter((x) => x.cid).flatMap((x) => ["Live", "Daily", "Complaints", "Staff"].map((t) => t + x.sfx))], applied };
 }
 
 /* ─── Roster tabs, refreshable on their own ────────────────────────────────

@@ -232,6 +232,9 @@ export async function togglePlan(planId: string) {
   return { ok: true as const, active: !p.active };
 }
 
+/** Upper bound for any single amount typed by staff (₹1 crore) — beyond this it is a typo or an attack. */
+const MAX_MONEY = 10_000_000;
+
 /* ----- Rates & GST (Admin+) ----- */
 export async function saveRates(rates: Record<string, { label: string; items: [string, number][] }>, gstPct: number, gstEnabled?: boolean) {
   const st = await requireStaff(3);
@@ -460,10 +463,18 @@ export async function setStaffActive(staffId: string, active: boolean) {
 /* ----- Expenses (Manager+), with optional receipt upload key ----- */
 export async function submitExpense(input: { category: string; amount: number; note: string; method: "cash" | "upi"; receiptKey?: string | null; receiptMime?: string | null }) {
   const st = await requireStaff(2);
-  const amount = Math.floor(input.amount);
-  if (!amount || amount <= 0) return { ok: false as const, error: "Enter a valid amount" };
+  /* Validated here, not just in the form: Math.floor(Infinity) is Infinity and
+     survives a `<= 0` check, an arbitrary `method` string would corrupt the
+     drawer maths, and unbounded text goes straight into the reports. */
+  const amount = Math.floor(Number(input.amount));
+  if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_MONEY) return { ok: false as const, error: "Enter a valid amount" };
+  if (input.method !== "cash" && input.method !== "upi") return { ok: false as const, error: "Pick cash or UPI" };
+  const category = String(input.category ?? "").trim();
+  if (!category || category.length > 60) return { ok: false as const, error: "Enter a category (up to 60 characters)" };
+  const note = String(input.note ?? "").trim();
+  if (note.length > 500) return { ok: false as const, error: "Note is too long (500 characters max)" };
   await db.expense.create({
-    data: { category: input.category, amount, note: input.note.trim() || null, method: input.method, by: st.id, collegeId: st.collegeId || "", receiptKey: input.receiptKey || null, receiptMime: input.receiptMime || null },
+    data: { category, amount, note: note || null, method: input.method, by: st.id, collegeId: st.collegeId || "", receiptKey: input.receiptKey || null, receiptMime: input.receiptMime || null },
   });
   await audit("Expense", `${input.category} ₹${amount} (${input.method})${input.note ? " — " + input.note : ""}${input.receiptKey ? " · invoice attached" : ""}`, st.id);
   return { ok: true as const };
@@ -472,6 +483,10 @@ export async function submitExpense(input: { category: string; amount: number; n
 /* ----- Payroll (Admin+): numbered payslip + optional auto Salaries expense ----- */
 export async function createPayslip(input: { staffId: string; month: string; basic: number; allowances: number; deductions: number; postExpense: boolean }) {
   const st = await requireStaff(3);
+  const parts = [input.basic, input.allowances, input.deductions];
+  if (parts.some((x) => typeof x !== "number" || !Number.isFinite(x) || x < 0 || x > MAX_MONEY)) {
+    return { ok: false as const, error: "Enter valid amounts (zero or more)" };
+  }
   const net = Math.round(input.basic + input.allowances - input.deductions);
   if (net < 0) return { ok: false as const, error: "Net pay cannot be negative" };
   const target = await db.staff.findUniqueOrThrow({ where: { id: input.staffId } });

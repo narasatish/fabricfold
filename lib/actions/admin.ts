@@ -199,10 +199,15 @@ export async function savePlan(input: {
 }) {
   const st = await requireStaff(3);
   assertSameCollege(st, input.collegeId);
-  const name = input.name.trim();
-  if (name.length < 2) return { ok: false as const, error: "Give the plan a name" };
-  if (!input.price || input.price <= 0) return { ok: false as const, error: "Enter a valid price" };
-  const buckets = input.buckets.filter((b) => SERVICES.includes(b.service) && b.cycles > 0);
+  const name = String(input.name ?? "").trim();
+  if (name.length < 2 || name.length > 60) return { ok: false as const, error: "Give the plan a name (2–60 characters)" };
+  if (typeof input.price !== "number" || !Number.isFinite(input.price) || input.price <= 0 || input.price > MAX_MONEY) return { ok: false as const, error: "Enter a valid price" };
+  /* cycles <= 0 means "this service isn't in the plan" (the form sends 0 for
+     unused services) and is dropped; anything else must be a sane whole number. */
+  const buckets = (Array.isArray(input.buckets) ? input.buckets : []).filter((b) => SERVICES.includes(b.service) && !(b.cycles <= 0));
+  if (buckets.some((b) => !Number.isInteger(b.cycles) || b.cycles > 500 || !Number.isFinite(b.kgPerCycle) || b.kgPerCycle <= 0 || b.kgPerCycle > 100)) {
+    return { ok: false as const, error: "Cycles must be a whole number (1–500) and kg per cycle 1–100" };
+  }
   if (!buckets.length) return { ok: false as const, error: "Add at least one service with cycles" };
   const college = await db.college.findUnique({ where: { id: input.collegeId } });
   if (!college) return { ok: false as const, error: "Pick a campus" };

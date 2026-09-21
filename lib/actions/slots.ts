@@ -54,6 +54,9 @@ export async function saveSlotWindow(input: {
   const { id, collegeId, weekday, startMin, endMin, capacity } = input;
   assertSameCollege(st, collegeId);
 
+  // Integers only: NaN passes every `<` / `>` range check below, and a fraction
+  // or Infinity would reach an Int column and crash instead of being refused.
+  if (![weekday, startMin, endMin, capacity].every(Number.isInteger)) return { ok: false as const, error: "Enter whole numbers for the day, times and capacity" };
   if (weekday < 0 || weekday > 6) return { ok: false as const, error: "Pick a day" };
   if (startMin < 0 || endMin > 24 * 60) return { ok: false as const, error: "Times must be within the day" };
   if (endMin <= startMin) return { ok: false as const, error: "End time must be after the start time" };

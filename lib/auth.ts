@@ -116,6 +116,14 @@ export async function requireStaff(minRole = 1) {
  * target row actually belongs to. Throws the same AuthError shape as every
  * other guard, so callers don't need a separate error path.
  */
+/** Business-wide config (default rates, GST, UPI/bank details, report email)
+ *  affects EVERY campus, so a campus-scoped account may not change it. */
+export function assertGlobalScope(st: { collegeId: string | null }) {
+  if (st.collegeId) {
+    throw new AuthError("This setting applies to every campus — only the owner account can change it");
+  }
+}
+
 export function assertSameCollege(st: { collegeId: string | null }, targetCollegeId: string | null | undefined) {
   if (st.collegeId && st.collegeId !== targetCollegeId) {
     throw new AuthError("That's a different campus — not yours to change");

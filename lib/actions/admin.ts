@@ -4,7 +4,7 @@
 import { Prisma } from "../generated/prisma/client";
 import { db } from "../db";
 import { FEATURE_DEFAULTS, featureOn, type FeatureKey } from "../features";
-import { requireStaff, assertSameCollege } from "../auth";
+import { requireStaff, assertSameCollege, assertGlobalScope } from "../auth";
 import { PERM_DEFS } from "../perms";
 import { rosterSoon } from "../sheets-sync";
 import { audit } from "../notify";
@@ -235,6 +235,7 @@ export async function togglePlan(planId: string) {
 /* ----- Rates & GST (Admin+) ----- */
 export async function saveRates(rates: Record<string, { label: string; items: [string, number][] }>, gstPct: number, gstEnabled?: boolean) {
   const st = await requireStaff(3);
+  assertGlobalScope(st);
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const settings = { ...(cfg.settings as Record<string, unknown>), ...(gstEnabled === undefined ? {} : { gstEnabled }) };
   await db.appConfig.update({ where: { id: "main" }, data: { rates: rates as object, gstPct, settings } });
@@ -277,6 +278,7 @@ export async function saveCollegeExpressRates(collegeId: string, expressRates: R
 /* ----- Payment & bank details (Admin+) ----- */
 export async function savePaymentConfig(payment: { upiId: string; payeeName: string; bankName: string; accountName: string; accountNo: string; ifsc: string; gatewayKey: string }) {
   const st = await requireStaff(3);
+  assertGlobalScope(st);
   await db.appConfig.update({ where: { id: "main" }, data: { payment } });
   await audit("Payment details updated", payment.upiId, st.id);
   return { ok: true as const };
@@ -285,6 +287,7 @@ export async function savePaymentConfig(payment: { upiId: string; payeeName: str
 /* ----- Settings (report email etc., Admin+) ----- */
 export async function saveSettings(settings: Record<string, unknown>) {
   const st = await requireStaff(3);
+  assertGlobalScope(st);
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const merged = { ...(cfg.settings as Record<string, unknown>), ...settings };
   await db.appConfig.update({ where: { id: "main" }, data: { settings: JSON.parse(JSON.stringify(merged)) } });

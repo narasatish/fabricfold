@@ -13,7 +13,7 @@ import { notifyOwner } from "../mail";
 import { syncBagToPlan } from "./bags";
 import { CYCLE_RATES } from "../money";
 import { featureOn } from "../features";
-import { enqueueSheetEvent, customerIdFor, flushSoon, istStamp } from "../sheet-events";
+import { enqueueSheetEvent, enqueuePaymentEvent, customerIdFor, flushSoon, istStamp } from "../sheet-events";
 import { rosterSoon } from "../sheets-sync";
 
 const rid = (n: number) => { let s = ""; for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10); return s; };
@@ -183,10 +183,13 @@ export async function activateSubscription(studentId: string, method: "cash" | "
         data: { active: true, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesUsed: 0 },
       });
       await tx.payment.create({ data: { method, amount: gross, collegeId: stu.collegeId, studentId, note: `Subscription: ${stu.subscription!.plan}` } });
+      await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId, label: `Plan: ${stu.subscription!.plan}`, method, amount: gross });
     }, { timeout: 15_000 }); // row lock can queue concurrent activation attempts
   } catch (e) {
     return { ok: false as const, error: (e as Error).message };
   }
+
+  flushSoon();
 
   // Third path that turns a plan on, so it allocates the code too.
   const bag = await syncBagToPlan(studentId);
@@ -249,14 +252,17 @@ export async function assignSubscription(studentId: string, planId: string, meth
       if (creditApplied > 0) {
         await tx.student.update({ where: { id: studentId }, data: { credits: { decrement: creditApplied } } });
         await tx.payment.create({ data: { method: "credit", amount: creditApplied, collegeId: stu.collegeId, studentId, note: `Subscription: ${plan.name} (credit applied)` } });
+        await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId, label: `Plan: ${plan.name}`, method: "credit", amount: creditApplied });
       }
       if (cash > 0) {
         await tx.payment.create({ data: { method, amount: cash, collegeId: stu.collegeId, studentId, note: `Subscription: ${plan.name} (assigned at counter)` } });
+        await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId, label: `Plan: ${plan.name}`, method, amount: cash });
       }
     }, { timeout: 15_000 }); // advisory lock can queue a concurrent caller past Prisma's 5s default
   } catch (e) {
     return { ok: false as const, error: (e as Error).message };
   }
+  flushSoon();
   await db.otp.deleteMany({ where: { purpose: "subscription", refId: studentId } });
 
   /* The customer ID follows the plan. Bronze -> B###, Silver -> S###, Gold ->
@@ -372,7 +378,10 @@ export async function upgradeSubscription(studentId: string, planId: string, met
     await tx.payment.create({
       data: { method, amount: difference, collegeId: stu.collegeId, studentId, note: `Plan change: ${cur.plan} → ${plan.name}` },
     });
+    await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId, label: `Plan change: ${cur.plan} → ${plan.name}`, method, amount: difference });
   }, { timeout: 15_000 }); // row lock can queue concurrent upgrade attempts
+
+  flushSoon();
 
   /* A tier change changes the letter on the bag, so the code is re-issued and
      the old one retired. Free — charging a student to upgrade would be wrong,

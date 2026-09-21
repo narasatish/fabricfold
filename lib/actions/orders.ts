@@ -4,7 +4,7 @@
    prototype does -> realtime broadcast -> notification. */
 import { db, dbSchemaPrefix } from "../db";
 import { featureOn, serviceOn } from "../features";
-import { enqueueSheetEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
+import { enqueueSheetEvent, enqueuePaymentEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff, requireStaffPerm, assertSameCollege } from "../auth";
 import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, expressFlatFee, collegeExpressFee, expressItemRate, isCycleService, collegeUsesCycleBasedPricing, resolveCollegeRates, validWeight, isMoneyAmount } from "../money";
@@ -802,6 +802,7 @@ export async function refundOrder(orderId: string, amount: number, via: "upi" | 
       await tx.payment.create({
         data: { method: "refund", refundVia: via, amount: -amount, orderId: o.id, collegeId: o.collegeId, studentId: o.studentId, note: "Refund" + (reason ? " — " + reason : "") },
       });
+      await enqueuePaymentEvent(tx, { collegeId: o.collegeId, studentId: o.studentId, label: "#" + o.id.slice(-6), method: `refund (${via})`, amount: -amount });
       if (via === "credit") await tx.student.update({ where: { id: o.studentId }, data: { credits: { increment: amount } } });
       if (o.invoice) await createCreditNote(tx, o.invoice, amount, reason, st.id, via);
       // refundAmount is a nullable Decimal column with no DB default — Postgres
@@ -816,6 +817,7 @@ export async function refundOrder(orderId: string, amount: number, via: "upi" | 
     return { ok: false, error: (e as Error).message };
   }
 
+  flushSoon();
   await pushNotif(o.studentId, via === "credit" ? `₹${amount} refunded to your store credits.${reason ? " " + reason : ""}` : `₹${amount} refunded via ${via.toUpperCase()}.${reason ? " " + reason : ""}`, "status");
   await audit("Refund", `#${o.id.slice(-4)} ₹${amount} via ${via}${restoreCycle ? " + cycle returned" : ""}${reason ? " — " + reason : ""}`, st.id);
   bcast(o);

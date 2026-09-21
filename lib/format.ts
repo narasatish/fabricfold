@@ -1,5 +1,11 @@
 /* Formatting helpers — same output as the prototype. */
-export const fmt = (n: number | unknown) => "₹" + Number(n || 0).toLocaleString("en-IN");
+/* Whole rupees stay whole; anything fractional shows exactly two decimals
+   (₹1.10, ₹118.50) — never ₹1.1 or ₹1,234.567. */
+export const fmt = (n: number | unknown) => {
+  const v = Number(n || 0);
+  const x = Number.isFinite(v) ? v : 0;
+  return "₹" + x.toLocaleString("en-IN", Number.isInteger(x) ? undefined : { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
 
 export function timeAgo(t: Date | number) {
   const ts = typeof t === "number" ? t : t.getTime();

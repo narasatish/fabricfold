@@ -1,6 +1,7 @@
 "use server";
 /* Admin: rates & GST, plan, payment details, colleges + feature flags, staff,
    expenses (Manager+), payroll (Admin+). All sensitive edits audit-logged. */
+import { enqueueExpenseEvent, flushSoon } from "../sheet-events";
 import { Prisma } from "../generated/prisma/client";
 import { db } from "../db";
 import { FEATURE_DEFAULTS, featureOn, type FeatureKey } from "../features";
@@ -509,6 +510,8 @@ export async function submitExpense(input: { category: string; amount: number; n
   await db.expense.create({
     data: { category, amount, note: note || null, method: input.method, by: st.id, collegeId: st.collegeId || "", receiptKey: input.receiptKey || null, receiptMime: input.receiptMime || null },
   });
+  await enqueueExpenseEvent(db, { collegeId: st.collegeId || "", category, amount, method: input.method, by: st.name, note: note || null });
+  flushSoon();
   await audit("Expense", `${input.category} ₹${amount} (${input.method})${input.note ? " — " + input.note : ""}${input.receiptKey ? " · invoice attached" : ""}`, st.id);
   return { ok: true as const };
 }
@@ -560,6 +563,7 @@ export async function createPayslip(input: { staffId: string; month: string; bas
         const ex = await tx.expense.create({
           data: { category: "Salaries", amount: net, note: `Payslip ${number} · ${target.name}`, method: "upi", by: st.id, collegeId: target.collegeId || st.collegeId || "" },
         });
+        await enqueueExpenseEvent(tx, { collegeId: target.collegeId || st.collegeId || "", category: "Salaries", amount: net, method: "upi", by: st.name, note: `Payslip ${number} · ${target.name}` });
         expenseId = ex.id;
       }
       return tx.payslip.create({
@@ -573,6 +577,7 @@ export async function createPayslip(input: { staffId: string; month: string; bas
     throw e;
   }
 
+  flushSoon();
   await audit("Payslip", `${slip.number} · ${target.name} · net ₹${net}${input.postExpense ? " · posted to Salaries" : ""}`, st.id);
   return { ok: true as const, number: slip.number };
 }

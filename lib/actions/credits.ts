@@ -1,6 +1,7 @@
 "use server";
 /* Compensation — credits by default; cash is Manager+ only, posts a cash_out
    payment and (if the order was invoiced) raises a proportional credit note. */
+import { enqueuePaymentEvent, flushSoon } from "../sheet-events";
 import { db } from "../db";
 import { requireStaffPerm, assertSameCollege } from "../auth";
 import { createCreditNote } from "../money";
@@ -47,6 +48,7 @@ export async function submitCompensation(input: { studentId: string; orderId?: s
         await tx.student.update({ where: { id: stu.id }, data: { credits: { increment: amount } } });
       } else {
         await tx.payment.create({ data: { method: "cash_out", amount: -amount, collegeId: stu.collegeId, orderId: input.orderId || null, studentId: stu.id, note: "Cash compensation" } });
+        await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId: stu.id, label: input.orderId ? "Compensation #" + input.orderId.slice(-6) : "Compensation", method: "cash payout", amount: -amount });
         if (input.orderId) {
           const inv = await tx.invoice.findUnique({ where: { orderId: input.orderId } });
           if (inv) await createCreditNote(tx, inv, amount, "Cash compensation", st.id, "cash");
@@ -64,6 +66,7 @@ export async function submitCompensation(input: { studentId: string; orderId?: s
     return { ok: false as const, error: (e as Error).message };
   }
 
+  flushSoon();
   if (input.method === "credit") await pushNotif(stu.id, `You received ₹${amount} in credits. ${input.comment || ""}`.trim(), "status");
   await audit("Compensation", `${KIND_LABEL[input.kind] || "Credit"} ₹${amount} (${input.method}) → ${stu.name}`, st.id);
   publish([`student:${stu.id}`, `orders:${stu.collegeId}`], { type: "payment", payload: { studentId: stu.id } });

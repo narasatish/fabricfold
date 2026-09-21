@@ -9,6 +9,7 @@
    Codes are never reused — see lib/bagcode.ts. A lost bag is marked lost and
    the student is issued a NEW code, because the old label is still out there
    on a bag someone may hand in. */
+import { enqueuePaymentEvent, flushSoon } from "../sheet-events";
 import { db } from "../db";
 import { requireStaff, assertSameCollege } from "../auth";
 import { pushNotif, audit } from "../notify";
@@ -102,6 +103,7 @@ export async function issueBag(
           await tx.payment.create({
             data: { method: input.method || "cash", amount: price, collegeId: stu.collegeId, studentId, note: `Bag ${code}` },
           });
+          await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId, label: `Bag ${code}`, method: input.method || "cash", amount: price });
         }
         return b;
       }, { timeout: 15_000 }); // advisory lock can queue a concurrent caller past Prisma's 5s default — same class as orders.ts's acceptOrder/walkInOrder
@@ -122,6 +124,7 @@ export async function issueBag(
   }
   if (!bag) return { ok: false as const, error: "Couldn't allocate a code — please try again" };
 
+  if (price > 0) flushSoon(); // the bag fee's Payments row was queued in the transaction
   await pushNotif(
     studentId,
     complimentary && !upgradingFromWalkIn

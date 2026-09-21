@@ -1,5 +1,6 @@
 "use server";
 /* Operations: staff attendance, day-close cash ritual, wallet top-ups. */
+import { enqueuePaymentEvent, flushSoon } from "../sheet-events";
 import { db } from "../db";
 import { requireStaff, requireStaffPerm, assertSameCollege } from "../auth";
 import { audit } from "../notify";
@@ -149,12 +150,14 @@ export async function topUpCredits(studentId: string, amount: number, method: "c
       if (recent) throw new Error("This top-up was just recorded — check the wallet before adding it again");
       await tx.student.update({ where: { id: studentId }, data: { credits: { increment: amount } } });
       await tx.payment.create({ data: { method, amount, collegeId: stu.collegeId, studentId, note: "Wallet top-up" } });
+      await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId, label: "Wallet top-up", method, amount });
       // appears in the student's wallet ledger as money added
       await tx.compensation.create({ data: { studentId, kind: "topup", amount, method: "credit", comment: `Top-up (${method})`, by: st.id } });
     }, { timeout: 15_000 }); // advisory lock can queue a concurrent caller past Prisma's 5s default — same class as bags.ts/subscription.ts
   } catch (e) {
     return { ok: false as const, error: (e as Error).message };
   }
+  flushSoon();
   await audit("Wallet top-up", `${stu.name} · ₹${amount} (${method})`, st.id);
   void notifyOwner("Wallet top-up", `${stu.name} added ₹${amount} by ${method.toUpperCase()} (taken by ${st.name}).`);
   return { ok: true as const };

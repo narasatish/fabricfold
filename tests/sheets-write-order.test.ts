@@ -9,12 +9,12 @@
    an empty tab, and the trim range starts exactly after the new data. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const calls: { method: string; url: string }[] = [];
+const calls: { method: string; url: string; body?: string }[] = [];
 
 function mockFetch(overrides: { failPut?: boolean; failClear?: boolean } = {}) {
   return vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method || "GET";
-    calls.push({ method, url });
+    calls.push({ method, url, body: typeof init?.body === "string" ? init.body : undefined });
     if (url.includes(":batchUpdate")) return new Response("{}", { status: 200 });
     if (method === "PUT") {
       if (overrides.failPut) return new Response("boom", { status: 500 });
@@ -73,6 +73,18 @@ FVu0/0Ngywo2rPLJjcSuovU=
 -----END PRIVATE KEY-----`;
 
 describe("writeSheet write-then-trim ordering", () => {
+  it("pads every row to A:Z so an empty/short row overwrites stale cells (a deleted student's row must not survive)", async () => {
+    global.fetch = mockFetch() as unknown as typeof fetch;
+    const { writeSheet } = await import("../lib/sheets");
+    await writeSheet("Test", [["h"], [], ["Total", 0]]);
+    const put = calls.find((c) => c.method === "PUT");
+    const values = JSON.parse(put!.body!).values as string[][];
+    expect(values).toHaveLength(3);
+    for (const row of values) expect(row).toHaveLength(26);
+    expect(values[1].every((v) => v === "")).toBe(true);
+    expect(values[2].slice(0, 2)).toEqual(["Total", 0]);
+  });
+
   it("writes data BEFORE trimming leftover rows — never clears before writing", async () => {
     global.fetch = mockFetch() as unknown as typeof fetch;
     const { writeSheet } = await import("../lib/sheets");

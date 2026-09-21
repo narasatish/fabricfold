@@ -150,10 +150,16 @@ export async function writeSheet(tab: string, rows: (string | number)[][]) {
      sync, up to an hour of "the Sheet is broken". Writing first means a
      failure at worst leaves stale-but-present data (self-correcting on the
      next successful sync) rather than a black hole. */
+  /* Pad every row to the full A:Z width. A PUT leaves any cell the payload
+     doesn't mention untouched, so an empty spacer row or a shorter row would
+     keep whatever the PREVIOUS sync left there (found live: a deleted
+     student's row surviving in the "Students — BVRIT" tab under the new
+     "Total 0" line). Explicit "" values overwrite it. */
+  const padded = rows.map((r) => { const a: (string | number)[] = r.slice(0, 26); while (a.length < 26) a.push(""); return a; });
   const dataRange = encodeURIComponent(`${tab}!A1:Z${Math.max(rows.length, 1)}`);
   const put = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${dataRange}?valueInputOption=USER_ENTERED`,
-    { method: "PUT", headers: auth, body: JSON.stringify({ values: rows }) },
+    { method: "PUT", headers: auth, body: JSON.stringify({ values: padded }) },
   );
   if (!put.ok) return { ok: false as const, error: `write failed (${put.status}): ${(await put.text()).slice(0, 200)}` };
 

@@ -28,8 +28,13 @@ describe("campus-boundary bypasses closed in API routes", () => {
   });
   it("the company-wide XLSX export scopes computeReport (and its name lookups) to the caller's campus", () => {
     const src = read("app/api/export/xlsx/route.ts");
-    expect(src).toMatch(/computeReport\(p, me\.collegeId\)/);
-    expect(src).toMatch(/db\.staff\.findMany\(me\.collegeId \? \{ where: \{ collegeId: me\.collegeId \} \} : undefined\)/);
+    // The scope starts as the caller's OWN campus (a scoped account can never
+    // widen it via ?c=); only an owner-level account may pick one.
+    expect(src).toMatch(/let scopeId = me\.collegeId;/);
+    expect(src).toMatch(/if \(!scopeId && asked\)/);
+    expect(src).toMatch(/computeReport\(p, scopeId\)/);
+    expect(src).toMatch(/db\.staff\.findMany\(scopeId \? \{ where: \{ collegeId: scopeId \} \} : undefined\)/);
+    expect(src).toMatch(/db\.student\.findMany\(scopeId \? \{ where: \{ collegeId: scopeId \} \} : undefined\)/);
   });
   it("the Reports screen itself scopes computeReport too — not just its export", () => {
     // Renamed staff.collegeId -> selectedCollegeId when the Owner per-campus

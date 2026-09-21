@@ -54,6 +54,7 @@ const FEATURES: [FeatureKey, string][] = [
   ["svc_wash", "Wash & Iron"], ["svc_washfold", "Wash & Fold"], ["svc_iron", "Iron Only"], ["svc_dryclean", "Dry Clean"],
   ["subscriptions", "Subscriptions"], ["credits", "Credits & compensation"],
   ["express", "Express (same-day)"], ["chat", "Chat & complaints"],
+  ["gateway", "Online payment — all students (UPI/card)"], ["gatewayFaculty", "Online payment — faculty only"],
 ];
 
 export default function StaffAdminClient({ config, colleges, staff, payslips, plans, attendance, month, errors, slotWindows, currentRole }: Props) {

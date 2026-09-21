@@ -8,6 +8,7 @@ import crypto from "node:crypto";
 import { db } from "../db";
 import { requireStudent } from "../auth";
 import { payOrder } from "./orders";
+import { onlinePaymentAllowed } from "../features";
 
 const KEY_ID = () => process.env.RAZORPAY_KEY_ID || "";
 const KEY_SECRET = () => process.env.RAZORPAY_KEY_SECRET || "";
@@ -19,7 +20,7 @@ export async function gatewayEnabled() {
 /** Create a Razorpay order for the amount still owed (after optional credits). */
 export async function createGatewayOrder(orderId: string, applyCredits: boolean) {
   const stu = await requireStudent();
-  if (!(await gatewayEnabled())) return { ok: false as const, error: "Online payment isn't available yet — pay at the counter" };
+  if (!(await gatewayEnabled()) || !onlinePaymentAllowed(stu.college.features, stu.kind)) return { ok: false as const, error: "Online payment isn't available yet — pay at the counter" };
 
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
   if (o.studentId !== stu.id) return { ok: false as const, error: "Not your order" };
@@ -64,8 +65,8 @@ export async function confirmGatewayPayment(
   applyCredits: boolean,
   rzp: { orderId: string; paymentId: string; signature: string },
 ) {
-  await requireStudent(); // session check; ownership is re-checked inside payOrder
-  if (!(await gatewayEnabled())) return { ok: false as const, error: "Gateway not configured" };
+  const stu = await requireStudent(); // session check; ownership is re-checked inside payOrder
+  if (!(await gatewayEnabled()) || !onlinePaymentAllowed(stu.college.features, stu.kind)) return { ok: false as const, error: "Gateway not configured" };
 
   const expected = crypto
     .createHmac("sha256", KEY_SECRET())

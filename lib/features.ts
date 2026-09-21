@@ -32,6 +32,10 @@ export const FEATURE_DEFAULTS = {
   credits: true,
   chat: true,
   express: false,
+  // Online payment (Razorpay). Both OFF until a college is switched on:
+  // gateway = every student + faculty of the college; gatewayFaculty = faculty only.
+  gateway: false,
+  gatewayFaculty: false,
 } as const;
 
 export type FeatureKey = keyof typeof FEATURE_DEFAULTS;
@@ -64,4 +68,12 @@ export function featureOn(features: unknown, key: FeatureKey): boolean {
 export function serviceOn(features: unknown, service: string): boolean {
   const key = SERVICE_FEATURE[service];
   return key ? featureOn(features, key) : false;
+}
+
+/** May this person pay online (Razorpay: UPI / card / netbanking)? Needs the
+ *  college's `gateway` flag, or `gatewayFaculty` for faculty accounts. The
+ *  Razorpay keys being present is a separate, business-wide condition. */
+export function onlinePaymentAllowed(features: unknown, kind: string | null | undefined): boolean {
+  if (featureOn(features, "gateway")) return true;
+  return kind === "faculty" && featureOn(features, "gatewayFaculty");
 }

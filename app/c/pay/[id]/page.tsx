@@ -2,6 +2,7 @@ import { requireStudent } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { fmt } from "@/lib/format";
+import { onlinePaymentAllowed } from "@/lib/features";
 import { notFound, redirect } from "next/navigation";
 import PayClient from "./_components/PayClient";
 
@@ -37,7 +38,7 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
           studentCredits={Number(student.credits)}
           paymentUpiId={payment?.upiId || ""}
           paymentPayeeName={payment?.payeeName || "FabricFold"}
-          gatewayEnabled={!!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET)}
+          gatewayEnabled={!!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) && onlinePaymentAllowed(student.college.features, student.kind)}
           testPay={process.env.TEST_TOOLS === "on"}
         />
       </div>

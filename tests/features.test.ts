@@ -80,9 +80,9 @@ describe("defaults cover everything", () => {
     expect(src).toMatch(/features: DEFAULT_FEATURES/);
   });
 
-  it("express is the only add-on that starts off", () => {
+  it("only express and the two online-payment switches start off", () => {
     const off = (Object.keys(FEATURE_DEFAULTS) as FeatureKey[]).filter((k) => !FEATURE_DEFAULTS[k]);
-    expect(off).toEqual(["express"]);
+    expect(off).toEqual(["express", "gateway", "gatewayFaculty"]);
   });
 });
 

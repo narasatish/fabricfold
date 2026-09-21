@@ -41,6 +41,7 @@ describe("the subscribe route uses it and survives bad JSON", () => {
     expect(src).toMatch(/try \{[^}]*req\.json\(\)/);
   });
   it("caps the key lengths", () => {
-    expect(src).toMatch(/p256dh[sS]*length/);
+    expect(src).toContain("p256dh.length > 200");
+    expect(src).toContain("auth.length > 100");
   });
 });

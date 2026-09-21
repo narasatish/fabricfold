@@ -70,6 +70,23 @@ export function sheetSafe<T>(cell: T): T | string {
 }
 const safeRows = (rows: (string | number)[][]) => rows.map((r) => r.map((c) => sheetSafe(c)));
 
+/* Google allows about 60 write requests a minute per user, and the hourly sync now
+   writes ~20 tabs at three calls each — so a 429 ("slow down") is a realistic
+   answer, and without a retry the rest of the tabs quietly stayed stale for an
+   hour. Retries 429/503 with backoff (honouring Retry-After, capped), a few times
+   only: appends run inside a database transaction that holds a lock, so the total
+   wait must stay short. A real error (400, 401, 403...) is returned at once. */
+async function gfetch(url: string, init: RequestInit, retries = 3): Promise<Response> {
+  const base = Number(process.env.SHEETS_RETRY_BASE_MS ?? 1000);
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, init);
+    if ((res.status !== 429 && res.status !== 503) || attempt >= retries) return res;
+    const retryAfter = Number(res.headers.get("retry-after"));
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 10_000) : base * 2 ** attempt;
+    await new Promise((r) => setTimeout(r, waitMs));
+  }
+}
+
 /** Read a tab's values. Returns [] when the tab doesn't exist yet. */
 export async function readSheet(tab: string): Promise<string[][]> {
   if (!sheetsConfigured()) return [];
@@ -129,10 +146,11 @@ export async function appendSheet(
     }
 
     const range = encodeURIComponent(`${tab}!A1`);
-    const res = await fetch(
+    const res = await gfetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${range}:append` +
         `?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
       { method: "POST", headers: auth, body: JSON.stringify({ values: out }) },
+      1, // one retry only: this runs inside the outbox transaction (30s limit, holds a row lock); the cron sweep retries the rest
     );
     if (!res.ok) return { ok: false as const, error: `append failed (${res.status}): ${(await res.text()).slice(0, 200)}` };
     return { ok: true as const, rows: out.length };
@@ -173,7 +191,7 @@ export async function writeSheet(tab: string, rows: (string | number)[][]) {
      "Total 0" line). Explicit "" values overwrite it. */
   const padded = safeRows(rows).map((r) => { const a: (string | number)[] = r.slice(0, 26); while (a.length < 26) a.push(""); return a; });
   const dataRange = encodeURIComponent(`${tab}!A1:Z${Math.max(rows.length, 1)}`);
-  const put = await fetch(
+  const put = await gfetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${dataRange}?valueInputOption=USER_ENTERED`,
     { method: "PUT", headers: auth, body: JSON.stringify({ values: padded }) },
   );
@@ -183,7 +201,7 @@ export async function writeSheet(tab: string, rows: (string | number)[][]) {
   // written. A failure here leaves harmless stale trailing rows, not a
   // blank tab — the asymmetry is the whole point of this ordering.
   const trimRange = encodeURIComponent(`${tab}!A${rows.length + 1}:Z1000`);
-  const clear = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${trimRange}:clear`, {
+  const clear = await gfetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${trimRange}:clear`, {
     method: "POST", headers: auth, body: "{}",
   });
   if (!clear.ok) return { ok: false as const, error: `trim failed (${clear.status}): ${(await clear.text()).slice(0, 200)}` };

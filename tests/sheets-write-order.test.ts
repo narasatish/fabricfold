@@ -163,3 +163,54 @@ describe("Sheet writes neutralise formula injection", () => {
     expect(putBody()[1].slice(0, 10)).toEqual([5, -2.5, "-5", "+12", "Regular garment", "'+91 9876543210", "—", "", "2026-09-21 14:51", "#1015"]);
   });
 });
+
+/* Google allows about 60 write requests per minute per user. The hourly sync now
+   writes ~20 tabs (three calls each once the tabs are split per college), so a
+   429 "too many requests" is a realistic answer, and without a retry it left the
+   rest of the tabs stale for an hour with nothing to say so. Writes retry with
+   backoff on 429/503 (and honour Retry-After), then give up cleanly. */
+describe("Sheet writes retry when Google says slow down", () => {
+  const withThrottle = (path: "put" | "clear" | "append", times: number, status = 429) => {
+    let left = times;
+    return vi.fn(async (url: string, init?: RequestInit) => {
+      const method = init?.method || "GET";
+      calls.push({ method, url, body: typeof init?.body === "string" ? init.body : undefined });
+      const hit = (path === "put" && method === "PUT") || (path === "clear" && url.includes(":clear")) || (path === "append" && url.includes(":append"));
+      if (hit && left > 0) { left--; return new Response("slow down", { status, headers: { "retry-after": "0" } }); }
+      return new Response("{}", { status: 200 });
+    });
+  };
+  beforeEach(() => { process.env.SHEETS_RETRY_BASE_MS = "1"; });
+
+  it("writeSheet: a 429 on the data write is retried and then succeeds", async () => {
+    global.fetch = withThrottle("put", 2) as unknown as typeof fetch;
+    const { writeSheet } = await import("../lib/sheets");
+    const r = await writeSheet("Test", [["a"], ["b"]]);
+    expect(r.ok).toBe(true);
+    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(3); // 2 throttled + 1 good
+  });
+  it("writeSheet: a 429 on the trim is retried too", async () => {
+    global.fetch = withThrottle("clear", 1) as unknown as typeof fetch;
+    const { writeSheet } = await import("../lib/sheets");
+    expect((await writeSheet("Test", [["a"]])).ok).toBe(true);
+  });
+  it("appendSheet: a 503 is retried and then succeeds", async () => {
+    global.fetch = withThrottle("append", 1, 503) as unknown as typeof fetch;
+    const { appendSheet } = await import("../lib/sheets");
+    expect((await appendSheet("Log", [["t", "x"]])).ok).toBe(true);
+    expect(calls.filter((c) => c.url.includes(":append"))).toHaveLength(2);
+  });
+  it("gives up after a few tries and reports the failure instead of hanging", async () => {
+    global.fetch = withThrottle("put", 99) as unknown as typeof fetch;
+    const { writeSheet } = await import("../lib/sheets");
+    const r = await writeSheet("Test", [["a"]]);
+    expect(r.ok).toBe(false);
+    expect(calls.filter((c) => c.method === "PUT").length).toBeLessThanOrEqual(4);
+  });
+  it("does not retry a real error (a 400 fails immediately)", async () => {
+    global.fetch = withThrottle("put", 99, 400) as unknown as typeof fetch;
+    const { writeSheet } = await import("../lib/sheets");
+    expect((await writeSheet("Test", [["a"]])).ok).toBe(false);
+    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1);
+  });
+});

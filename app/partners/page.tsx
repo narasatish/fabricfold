@@ -41,7 +41,7 @@ export default function Partners() {
         <div className="m-phone" aria-hidden="true">
           <div className="bar" />
           <div className="card pad">
-            <div className="label">This month · your campus</div>
+            <div className="label">Sample month · illustrative figures</div>
             <div className="kv mt8"><span className="k">Orders handled</span><span className="mono">318</span></div>
             <div className="kv"><span className="k">On-time collection</span><span className="mono">97%</span></div>
             <div className="kv"><span className="k">Avg. rating</span><span className="mono">4.6 ★</span></div>

@@ -177,8 +177,20 @@ export function CampusSwitch({ colleges, value, onChange }: { colleges: { id: st
 }
 
 /* ---------- Switch ---------- */
-export function Switch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
-  return <button type="button" className={`switch ${on ? "on" : ""}`} onClick={onToggle} role="switch" aria-checked={on} />;
+export function Switch({ on, onToggle, label }: { on: boolean; onToggle: () => void; label?: string }) {
+  /* A bare toggle has no text of its own, so a screen reader announces it as
+     "switch" with no name. Take an explicit `label`; when a call site doesn't
+     give one, name it from the text sitting beside it in the same row. */
+  const ref = useRef<HTMLButtonElement>(null);
+  const [auto, setAuto] = useState<string | undefined>();
+  useEffect(() => {
+    if (label) return;
+    const p = ref.current?.parentElement;
+    if (!p) return;
+    const t = Array.from(p.childNodes).filter((n) => n !== ref.current).map((n) => (n instanceof HTMLElement ? n.innerText : n.textContent) ?? "").join(" ").replace(/\s+/g, " ").trim().slice(0, 80);
+    if (t) setAuto(t);
+  }, [label]);
+  return <button ref={ref} type="button" className={`switch ${on ? "on" : ""}`} onClick={onToggle} role="switch" aria-checked={on} aria-label={label ?? auto} />;
 }
 
 /* ---------- Realtime (polling) ----------

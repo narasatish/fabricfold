@@ -142,7 +142,7 @@ function OrderRow({ order, rates }: { order: Order; rates: Record<string, any> }
           <Svg name="bag" size={15} />
         </Link>
       )}
-      <Link href={`/c/orders/${order.id}`} style={{ color: "var(--faint)", flexShrink: 0 }}>
+      <Link href={`/c/orders/${order.id}`} aria-label={`View order #${order.id.slice(-4)}`} style={{ color: "var(--faint)", flexShrink: 0 }}>
         <Svg name="chevR" size={18} />
       </Link>
     </div>

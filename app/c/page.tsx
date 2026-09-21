@@ -63,7 +63,7 @@ export default async function CustomerHome() {
         title="FabricFold"
         sub={college ? college.name : undefined}
         right={
-          <Link href="/c/notifications" className="action" style={{ position: "relative" }}>
+          <Link href="/c/notifications" className="action" style={{ position: "relative" }} aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}>
             <Svg name="bell" size={22} />
             {unreadCount > 0 && <span className="notif-dot" />}
           </Link>

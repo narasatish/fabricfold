@@ -388,8 +388,10 @@ export async function deleteCollege(collegeId: string) {
 /* ----- Staff management (Admin+) ----- */
 export async function saveStaff(input: { id?: string; name: string; phone: string; role: number; collegeId: string | null; perms?: Record<string, boolean> }) {
   const st = await requireStaff(3);
-  const phone = input.phone.replace(/\D/g, "").slice(-10);
-  if (!input.name.trim() || phone.length !== 10) return { ok: false as const, error: "Name and a valid mobile are required" };
+  const phone = String(input.phone ?? "").replace(/\D/g, "").slice(-10);
+  const name = String(input.name ?? "").trim();
+  if (!name || name.length > 80 || !/^[6-9]\d{9}$/.test(phone)) return { ok: false as const, error: "Name (up to 80 characters) and a valid mobile are required" };
+  if (!Number.isInteger(input.role) || input.role < 1 || input.role > 4) return { ok: false as const, error: "Pick a role" };
   if (input.role >= 4 && st.role < 4) return { ok: false as const, error: "Only the owner can grant Owner" };
   // A campus-scoped Admin can only create/edit staff ON their own campus —
   // never a global (collegeId null) account, never another campus's.
@@ -397,7 +399,17 @@ export async function saveStaff(input: { id?: string; name: string; phone: strin
   let priorRole: number | undefined;
   if (input.id) {
     const existing = await db.staff.findUnique({ where: { id: input.id }, select: { collegeId: true, role: true } });
-    if (existing) { assertSameCollege(st, existing.collegeId); priorRole = existing.role; }
+    if (existing) {
+      assertSameCollege(st, existing.collegeId);
+      priorRole = existing.role;
+      // Same protections setStaffActive has: only an Owner may change an Owner,
+      // and the last active Owner can never be demoted (nobody could grant Owner again).
+      if (existing.role >= 4 && st.role < 4) return { ok: false as const, error: "Only the owner can change an owner's account" };
+      if (existing.role >= 4 && input.role < 4) {
+        const owners = await db.staff.count({ where: { role: { gte: 4 }, active: true } });
+        if (owners <= 1) return { ok: false as const, error: "This is the last owner — promote someone else first" };
+      }
+    }
   }
   /* Only known tool keys survive, and only real booleans — the override map
      reaches every permission check, so a stray key must die at the door. */
@@ -413,7 +425,7 @@ export async function saveStaff(input: { id?: string; name: string; phone: strin
     await db.staff.update({
       where: { id: input.id },
       data: {
-        name: input.name.trim(), phone, role: input.role, collegeId: input.collegeId,
+        name, phone, role: input.role, collegeId: input.collegeId,
         ...(perms !== undefined ? { perms } : {}),
         ...(roleChanged ? { sessionEpoch: { increment: 1 } } : {}),
       },
@@ -423,7 +435,7 @@ export async function saveStaff(input: { id?: string; name: string; phone: strin
   rosterSoon();
   } else {
     try {
-      await db.staff.create({ data: { name: input.name.trim(), phone, role: input.role, collegeId: input.collegeId } });
+      await db.staff.create({ data: { name, phone, role: input.role, collegeId: input.collegeId } });
     } catch (e) {
       if ((e as { code?: string }).code === "P2002") return { ok: false as const, error: "This number is already registered to another staff member" };
       throw e;

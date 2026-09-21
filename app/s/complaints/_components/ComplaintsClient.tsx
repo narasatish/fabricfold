@@ -1,8 +1,9 @@
 "use client";
+import { TimeAgo } from "@/components/time-ago";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
-import { fmt, timeAgo, initials } from "@/lib/format";
+import { fmt, initials } from "@/lib/format";
 import { Seg, Sheet, useToast } from "@/components/chrome";
 import { sendComplaintMessage, resolveComplaint, grantFreeReservice } from "@/lib/actions/complaints";
 import { submitCompensation } from "@/lib/actions/credits";
@@ -128,7 +129,7 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
           <div key={c.id} className="card pad mt10">
             <div className="between">
               <span className={`pill ${c.status === "open" ? "amber" : ""}`}>{c.status === "open" ? "Open" : "Resolved"}</span>
-              <span className="muted" style={{ fontSize: "12px" }}>{timeAgo(c.at)}</span>
+              <span className="muted" style={{ fontSize: "12px" }}><TimeAgo at={c.at} /></span>
             </div>
             <div className="row gap8 mt8" style={{ alignItems: "center" }}>
               <div className="avatar" style={{ width: 34, height: 34, fontSize: 13 }}>{initials(c.student.name)}</div>
@@ -153,7 +154,7 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
                     }}
                   >
                     {m.text}
-                    <div style={{ fontSize: 10.5, opacity: 0.72, marginTop: 3 }}>{m.from} · {timeAgo(m.at)}</div>
+                    <div style={{ fontSize: 10.5, opacity: 0.72, marginTop: 3 }}>{m.from} · <TimeAgo at={m.at} /></div>
                   </div>
                 ))}
               </div>

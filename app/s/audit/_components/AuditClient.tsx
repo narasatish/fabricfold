@@ -1,5 +1,5 @@
 "use client";
-import { timeAgo } from "@/lib/format";
+import { TimeAgo } from "@/components/time-ago";
 
 type AuditLog = {
   id: string;
@@ -24,7 +24,7 @@ export default function StaffAuditClient({ logs }: { logs: AuditLog[] }) {
                   {log.detail}
                 </div>
                 <div className="faint" style={{ fontSize: "11.5px", marginTop: "6px" }}>
-                  {log.by} · {timeAgo(log.at)}
+                  {log.by} · <TimeAgo at={log.at} />
                 </div>
               </div>
             </div>

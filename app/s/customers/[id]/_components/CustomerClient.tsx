@@ -1,8 +1,9 @@
 "use client";
+import { TimeAgo } from "@/components/time-ago";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
-import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, loyaltyBadge } from "@/lib/format";
+import { fmt, dateStr, initials, STATUS_LABEL, loyaltyBadge } from "@/lib/format";
 import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
 import { assignSubscription, upgradeSubscription, cancelSubscription, adjustCycleUsage } from "@/lib/actions/subscription";
@@ -767,7 +768,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
                 <span className="mono">{fmt(c.amount)}</span>
               </div>
               {c.comment && <div className="muted" style={{ fontSize: "12px", marginTop: "4px" }}>{c.comment}</div>}
-              <div className="muted" style={{ fontSize: "11.5px", marginTop: "3px" }}>{timeAgo(c.at)}</div>
+              <div className="muted" style={{ fontSize: "11.5px", marginTop: "3px" }}><TimeAgo at={c.at} /></div>
             </div>
           ))}
         </>

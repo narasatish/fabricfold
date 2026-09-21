@@ -1,9 +1,10 @@
 "use client";
+import { TimeAgo } from "@/components/time-ago";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { Seg, Sheet, Switch, useToast, CampusSwitch, useCampusSwitch } from "@/components/chrome";
-import { fmt, timeAgo, initials } from "@/lib/format";
+import { fmt, initials } from "@/lib/format";
 import { isOverdue } from "@/lib/money";
 import { dayLabel, hhmm, istDateStr, istMinutes } from "@/lib/slots";
 import { activateSubscription } from "@/lib/actions/subscription";
@@ -241,7 +242,7 @@ export default function StaffHomeClient({
             <div className="muted">
               {pieces} pieces · {Number(o.weightKg || 0)} kg
             </div>
-            <div>{timeAgo(o.createdAt)}</div>
+            <div><TimeAgo at={o.createdAt} /></div>
           </div>
         </div>
         <div className={`pill ${statusClass}`} style={{ marginLeft: "8px" }}>
@@ -428,7 +429,7 @@ export default function StaffHomeClient({
                 </span>
               </div>
               {campusComplaints.slice(0, 3).map((c) => (
-                <div key={c.id} className="muted mt6" style={{ fontSize: 12.5 }}>{c.studentName} — {timeAgo(c.at)}</div>
+                <div key={c.id} className="muted mt6" style={{ fontSize: 12.5 }}>{c.studentName} — <TimeAgo at={c.at} /></div>
               ))}
             </button>
           )}

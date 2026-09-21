@@ -1,9 +1,10 @@
 "use client";
+import { TimeAgo } from "@/components/time-ago";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { Qr } from "@/components/qr";
-import { fmt, dateStr, timeAgo, initials, STATUS_LABEL, upiLink } from "@/lib/format";
+import { fmt, dateStr, initials, STATUS_LABEL, upiLink } from "@/lib/format";
 import { CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, collegeUsesCycleBasedPricing, SHOW_GST_UI } from "@/lib/money";
 import { isOverdue } from "@/lib/money";
 import { useToast, Sheet, Seg, Switch } from "@/components/chrome";
@@ -605,7 +606,7 @@ export default function StaffOrderClient({
                 <div className="tl-dot"><Svg name="check" size={11} sw={3} /></div>
                 <div>
                   <div className="h-sm" style={{ textTransform: "capitalize" }}>{STATUS_LABEL[t.status] || t.status}</div>
-                  <div className="muted" style={{ fontSize: "12px" }}>{dateStr(t.at)} · {timeAgo(t.at)}</div>
+                  <div className="muted" style={{ fontSize: "12px" }}>{dateStr(t.at)} · <TimeAgo at={t.at} /></div>
                 </div>
               </div>
             ))}

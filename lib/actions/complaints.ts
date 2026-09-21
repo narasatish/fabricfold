@@ -16,6 +16,7 @@ export async function submitComplaint(text: string, orderId?: string | null, pho
   const stu = await requireStudent();
   const t = text.trim();
   if (!t) return { ok: false as const, error: "Please describe the issue" };
+  if (t.length > 2000) return { ok: false as const, error: "Please keep the description under 2000 characters" };
 
   /* Students attach the same evidence staff do: at least MIN_DAMAGE_PHOTOS.
      A complaint is the opening of a dispute about someone's clothes, and it

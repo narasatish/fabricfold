@@ -971,7 +971,9 @@ export async function rateOrder(orderId: string, rating: number, comment: string
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
   if (o.studentId !== stu.id) return { ok: false as const, error: "Not your order" };
   if (o.status !== "collected") return { ok: false as const, error: "Order not collected yet" };
-  await db.order.update({ where: { id: o.id }, data: { rating: Math.max(1, Math.min(5, rating)), ratingComment: comment.trim() || null, ratedAt: new Date() } });
+  // NaN or a fraction would fail the Int column and surface as a crash.
+  if (!Number.isInteger(rating)) return { ok: false as const, error: "Pick a rating from 1 to 5" };
+  await db.order.update({ where: { id: o.id }, data: { rating: Math.max(1, Math.min(5, rating)), ratingComment: String(comment ?? "").trim().slice(0, 500) || null, ratedAt: new Date() } });
   bcast(o);
   return { ok: true as const };
 }

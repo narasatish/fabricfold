@@ -189,6 +189,8 @@ export default function RegisterForm({ collegeId, collegeName }: RegisterFormPro
                       id="name-input"
                       type="text"
                       placeholder="Enter your full name"
+                      maxLength={80}
+                      autoComplete="name"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       disabled={loading}

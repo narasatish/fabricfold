@@ -18,6 +18,10 @@ import { rateLimit, requestIp } from "../rate-limit";
 import { notifyOwner } from "../mail";
 import { audit } from "../notify";
 
+/* Per-IP cap on registrations — sized for a campus behind one shared WiFi/NAT
+   address (a QR poster at the college can bring dozens in an hour). Each one still
+   needs a real phone to send the WhatsApp message, which is the real cost to an abuser. */
+const WA_REGISTER_MAX_PER_IP_HOUR = 60;
 const TTL_MS = 5 * 60_000;                    // same as login flow
 const CLAIM_COOKIE = "ff_wa_register_claim"; // distinct from login cookie
 
@@ -48,8 +52,11 @@ export async function startWhatsAppRegister(input: { name: string; collegeId: st
   const number = businessNumber();
   if (!number) return { ok: false as const, error: "WhatsApp registration isn't switched on yet." };
 
-  const name = input.name.trim();
+  // No control characters (a NUL byte crashes the database write), collapse runs
+  // of whitespace, and cap the length — the name goes straight onto the student.
+  const name = String(input.name ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
   if (name.length < 2) return { ok: false as const, error: "Enter your name" };
+  if (name.length > 80) return { ok: false as const, error: "That name is too long — please use up to 80 characters" };
 
   const college = await db.college.findUnique({ where: { id: input.collegeId } });
   if (!college || !college.active) return { ok: false as const, error: "Campus not found" };
@@ -57,7 +64,7 @@ export async function startWhatsAppRegister(input: { name: string; collegeId: st
   /* Rate-limit the flow the same way login does: per IP, same cap. */
   const ip = await requestIp();
   if (ip !== "unknown") {
-    const lim = await rateLimit(`wa:register:${ip}`, 10, 3600);
+    const lim = await rateLimit(`wa:register:${ip}`, WA_REGISTER_MAX_PER_IP_HOUR, 3600);
     if (!lim.allowed) {
       return { ok: false as const, error: `Too many attempts from this device. Try again in ${Math.ceil(lim.retryAfterSec / 60)} minutes.` };
     }
@@ -190,6 +197,14 @@ export async function checkWhatsAppRegister(code: string) {
     student = result.stu;
     bagCode = result.code;
   } catch (e) {
+    /* The most common cause by far: this phone already has an account (someone
+       who registered before taps "Join" again). Say so and point them to Sign
+       in — a generic "try again" here fails identically every time. */
+    const existing = row.phone ? await db.student.findUnique({ where: { phone: row.phone }, select: { id: true } }) : null;
+    if (existing) {
+      await db.waVerify.updateMany({ where: { id: row.id }, data: { status: "failed", reason: "This number is already registered" } });
+      return { ok: false as const, status: "failed" as const, error: "This number is already registered — go back and tap Sign in instead." };
+    }
     console.error("[wa-register] account creation failed", e);
     /* The claim above marked this row "claimed" BEFORE the account-creation
        transaction ran — so a failure here (e.g. the phone already belongs

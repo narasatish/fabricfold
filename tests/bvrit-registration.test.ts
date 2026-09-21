@@ -133,22 +133,19 @@ describe("BVRIT registration flow", () => {
     const college = await db.college.findFirst({ where: { name: "BVRIT" } });
     if (!college) return;
 
-    // Clear the rate limit key first
-    await db.rateLimit.deleteMany({ where: { key: { startsWith: "wa:register:" } } });
+    /* The cap is 60 per hour per IP (a whole campus shares one WiFi address, so
+       10 refused the 11th student on launch morning). Seed the counter to 58
+       instead of making 60 slow round trips: #59 and #60 must pass, #61 must not. */
+    await db.rateLimit.deleteMany({ where: { key: "wa:register:203.0.113.42" } });
+    await db.rateLimit.create({ data: { key: "wa:register:203.0.113.42", windowStart: new Date(), count: 58 } });
 
-    // Generate multiple requests and expect the limit to be hit
-    const first = await startWhatsAppRegister({ name: "Test1", collegeId: college.id });
-    expect(first.ok).toBe(true);
+    const at59 = await startWhatsAppRegister({ name: "Test59", collegeId: college.id });
+    expect(at59.ok).toBe(true);
+    const at60 = await startWhatsAppRegister({ name: "Test60", collegeId: college.id });
+    expect(at60.ok).toBe(true);
 
-    // Continue for a few more to get close to the limit (10 max per hour)
-    let lastResult = first;
-    for (let i = 0; i < 9; i++) {
-      lastResult = await startWhatsAppRegister({ name: `Test${i}`, collegeId: college.id });
-      expect(lastResult.ok).toBe(true);
-    }
-
-    // The 11th attempt should be rate-limited
-    const rateLimited = await startWhatsAppRegister({ name: "Test11", collegeId: college.id });
+    // The 61st attempt in the hour is rate-limited
+    const rateLimited = await startWhatsAppRegister({ name: "Test61", collegeId: college.id });
     expect(rateLimited.ok).toBe(false);
     expect(rateLimited.error).toMatch(/too many attempts/i);
   });

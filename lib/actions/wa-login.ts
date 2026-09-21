@@ -21,6 +21,11 @@ import { db } from "../db";
 import { createSession } from "../auth";
 import { rateLimit, requestIp } from "../rate-limit";
 
+/* Per-IP cap on sign-in attempts. A whole campus shares one WiFi/NAT address, so
+   this must be sized for launch morning, not for a single person: the code is 8
+   characters, lives 5 minutes and is bound to the browser that started it, so the
+   cap only guards against table spam, not against guessing. */
+const WA_START_MAX_PER_IP_HOUR = 120;
 const TTL_MS = 5 * 60_000;      // matches the OTP window — long enough to switch apps, short enough to matter
 const CLAIM_COOKIE = "ff_wa_claim";
 
@@ -53,7 +58,7 @@ export async function startWhatsAppLogin(mode: "customer" | "staff" = "customer"
      this, one script could fill the table and keep every code slot warm. */
   const ip = await requestIp();
   if (ip !== "unknown") {
-    const lim = await rateLimit(`wa:start:${ip}`, 10, 3600);
+    const lim = await rateLimit(`wa:start:${ip}`, WA_START_MAX_PER_IP_HOUR, 3600);
     if (!lim.allowed) {
       return { ok: false as const, error: `Too many attempts from this device. Try again in ${Math.ceil(lim.retryAfterSec / 60)} minutes.` };
     }

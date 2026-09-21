@@ -15,6 +15,22 @@ export type Period = { kind: "day" | "week" | "month" | "year" | "all"; from: Da
 const istDateStr = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 const istBoundary = (dateStr: string) => new Date(`${dateStr}T00:00:00+05:30`);
 
+/** The current month as "YYYY-MM" in IST (the server clock is UTC, which is a month behind for the first 5½ hours of every month). */
+export const istCurrentMonth = () => istDateStr().slice(0, 7);
+
+/** [from, to) of a calendar month in IST for a "YYYY-MM" string, or null if malformed. */
+export function istMonthRange(m: unknown): { from: Date; to: Date } | null {
+  if (typeof m !== "string") return null;
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(m);
+  if (!match) return null;
+  const y = Number(match[1]), mo = Number(match[2]);
+  const ny = mo === 12 ? y + 1 : y, nm = mo === 12 ? 1 : mo + 1;
+  return {
+    from: istBoundary(`${y}-${String(mo).padStart(2, "0")}-01`),
+    to: istBoundary(`${ny}-${String(nm).padStart(2, "0")}-01`),
+  };
+}
+
 export function parsePeriod(sp: { p?: string; d?: string; m?: string; y?: string }): Period {
   const kind = (sp.p as Period["kind"]) || "day";
   if (kind === "day") {

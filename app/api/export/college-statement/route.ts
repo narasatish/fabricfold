@@ -2,6 +2,7 @@
    college administration: orders, revenue by service, payment split, GST.
    Admin+ only. /api/export/college-statement?collegeId=…&m=YYYY-MM */
 import { db } from "@/lib/db";
+import { istMonthRange, istCurrentMonth } from "@/lib/report";
 import { requireStaff, assertSameCollege } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -18,10 +19,10 @@ export async function GET(req: Request) {
   }
   const url = new URL(req.url);
   const collegeId = url.searchParams.get("collegeId") || "";
-  const m = url.searchParams.get("m") || new Date().toISOString().slice(0, 7);
-  const [y, mo] = m.split("-").map(Number);
-  if (!y || !mo) return new Response("bad month", { status: 400 });
-  const from = new Date(y, mo - 1, 1), to = new Date(y, mo, 1);
+  const m = url.searchParams.get("m") || istCurrentMonth();
+  const range = istMonthRange(m);
+  if (!range) return new Response("bad month", { status: 400 });
+  const { from, to } = range;
 
   try {
     assertSameCollege(staff, collegeId);

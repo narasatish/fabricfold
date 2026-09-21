@@ -2,6 +2,7 @@
 import ExcelJS from "exceljs";
 import { requireStudent } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { istMonthRange, istCurrentMonth } from "@/lib/report";
 
 export const dynamic = "force-dynamic";
 
@@ -13,9 +14,10 @@ export async function GET(req: Request) {
     return new Response("unauthorized", { status: 401 });
   }
   const url = new URL(req.url);
-  const m = url.searchParams.get("m") || new Date().toISOString().slice(0, 7);
-  const [y, mo] = m.split("-").map(Number);
-  const from = new Date(y, mo - 1, 1), to = new Date(y, mo, 1);
+  const m = url.searchParams.get("m") || istCurrentMonth();
+  const range = istMonthRange(m);
+  if (!range) return new Response("bad month", { status: 400 });
+  const { from, to } = range;
   const N = (x: unknown) => Number(x || 0);
 
   const [orders, payments, comps, uses] = await Promise.all([

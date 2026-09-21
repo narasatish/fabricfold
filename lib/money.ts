@@ -276,3 +276,10 @@ export function loyaltyTier(lifetimePieces: number) {
 export function validWeight(w: unknown): boolean {
   return w == null || (typeof w === "number" && Number.isFinite(w) && w >= 0 && w <= 500);
 }
+
+/** A real, positive rupee amount with at most 2 decimals (paise). Compares with a
+ *  tolerance because 1.1 * 100 is 110.00000000000001 in floating point. */
+export function isMoneyAmount(x: unknown): boolean {
+  if (typeof x !== "number" || !Number.isFinite(x) || x <= 0) return false;
+  return Math.abs(x * 100 - Math.round(x * 100)) < 1e-6;
+}

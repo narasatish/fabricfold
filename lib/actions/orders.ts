@@ -7,7 +7,7 @@ import { featureOn, serviceOn } from "../features";
 import { enqueueSheetEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff, requireStaffPerm, assertSameCollege } from "../auth";
-import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, expressFlatFee, collegeExpressFee, expressItemRate, isCycleService, collegeUsesCycleBasedPricing, resolveCollegeRates, validWeight } from "../money";
+import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, expressFlatFee, collegeExpressFee, expressItemRate, isCycleService, collegeUsesCycleBasedPricing, resolveCollegeRates, validWeight, isMoneyAmount } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit } from "../notify";
@@ -760,7 +760,10 @@ export async function refundOrder(orderId: string, amount: number, via: "upi" | 
   /* Was requireStaff(1) — ANY staff could give money back. Refunds are now a
      named tool: Manager+ by default, grantable or revocable per person. */
   const st = await requireStaffPerm("refunds");
-  if (!amount || amount <= 0) return { ok: false, error: "Enter a valid amount" };
+  if (!isMoneyAmount(amount)) return { ok: false, error: "Enter a valid amount (up to 2 decimals)" };
+  if (!["upi", "cash", "credit"].includes(via)) return { ok: false, error: "Pick how the refund is paid" };
+  reason = String(reason ?? "").trim();
+  if (reason.length > 200) return { ok: false, error: "Keep the reason under 200 characters" };
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId }, include: { invoice: true, student: { include: { subscription: true } } } });
   assertSameCollege(st, o.collegeId);
   // Nothing capped this against what was actually billed — a typo (₹5000

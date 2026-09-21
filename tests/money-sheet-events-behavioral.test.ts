@@ -69,12 +69,21 @@ beforeAll(async () => {
 }, 300_000);
 
 
-const outbox = async (kind: string, since: Date) =>
-  (await db.sheetOutbox.findMany({ where: { kind, at: { gte: since } }, orderBy: { at: "asc" } })).map((r) => ({ collegeId: r.collegeId, row: r.payload as unknown as (string | number)[] }));
+/* Rows added since a snapshot, by id — NOT by timestamp: the database stamps `at`
+   with its own clock, and a few seconds of drift from this machine's clock made a
+   time filter miss a fresh row (seen once in a batch run). */
+const seen = new Set<string>();
+const snapshot = async () => { (await db.sheetOutbox.findMany({ select: { id: true } })).forEach((r) => seen.add(r.id)); return new Date(); };
+const outbox = async (kind: string, _since: Date) => {
+  const rows = await db.sheetOutbox.findMany({ where: { kind }, orderBy: { at: "asc" } });
+  const fresh = rows.filter((r) => !seen.has(r.id));
+  fresh.forEach((r) => seen.add(r.id));
+  return fresh.map((r) => ({ collegeId: r.collegeId, row: r.payload as unknown as (string | number)[] }));
+};
 
 describe("money movements reach the Sheet outbox", { timeout: 180_000 }, () => {
   it("wallet top-up -> a Payments row, positive, for the student's college", async () => {
-    const t0 = new Date();
+    const t0 = await snapshot();
     expect((await ops.topUpCredits("444403", 500, "cash")).ok).toBe(true);
     const ev = await outbox("payment", t0);
     expect(ev).toHaveLength(1);
@@ -88,7 +97,7 @@ describe("money movements reach the Sheet outbox", { timeout: 180_000 }, () => {
     const placed = await orders.walkInOrder("444403", { service: "ironOnly", items: [{ label: "Garment", qty: 4 }], weightKg: null, useCycle: false });
     if (!placed.ok) throw new Error("setup");
     expect((await orders.recordPay(placed.id, "cash", false, false)).ok).toBe(true);
-    const t0 = new Date();
+    const t0 = await snapshot();
     expect((await orders.refundOrder(placed.id, 15, "cash", "QA")).ok).toBe(true);
     const ev = await outbox("payment", t0);
     expect(ev).toHaveLength(1);
@@ -98,7 +107,7 @@ describe("money movements reach the Sheet outbox", { timeout: 180_000 }, () => {
   });
 
   it("cash compensation -> a Payments row, negative", async () => {
-    const t0 = new Date();
+    const t0 = await snapshot();
     expect((await credits.submitCompensation({ studentId: "444403", kind: "damage", amount: 40, method: "cash", comment: "QA payout" } as never)).ok).toBe(true);
     const ev = await outbox("payment", t0);
     expect(ev).toHaveLength(1);
@@ -107,7 +116,7 @@ describe("money movements reach the Sheet outbox", { timeout: 180_000 }, () => {
   });
 
   it("expense -> an Expenses row for the right college", async () => {
-    const t0 = new Date();
+    const t0 = await snapshot();
     expect((await admin.submitExpense({ category: "Detergent", amount: 250, note: "QA", method: "cash" })).ok).toBe(true);
     const ev = await outbox("expense", t0);
     expect(ev).toHaveLength(1);

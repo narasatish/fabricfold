@@ -58,7 +58,8 @@ export async function submitComplaint(text: string, orderId?: string | null, pho
 }
 
 export async function sendComplaintMessage(complaintId: string, text: string, photos?: string[]) {
-  const t = text.trim();
+  const t = String(text ?? "").trim();
+  if (t.length > 2000) return { ok: false as const, error: "Please keep the message under 2000 characters" };
   const pics = cleanPhotos(photos);
   // A photo on its own is a valid message — "here's what it looks like".
   if (!t && !pics.length) return { ok: false as const, error: "Type a message or attach a photo" };
@@ -92,6 +93,7 @@ export async function sendComplaintMessage(complaintId: string, text: string, ph
 export async function reportOrderDamage(orderId: string, input: { comment: string; photos: string[] }) {
   const st = await requireStaff(1);
   const comment = (input.comment || "").trim();
+  if (comment.length > 2000) return { ok: false as const, error: "Keep the description under 2000 characters" };
   const pics = cleanPhotos(input.photos);
   if (comment.length < 5) return { ok: false as const, error: "Describe what you found — this is the record if the student disputes it later" };
   if (pics.length < MIN_DAMAGE_PHOTOS) {
@@ -162,7 +164,8 @@ export async function resolveComplaint(complaintId: string, resolution: string):
   const st = await requireStaff(1);
   const c = await db.complaint.findUniqueOrThrow({ where: { id: complaintId } });
   assertSameCollege(st, c.collegeId);
-  const res = resolution.trim() || "Resolved by staff.";
+  const res = String(resolution ?? "").trim() || "Resolved by staff.";
+  if (res.length > 500) return { ok: false as const, error: "Keep the resolution note under 500 characters" };
 
   /* Claim the complaint atomically before recording the resolution — the check
      above ran before the update, so two concurrent calls could both pass it and

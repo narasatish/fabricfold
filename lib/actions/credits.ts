@@ -11,6 +11,7 @@ import { pushNotif, audit } from "../notify";
 const KIND_LABEL: Record<string, string> = { damage: "Damage", stain: "Stain/re-do", missing: "Missing item", goodwill: "Goodwill", manual: "Adjustment" };
 
 export async function submitCompensation(input: { studentId: string; orderId?: string | null; complaintId?: string | null; kind: string; amount: number; method: "credit" | "cash"; comment: string }) {
+  if (String(input.comment ?? "").length > 300) return { ok: false as const, error: "Keep the comment under 300 characters" };
   /* Compensation gives money away, so it rides the refunds tool. The old
      "credit comp = any staff" quietly meant Counter could mint wallet money;
      grantable now, but a deliberate grant rather than a default. Cash still

@@ -75,7 +75,7 @@ export async function closeDay(countedCash: number, note?: string, collegeId?: s
   const variance = Math.round((countedCash - expected) * 100) / 100;
 
   try {
-    await db.dayClose.create({ data: { date, collegeId: scope, expectedCash: expected, countedCash, variance, note: note?.trim() || null, by: st.id } });
+    await db.dayClose.create({ data: { date, collegeId: scope, expectedCash: expected, countedCash, variance, note: note?.trim().slice(0, 200) || null, by: st.id } });
   } catch (e) {
     // Two concurrent close-day taps both pass the pre-check above, and the
     // second hits the unique constraint on `date`. Catch and return the same

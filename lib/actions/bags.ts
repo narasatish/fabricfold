@@ -96,7 +96,7 @@ export async function issueBag(
           data: {
             code, studentId, tier: isTier(tier) ? tier : null,
             complimentary, price, issuedBy: st.id,
-            note: input.note?.trim() || null,
+            note: input.note?.trim().slice(0, 200) || null,
           },
         });
         if (price > 0) {
@@ -387,7 +387,7 @@ export async function releaseBagCode(bagId: string, note?: string) {
      condition ensures only one succeeds. */
   const released = await db.bag.updateMany({
     where: { id: bagId, status: { not: "released" } },
-    data: { status: "released", releasedAt: new Date(), note: note?.trim() || bag.note },
+    data: { status: "released", releasedAt: new Date(), note: note?.trim().slice(0, 200) || bag.note },
   });
   if (released.count === 0) return { ok: false as const, error: "This code has already been released" };
 
@@ -410,7 +410,7 @@ export async function retireBag(bagId: string, status: "lost" | "replaced", note
   // otherwise both pass the check above and the second write silently wins.
   const claimed = await db.bag.updateMany({
     where: { id: bagId, status: "active" },
-    data: { status, note: note?.trim() || bag.note },
+    data: { status, note: note?.trim().slice(0, 200) || bag.note },
   });
   if (claimed.count === 0) return { ok: false as const, error: "This bag was just updated by someone else — refresh and try again" };
   await audit("Bag retired", `${bag.code} · ${bag.student.name} · ${status}${note ? ` — ${note}` : ""}`, st.id);

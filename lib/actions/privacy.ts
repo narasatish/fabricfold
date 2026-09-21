@@ -121,7 +121,7 @@ export async function eraseMyData(confirmation: string) {
 /** Staff erase a student on their behalf — a request made at the counter. */
 export async function eraseStudentData(studentId: string, reason: string) {
   const st = await requireStaff(3); // Admin+
-  const note = (reason || "").trim();
+  const note = (reason || "").trim().slice(0, 300);
   if (note.length < 3) return { ok: false as const, error: "Give a reason — erasure is irreversible and auditable" };
 
   const stu = await db.student.findUnique({ where: { id: studentId } });

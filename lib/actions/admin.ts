@@ -22,10 +22,11 @@ import { PAYMENT_KEYS, ratesProblem, expressProblem, gstProblem, paymentProblem,
    one — see the bag-issuance block below. */
 export async function registerStudent(input: { name: string; phone: string; collegeId: string; kind?: "student" | "faculty" }) {
   const st = await requireStaff(1);
-  const name = input.name.trim();
-  const phone = input.phone.replace(/\D/g, "").slice(-10);
-  if (name.length < 2) return { ok: false as const, error: "Enter the student's name" };
-  if (phone.length !== 10) return { ok: false as const, error: "Enter a valid 10-digit mobile number" };
+  const name = String(input.name ?? "").trim();
+  const phone = String(input.phone ?? "").replace(/\D/g, "").slice(-10);
+  if (name.length < 2 || name.length > 80) return { ok: false as const, error: "Enter the student's name (2–80 characters)" };
+  // Indian mobiles start 6-9; 0000000000 / 1234567890 can never receive a message.
+  if (!/^[6-9]\d{9}$/.test(phone)) return { ok: false as const, error: "Enter a valid 10-digit mobile number" };
   if (await db.student.findUnique({ where: { phone } })) return { ok: false as const, error: "This number is already registered" };
   assertSameCollege(st, input.collegeId);
   const college = await db.college.findUnique({ where: { id: input.collegeId } });
@@ -92,8 +93,8 @@ export async function registerStudent(input: { name: string; phone: string; coll
    come to the counter and an Admin makes the change here. */
 export async function updateStudentPhone(studentId: string, newPhone: string) {
   const st = await requireStaff(3);
-  const phone = newPhone.replace(/\D/g, "").slice(-10);
-  if (phone.length !== 10) return { ok: false as const, error: "Enter a valid 10-digit mobile number" };
+  const phone = String(newPhone ?? "").replace(/\D/g, "").slice(-10);
+  if (!/^[6-9]\d{9}$/.test(phone)) return { ok: false as const, error: "Enter a valid 10-digit mobile number" };
   const existing = await db.student.findUnique({ where: { phone } });
   if (existing && existing.id !== studentId) return { ok: false as const, error: "This number is already registered to another student" };
   const stu = await db.student.findUnique({ where: { id: studentId } });

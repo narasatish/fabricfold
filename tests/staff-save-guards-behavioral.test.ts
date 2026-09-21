@@ -121,3 +121,33 @@ describe("saveCollege input checks", () => {
     expect((await college({ name: "Real Campus", closedWeekday: null })).ok).toBe(true);
   });
 });
+
+describe("registerStudent / updateStudentPhone input checks", () => {
+  const reg = (over: Record<string, unknown> = {}) =>
+    admin.registerStudent({ name: "New Kid", phone: "9811111111", collegeId: "col1", ...over } as never);
+  const bad: [string, Record<string, unknown>][] = [
+    ["phone starting 1", { phone: "1234567890" }], ["phone all zeros", { phone: "0000000000" }], ["9-digit phone", { phone: "981111111" }],
+    ["300-char name", { name: "N".repeat(300) }], ["1-char name", { name: "A" }], ["blank name", { name: "   " }],
+  ];
+  for (const [label, over] of bad) {
+    it(`registerStudent rejects ${label}`, async () => {
+      await as("own1", 4);
+      const before = await db.student.count();
+      const r = await reg(over);
+      expect(r.ok, label).toBe(false);
+      expect(await db.student.count()).toBe(before);
+    });
+  }
+  it("still registers a normal student, with punctuation in the number", async () => {
+    await as("own1", 4);
+    expect((await reg({ phone: "+91 98111 22222", name: "Real Kid" })).ok).toBe(true);
+    expect(await db.student.count({ where: { phone: "9811122222" } })).toBe(1);
+  });
+  it("updateStudentPhone rejects a number that can't be a real mobile", async () => {
+    await as("own1", 4);
+    const s = await db.student.findFirstOrThrow({ where: { phone: "9811122222" } });
+    for (const p of ["1234567890", "0000000000"]) expect((await admin.updateStudentPhone(s.id, p)).ok, p).toBe(false);
+    expect((await db.student.findUniqueOrThrow({ where: { id: s.id } })).phone).toBe("9811122222");
+    expect((await admin.updateStudentPhone(s.id, "9822233333")).ok).toBe(true);
+  });
+});

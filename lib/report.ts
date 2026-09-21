@@ -154,11 +154,12 @@ export async function reportText(p: Period) {
 
 /** Point-in-time snapshot — not period-scoped, always "right now": the current
     order backlog and open complaints, regardless of when they were created. */
-export async function currentBacklog() {
+export async function currentBacklog(collegeId?: string | null) {
+  const scope = collegeId ? { collegeId } : {};
   const [inProgress, ready, openComplaints] = await Promise.all([
-    db.order.count({ where: { status: { in: ["received", "processing"] } } }),
-    db.order.count({ where: { status: "ready" } }),
-    db.complaint.count({ where: { status: "open" } }),
+    db.order.count({ where: { ...scope, status: { in: ["received", "processing"] } } }),
+    db.order.count({ where: { ...scope, status: "ready" } }),
+    db.complaint.count({ where: { ...scope, status: "open" } }),
   ]);
   return { inProgress, ready, pending: inProgress + ready, openComplaints };
 }
@@ -181,6 +182,27 @@ export async function dailyEmailReport() {
     `Orders received: ${r.ordersIn}  Completed: ${r.ordersDone}  Collected: ${f(r.total)}  Complaints: ${r.complaints.length}`,
   ].join("\n");
 
+  /* BVRIT and St Mary's are separate businesses: after the combined view, one
+     block per college so neither's numbers are buried in the total. */
+  const colleges = await db.college.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } });
+  const perCollege: string[] = [];
+  for (const c of colleges) {
+    const [b, t, m] = await Promise.all([
+      currentBacklog(c.id),
+      computeReport(parsePeriod({ p: "day" }), c.id),
+      computeReport(parsePeriod({ p: "month" }), c.id),
+    ]);
+    perCollege.push(
+      ``,
+      `━━ ${c.name.toUpperCase()} ━━`,
+      `Right now — In progress: ${b.inProgress}  Ready to collect: ${b.ready}  Open complaints: ${b.openComplaints}`,
+      section("Today", t),
+      `Cash: ${f(t.cash)}  UPI: ${f(t.upi)}  Credits: ${f(t.credit)}  Expected in drawer: ${f(t.expectedDrawer)}`,
+      section("This month", m),
+      `Net (month): ${f(m.net)}  Expenses: ${f(m.expTotal)}`,
+    );
+  }
+
   return [
     `FabricFold — Daily Report — ${todayLabel}`,
     ``,
@@ -195,5 +217,6 @@ export async function dailyEmailReport() {
     ``,
     `Cash: ${f(today.cash)}  UPI: ${f(today.upi)}  Credits: ${f(today.credit)}  (today)`,
     `GST collected (today): ${f(today.gstCollected)}  Net GST payable (month): ${f(month.netGst)}`,
+    ...perCollege,
   ].join("\n");
 }

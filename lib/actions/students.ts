@@ -77,7 +77,7 @@ function parseLine(line: string): { name: string; phone: string } {
     else nameBits.push(p);
   }
   if (!phone) { const d = line.replace(/\D/g, ""); if (d.length >= 10) phone = d.slice(-10); }
-  const name = nameBits.join(" ").replace(/[+\d]/g, "").trim() || "Student";
+  const name = nameBits.join(" ").replace(/[+\d]/g, "").trim().slice(0, 80) || "Student";
   return { name, phone };
 }
 
@@ -97,7 +97,8 @@ export async function bulkRegisterStudents(text: string, collegeId: string) {
   const seen = new Set<string>();
   for (const line of lines) {
     const { name, phone } = parseLine(line);
-    if (phone.length !== 10) { skipped.push({ line, reason: "no valid 10-digit phone" }); continue; }
+    // Indian mobiles start 6-9; 0000000000 / 1234567890 can never receive a message.
+    if (!/^[6-9]\d{9}$/.test(phone)) { skipped.push({ line, reason: "no valid 10-digit phone" }); continue; }
     if (seen.has(phone)) { skipped.push({ line, reason: "duplicate in list" }); continue; }
     seen.add(phone);
     if (await db.student.findUnique({ where: { phone } })) { skipped.push({ line, reason: "already registered" }); continue; }
@@ -121,6 +122,7 @@ export async function broadcastNotice(scope: string, text: string) {
   const st = await requireStaff(2);
   const msg = text.trim();
   if (msg.length < 3) return { ok: false as const, error: "Enter a message" };
+  if (msg.length > 500) return { ok: false as const, error: "Keep the notice under 500 characters" };
   // A campus-scoped staff member can't broadcast to "all" (that reaches
   // other campuses) or to any campus but their own.
   if (st.collegeId && (scope === "all" || scope !== st.collegeId)) {

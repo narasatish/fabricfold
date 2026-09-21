@@ -55,18 +55,26 @@ export async function clockOut() {
 /* ---------- Day close (Manager+) ----------
    Staff physically count the cash drawer; the app records counted vs expected.
    A non-zero variance is permanent evidence — the anti-theft ritual. */
-export async function closeDay(countedCash: number, note?: string) {
+export async function closeDay(countedCash: number, note?: string, collegeId?: string | null) {
   const st = await requireStaffPerm("dayclose");
   const date = istToday();
-  if (await db.dayClose.findUnique({ where: { date } })) return { ok: false as const, error: "Today is already closed" };
+  /* Each college has its own cash drawer, so each closes its own day. Campus
+     staff can only close their own; an owner picks a campus (validated) or
+     passes none to close the whole business. */
+  let scope = st.collegeId ?? "";
+  if (!st.collegeId && collegeId) {
+    if (!(await db.college.findUnique({ where: { id: collegeId }, select: { id: true } }))) return { ok: false as const, error: "Unknown college" };
+    scope = collegeId;
+  }
+  if (await db.dayClose.findUnique({ where: { date_collegeId: { date, collegeId: scope } } })) return { ok: false as const, error: "Today is already closed" };
   if (countedCash < 0 || !Number.isFinite(countedCash)) return { ok: false as const, error: "Enter the counted cash amount" };
 
-  const r = await computeReport(parsePeriod({ p: "day" }));
+  const r = await computeReport(parsePeriod({ p: "day" }), scope || null);
   const expected = r.expectedDrawer;
   const variance = Math.round((countedCash - expected) * 100) / 100;
 
   try {
-    await db.dayClose.create({ data: { date, expectedCash: expected, countedCash, variance, note: note?.trim() || null, by: st.id } });
+    await db.dayClose.create({ data: { date, collegeId: scope, expectedCash: expected, countedCash, variance, note: note?.trim() || null, by: st.id } });
   } catch (e) {
     // Two concurrent close-day taps both pass the pre-check above, and the
     // second hits the unique constraint on `date`. Catch and return the same
@@ -90,8 +98,8 @@ export async function closeDay(countedCash: number, note?: string) {
 }
 
 export async function todayClose() {
-  await requireStaff(1);
-  const rec = await db.dayClose.findUnique({ where: { date: istToday() } });
+  const st = await requireStaff(1);
+  const rec = await db.dayClose.findUnique({ where: { date_collegeId: { date: istToday(), collegeId: st.collegeId ?? "" } } });
   return rec ? { closed: true as const, variance: Number(rec.variance) } : { closed: false as const };
 }
 

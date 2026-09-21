@@ -46,6 +46,42 @@ if (!/^postgres(ql)?:\/\//.test(url)) {
 const host = (url.match(/@([^/?]+)/) || [])[1] || "unknown";
 console.log(`[deploy-migrate] Syncing schema to ${host} …`);
 
+/* The per-college reporting views (v_by_college_*, created by ensure-guards
+   right after this step) depend on the tables, and Postgres refuses to drop or
+   retype a column a view uses — which would fail `db push` on a future column
+   change. Drop them first; ensure-guards recreates them a moment later.
+   Best-effort: never blocks the deploy. */
+try {
+  const pg = (await import("pg")).default;
+  const c = new pg.Client({ connectionString: url.split("?")[0] });
+  await c.connect();
+  const schema = new URL(url).searchParams.get("schema") || "public";
+  const { rows } = await c.query(
+    `select table_name from information_schema.views where table_schema=$1 and table_name like 'v\_by\_college\_%'`, [schema]);
+  for (const r of rows) await c.query(`DROP VIEW IF EXISTS "${schema}"."${r.table_name}"`);
+
+  /* DayClose went from one row per date to one per (date, college) — each
+     college has its own cash drawer. Prisma refuses to ADD a unique constraint
+     without --accept-data-loss (it can't prove existing rows are unique), which
+     would block every deploy. Existing rows are trivially unique on the wider
+     key (collegeId defaults to ''), so apply this one migration as idempotent
+     SQL here; `db push` then finds the database already in sync. */
+  const [{ has }] = (await c.query(
+    `select exists(select 1 from information_schema.tables where table_schema=$1 and table_name='DayClose') has`, [schema])).rows;
+  if (has) {
+    await c.query("BEGIN");
+    await c.query(`ALTER TABLE "${schema}"."DayClose" ADD COLUMN IF NOT EXISTS "collegeId" TEXT NOT NULL DEFAULT ''`);
+    await c.query(`CREATE UNIQUE INDEX IF NOT EXISTS "DayClose_date_collegeId_key" ON "${schema}"."DayClose"("date","collegeId")`);
+    await c.query(`ALTER TABLE "${schema}"."DayClose" DROP CONSTRAINT IF EXISTS "DayClose_date_key"`);
+    await c.query(`DROP INDEX IF EXISTS "${schema}"."DayClose_date_key"`);
+    await c.query("COMMIT");
+  }
+  await c.end();
+  if (rows.length) console.log(`[deploy-migrate] Dropped ${rows.length} reporting view(s); ensure-guards recreates them.`);
+} catch (e) {
+  console.warn(`[deploy-migrate] view pre-drop skipped: ${e.message}`);
+}
+
 try {
   // Prisma 7 has no --skip-generate; --url is the supported override.
   execSync(`npx prisma db push --url "${url}"`, { stdio: "inherit" });

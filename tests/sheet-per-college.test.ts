@@ -11,7 +11,7 @@ const read = (f: string) => readFileSync(path.resolve(__dirname, "..", f), "utf8
 describe("per-college Sheet tabs", () => {
   const sync = read("lib/sheets-sync.ts");
   it("writes Live, Daily, Complaints and Staff once per college with a college-suffixed tab", () => {
-    for (const t of ["Live", "Daily", "Complaints", "Staff"]) expect(sync).toContain(`writeSheet("${t}" + sfx`);
+    for (const t of ["Live", "Daily", "Revenue", "Complaints", "Staff"]) expect(sync).toContain(`writeSheet("${t}" + sfx`);
     expect(sync).toMatch(/scopeColleges = await db\.college\.findMany\(\{ where: \{ active: true \}/);
   });
   it("scopes the report and counts by college, not globally", () => {
@@ -19,8 +19,8 @@ describe("per-college Sheet tabs", () => {
     expect(sync).toMatch(/computeReport\(parsePeriod\(\{ p: "day", d \}\), cid\)/);
     expect(sync).toMatch(/where: cid \? \{ collegeId: cid \} : \{\}/);
   });
-  it("keeps the day-close cash count off the campus staff tabs", () => {
-    expect(sync).toMatch(/if \(!cid\) \{\s*staffRows\.push\(\[\], \["DAY CLOSE/);
+  it("shows each campus its own day-close (cash drawer) rows", () => {
+    expect(sync).toMatch(/db\.dayClose\.findMany\(\{ where: cid \? \{ collegeId: cid \} : \{\}/);
   });
 });
 

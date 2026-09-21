@@ -71,7 +71,7 @@ export default function ReportsControls({
 
 /* Day-close ritual: count the physical drawer, record counted vs expected.
    Variance is stored permanently and emailed to the owner. Manager+. */
-export function CloseDayButton({ expected, closed, variance }: { expected: number; closed: boolean; variance?: number }) {
+export function CloseDayButton({ expected, closed, variance, collegeId }: { expected: number; closed: boolean; variance?: number; collegeId?: string | null }) {
   const router = useRouter();
   const toast = useToast();
   const [open, setOpen] = useState(false);
@@ -92,7 +92,7 @@ export function CloseDayButton({ expected, closed, variance }: { expected: numbe
   const doClose = async () => {
     setBusy(true);
     try {
-      const r = await closeDay(counted, note);
+      const r = await closeDay(counted, note, collegeId);
       if (!r.ok) return toast(r.error || "Failed", true);
       toast(r.variance === 0 ? "Day closed — drawer matches ✓" : `Day closed — variance ₹${r.variance}`, r.variance !== 0);
       setOpen(false);

@@ -558,13 +558,17 @@ model Attendance {
 // ───────────── Day close (cash drawer reconciliation ritual) ─────────────
 model DayClose {
   id           String   @id @default(cuid())
-  date         String   @unique // YYYY-MM-DD
+  date         String // YYYY-MM-DD
+  /** One drawer per college: "" = the whole business (an owner closing with no campus picked). */
+  collegeId    String   @default("")
   expectedCash Decimal // computed by the app at close time
   countedCash  Decimal // physically counted by staff
   variance     Decimal // counted − expected (≠0 is investigated)
   note         String?
   by           String // staffId
   at           DateTime @default(now())
+
+  @@unique([date, collegeId])
 }
 
 model AuditLog {

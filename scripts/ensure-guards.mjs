@@ -314,6 +314,44 @@ try {
     }
     console.log(`[guards] RLS — ${rlsEnabled} table(s) enabled, ${tables.rows.length - rlsEnabled} already on`);
   }
+
+  /* Per-college views: BVRIT and St Mary's are separate businesses, and some
+     tables (compensation, credit use, notifications, subscriptions, bags) only
+     reach a college THROUGH the student. These views put a collegeId and a
+     collegeName on every one, so "show me only BVRIT's payments" is one plain
+     WHERE, e.g.  select * from v_by_college_payment where "collegeName" = 'BVRIT'.
+     Read-only, derived, recreated on every deploy; a failure here must never
+     block a deploy, so it only warns. */
+  try {
+    const direct = ["Student", "Staff", "Plan", "Order", "Payment", "Invoice", "CreditNote", "Expense", "Complaint"];
+    const viaStudent = ["Subscription", "Bag", "Compensation", "CreditUse", "Notification"];
+    const exists = async (t) => (await client.query(
+      `select 1 from information_schema.tables where table_schema=$1 and table_name=$2`, [SCHEMA, t])).rowCount > 0;
+    let made = 0;
+    for (const t of direct) {
+      if (!(await exists(t))) continue;
+      await client.query(`CREATE OR REPLACE VIEW "${SCHEMA}"."v_by_college_${t.toLowerCase()}" AS
+        SELECT x.*, c.name AS "collegeName" FROM "${SCHEMA}"."${t}" x
+        LEFT JOIN "${SCHEMA}"."College" c ON c.id = x."collegeId"`);
+      made++;
+    }
+    for (const t of viaStudent) {
+      if (!(await exists(t))) continue;
+      await client.query(`CREATE OR REPLACE VIEW "${SCHEMA}"."v_by_college_${t.toLowerCase()}" AS
+        SELECT x.*, s."collegeId" AS "collegeId", c.name AS "collegeName" FROM "${SCHEMA}"."${t}" x
+        JOIN "${SCHEMA}"."Student" s ON s.id = x."studentId"
+        LEFT JOIN "${SCHEMA}"."College" c ON c.id = s."collegeId"`);
+      made++;
+    }
+    // PG15+: evaluate the views with the caller's rights so RLS still applies.
+    for (const { table_name } of (await client.query(
+      `select table_name from information_schema.views where table_schema=$1 and table_name like 'v\_by\_college\_%'`, [SCHEMA])).rows) {
+      await client.query(`ALTER VIEW "${SCHEMA}"."${table_name}" SET (security_invoker = true)`).catch(() => {});
+    }
+    console.log(`[guards] per-college views — ${made} (re)created`);
+  } catch (e) {
+    console.warn(`[guards] per-college views skipped: ${e.message}`);
+  }
 } catch (e) {
   // A deploy without ledger protection is worse than no deploy: fail the build
   // and leave the previous deployment live.

@@ -31,7 +31,7 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
   const period = parsePeriod(sp);
   const r = await computeReport(period, selectedCollegeId);
   const istDate = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
-  const dayClose = await db.dayClose.findUnique({ where: { date: istDate } });
+  const dayClose = await db.dayClose.findUnique({ where: { date_collegeId: { date: istDate, collegeId: selectedCollegeId ?? "" } } });
   const staffList = await db.staff.findMany(selectedCollegeId ? { where: { collegeId: selectedCollegeId } } : undefined);
   const byId = (id: string) => staffList.find((x) => x.id === id)?.name || id;
   const N = (x: unknown) => Number(x || 0);
@@ -120,7 +120,7 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
           <>
             <div className="between mt20" style={{ padding: "0 4px 10px" }}>
               <span className="sec-title" style={{ padding: 0 }}>Cash drawer</span>
-              {staff.role >= 2 && <CloseDayButton expected={r.expectedDrawer} closed={!!dayClose} variance={dayClose ? N(dayClose.variance) : undefined} />}
+              {staff.role >= 2 && <CloseDayButton collegeId={selectedCollegeId} expected={r.expectedDrawer} closed={!!dayClose} variance={dayClose ? N(dayClose.variance) : undefined} />}
             </div>
             <div className="card pad">
               <div className="kv"><span className="k">Opening float</span><span className="mono">{fmt(r.openingFloat)}</span></div>

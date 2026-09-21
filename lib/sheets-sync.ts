@@ -181,6 +181,23 @@ async function runSheetsSyncUnsafe() {
   }
   result = await writeSheet("Daily" + sfx, daily);
   if (!result.ok) throw new Error(`Daily${sfx} tab write failed: ${result.error}`);
+
+  /* ---- Revenue (last 6 months + all time) ---- The money view: what came in
+     by method, what went out, GST, and the net, per calendar month. */
+  const revenue: (string | number)[][] = [[
+    "Month", "Orders", "Cash", "UPI", "Credit", "Collected", "Refunds", "Expenses", "GST (net)", "Net",
+  ]];
+  const [ny, nm] = istDate().slice(0, 7).split("-").map(Number);
+  for (let i = 0; i < 6; i++) {
+    const t = ny * 12 + (nm - 1) - i;
+    const ym = `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, "0")}`;
+    const r = await computeReport(parsePeriod({ p: "month", m: ym }), cid);
+    revenue.push([ym, r.ordersIn, money(r.cash), money(r.upi), money(r.credit), money(r.total), money(r.refunds), money(r.expTotal), money(r.netGst), money(r.net)]);
+  }
+  const all = await computeReport(parsePeriod({ p: "all" }), cid);
+  revenue.push([], ["ALL TIME", all.ordersIn, money(all.cash), money(all.upi), money(all.credit), money(all.total), money(all.refunds), money(all.expTotal), money(all.netGst), money(all.net)]);
+  result = await writeSheet("Revenue" + sfx, revenue);
+  if (!result.ok) throw new Error(`Revenue${sfx} tab write failed: ${result.error}`);
   }
 
   /* ---- Plans ---- */
@@ -279,12 +296,10 @@ async function runSheetsSyncUnsafe() {
        formula and shows #ERROR! instead of the phone number. */
     staffRows.push([s.name, "'+91 " + s.phone, ROLE[s.role] || String(s.role), s.active ? "yes" : "removed", att.length, att[0]?.date || "—"]);
   }
-  if (!cid) {
-    staffRows.push([], ["DAY CLOSE — cash counted vs expected"], ["Date", "Expected", "Counted", "Variance", "Note"]);
-    const closes = await db.dayClose.findMany({ orderBy: { date: "desc" }, take: 30 });
-    for (const c of closes) {
-      staffRows.push([c.date, money(N(c.expectedCash)), money(N(c.countedCash)), money(N(c.variance)), c.note || ""]);
-    }
+  staffRows.push([], ["DAY CLOSE — cash counted vs expected"], ["Date", "Expected", "Counted", "Variance", "Note"]);
+  const closes = await db.dayClose.findMany({ where: cid ? { collegeId: cid } : {}, orderBy: { date: "desc" }, take: 30 });
+  for (const c of closes) {
+    staffRows.push([c.date, money(N(c.expectedCash)), money(N(c.countedCash)), money(N(c.variance)), c.note || ""]);
   }
   result = await writeSheet("Staff" + sfx, staffRows);
   if (!result.ok) throw new Error(`Staff${sfx} tab write failed: ${result.error}`);
@@ -314,7 +329,7 @@ async function runSheetsSyncUnsafe() {
   result = await writeSheet("Config", cfgRows);
   if (!result.ok) throw new Error(`Config tab write failed: ${result.error}`);
 
-  return { ok: true as const, at: stamp, tabs: ["Live", "Daily", "Plans", "Students", "Complaints", "Staff", "Config", ...scopes.filter((x) => x.cid).flatMap((x) => ["Live", "Daily", "Complaints", "Staff"].map((t) => t + x.sfx))], applied };
+  return { ok: true as const, at: stamp, tabs: ["Live", "Daily", "Plans", "Students", "Complaints", "Staff", "Config", ...scopes.filter((x) => x.cid).flatMap((x) => ["Live", "Daily", "Revenue", "Complaints", "Staff"].map((t) => t + x.sfx))], applied };
 }
 
 /* ─── Roster tabs, refreshable on their own ────────────────────────────────

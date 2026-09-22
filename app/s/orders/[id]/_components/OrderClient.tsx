@@ -163,6 +163,15 @@ export default function StaffOrderClient({
 
   // Handler: accept order
   const handleAccept = async () => {
+    // Same rule as the walk-in order sheet (owner, Sep 22: "adding weight is
+    // mandatory for st marys students and faculty") — weight is what tells
+    // staff how many cycles a bag actually needs, and acceptOrder's own
+    // server-side check treats an absent weight as fine, so nothing else
+    // was stopping this for a pre-booked order accepted at drop-off.
+    if (cycleBased && !acceptInput.weightKg) {
+      toast("Enter the weight (kg) before accepting this order", true);
+      return;
+    }
     const adjusted = serviceRates.items
       .filter((it) => acceptInput.itemQtys[it[0]] > 0)
       .map((it) => ({ label: it[0], qty: acceptInput.itemQtys[it[0]] }));
@@ -851,7 +860,7 @@ export default function StaffOrderClient({
           <div className="field">
             {cycleBased && (
               <>
-                <label>Weight (kg)</label>
+                <label>Weight (kg) — required</label>
                 {/* type="text" + inputMode="decimal": a number input shows spinner
                     arrows nobody weighs with, and its value-coercion made "5." and
                     a leading zero fight the typist. The raw string is kept in
@@ -971,7 +980,7 @@ export default function StaffOrderClient({
               />
             </label>
           </div>
-          <button className="btn mt16" onClick={handleAccept} disabled={acceptBusy}>
+          <button className="btn mt16" onClick={handleAccept} disabled={acceptBusy || (cycleBased && !acceptInput.weightKg)}>
             <Svg name="check" size={18} /> {acceptBusy ? "Accepting…" : "Accept"}
           </button>
         </div>

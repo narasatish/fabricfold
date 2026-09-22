@@ -77,13 +77,17 @@ describe("the counter reflects the no-charge policy", () => {
 describe("the weight field is typed, not clicked", () => {
   const ui = read("app/s/orders/[id]/_components/OrderClient.tsx");
   it("has no number spinner", () => {
-    const field = ui.slice(ui.indexOf("<label>Weight (kg)</label>"), ui.indexOf("<label>Weight (kg)</label>") + 1400);
+    const field = ui.slice(ui.indexOf("<label>Weight (kg)"), ui.indexOf("<label>Weight (kg)") + 1400);
     expect(field).toMatch(/type="text"/);
     expect(field).not.toMatch(/type="number"/);
     expect(field).not.toMatch(/step=/);
   });
   it("still raises a numeric keypad on a phone", () => {
     expect(ui).toMatch(/inputMode="decimal"/);
+  });
+  it("is mandatory before Accept — no weight, no cycle count to bill by (owner, Sep 22)", () => {
+    expect(ui).toMatch(/cycleBased && !acceptInput\.weightKg/);
+    expect(ui).toMatch(/Enter the weight \(kg\) before accepting this order/);
   });
   it("keeps the raw string while typing, so '5.' does not fight the typist", () => {
     expect(ui).toMatch(/const \[weightText, setWeightText\]/);

@@ -412,6 +412,7 @@ export async function cancelSubscription(studentId: string, reason: string) {
   const st = await requireStaff(3); // Admin+ — this ends something the student paid for
   const note = (reason || "").trim();
   if (note.length < 3) return { ok: false as const, error: "Give a reason — it is shown to the student and kept on record" };
+  if (note.length > 300) return { ok: false as const, error: "Keep the reason under 300 characters" };
 
   const stu = await db.student.findUnique({
     where: { id: studentId },

@@ -21,3 +21,11 @@ describe("free text is length-limited", () => {
     expect(read("lib/actions/privacy.ts")).toMatch(/\.trim\(\)\.slice\(0, 300\)/);
   });
 });
+
+describe("cancelSubscription reason", () => {
+  it("is capped, same as other admin-typed reasons", () => {
+    const src = fs.readFileSync(path.resolve(__dirname, "..", "lib/actions/subscription.ts"), "utf8");
+    const fn = src.slice(src.indexOf("export async function cancelSubscription"), src.indexOf("export async function cancelSubscription") + 800);
+    expect(fn).toMatch(/note\.length > 300/);
+  });
+});

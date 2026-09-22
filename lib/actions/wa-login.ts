@@ -52,7 +52,17 @@ function businessNumber(): string | null {
  */
 export async function startWhatsAppLogin(mode: "customer" | "staff" = "customer") {
   const number = businessNumber();
-  if (!number) return { ok: false as const, error: "WhatsApp sign-in isn't switched on yet — use your passcode, or ask at the counter." };
+  if (!number) {
+    // Staff have no passcode door at all (LoginForm.tsx: "the ONLY door") —
+    // telling them to "use your passcode" during a real WhatsApp outage
+    // would point at an option that doesn't exist and leave them stuck.
+    return {
+      ok: false as const,
+      error: mode === "staff"
+        ? "WhatsApp sign-in isn't switched on yet — ask the owner."
+        : "WhatsApp sign-in isn't switched on yet — use your passcode, or ask at the counter.",
+    };
+  }
 
   /* Per-IP cap. Each attempt is a database row and a pending sign-in; without
      this, one script could fill the table and keep every code slot warm. */

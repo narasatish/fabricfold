@@ -72,10 +72,13 @@ beforeAll(async () => {
 
   await db.staff.create({ data: { id: "stf1", phone: "9000000090", name: "Counter", role: 1, collegeId: "sm" } });
   await db.staff.create({ data: { id: "mgr1", phone: "9000000091", name: "Manager", role: 2, collegeId: "sm" } });
+  // Scoped to the OTHER campus (BVRIT) — for the cross-campus registration test below.
+  await db.staff.create({ data: { id: "mgrBv", phone: "9000000092", name: "BVRIT Manager", role: 2, collegeId: "bv" } });
 }, 300_000);
 
 const asCounter = () => authLib.createSession({ mode: "staff", staffId: "stf1", role: 1, epoch: 0 });
 const asManager = () => authLib.createSession({ mode: "staff", staffId: "mgr1", role: 2, epoch: 0 });
+const asBvritManager = () => authLib.createSession({ mode: "staff", staffId: "mgrBv", role: 2, epoch: 0 });
 
 let phoneSeq = 9822210000;
 const nextPhone = () => String(phoneSeq++);
@@ -151,6 +154,17 @@ describe("St Mary's registration requires a plan up front (owner, Sep 22)", { ti
     expect(stu.name).toBe("Bad Plan Id");
     const sub = await db.subscription.findUnique({ where: { studentId: r.id } });
     expect(sub?.active).not.toBe(true); // no plan was actually sold
+  });
+
+  it("a campus-scoped Manager registering at the OTHER campus still gets a real code, not a 'different campus' failure (owner: any staff may register at either college)", async () => {
+    await asBvritManager(); // scoped to BVRIT, registering a St Mary's student
+    const r = await adminActions.registerStudent({ name: "Cross Campus Buyer", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smSilver, method: "cash" });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.planError).toBeUndefined();
+    expect(r.bagCode).toMatch(/^S\d+$/);
+    const sub = await db.subscription.findUniqueOrThrow({ where: { studentId: r.id } });
+    expect(sub.active).toBe(true);
   });
 });
 

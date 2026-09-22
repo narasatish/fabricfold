@@ -108,7 +108,11 @@ export async function registerStudent(input: { name: string; phone: string; coll
     if (result.ok) {
       planName = result.plan.name;
       flushSoon();
-      const bag = await syncBagToPlan(stu.id);
+      // registerStudent is deliberately cross-campus (see the college.ts
+      // block above) — skip syncBagToPlan's own campus check here, or a
+      // Manager registering at the OTHER campus would lose their code after
+      // already being charged for the plan (found 2026-09-22 review).
+      const bag = await syncBagToPlan(stu.id, { skipCollegeCheck: true });
       bagCode = bag.ok ? bag.code ?? null : null;
       if (!bag.ok) planError = `Plan sold, but the code failed to issue: ${bag.error} — issue one manually`;
     } else {
@@ -117,7 +121,7 @@ export async function registerStudent(input: { name: string; phone: string; coll
       // (the exact bug this whole feature exists to prevent). Give them the
       // same safety-net Bronze code syncBagToPlan would mint for "no active
       // plan", and tell staff plainly so they can retry from the profile.
-      const bag = await syncBagToPlan(stu.id);
+      const bag = await syncBagToPlan(stu.id, { skipCollegeCheck: true });
       bagCode = bag.ok ? bag.code ?? null : null;
       planError = `Registered, but the plan could not be sold: ${result.error} — assign a plan from the student's profile`;
     }

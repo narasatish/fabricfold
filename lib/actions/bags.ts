@@ -172,7 +172,7 @@ export async function issueBag(
  * because a code could not be allocated; the caller reports what happened and
  * staff can issue the bag by hand.
  */
-export async function syncBagToPlan(studentId: string) {
+export async function syncBagToPlan(studentId: string, opts?: { skipCollegeCheck?: boolean }) {
   try {
     const st = await requireStaff(1);
     const stu = await db.student.findUnique({
@@ -180,7 +180,14 @@ export async function syncBagToPlan(studentId: string) {
       include: { subscription: { include: { planRef: true } }, bags: { orderBy: { issuedAt: "desc" } } },
     });
     if (!stu) return { ok: false as const, error: "Student not found" };
-    assertSameCollege(st, stu.collegeId);
+    // registerStudent (admin.ts) is deliberately NOT campus-scoped (owner,
+    // Sep 22: "staff should have right to register students in both
+    // colleges") and calls this right after selling a mandatory plan — a
+    // campus-scoped Manager registering at the OTHER campus would otherwise
+    // hit this check here and lose their code after already being charged.
+    // Every other caller (activateSubscription/assignSubscription/
+    // upgradeSubscription) is itself campus-scoped and does not pass this.
+    if (!opts?.skipCollegeCheck) assertSameCollege(st, stu.collegeId);
 
     const tier = stu.subscription?.active ? stu.subscription.planRef?.tier : null;
     const wanted = bagKindFor(tier);

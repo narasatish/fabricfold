@@ -10,8 +10,14 @@
 
    Usage: DATABASE_URL="postgresql://...?schema=..." node scripts/find-duplicate-bag-numbers.mjs
    (falls back to .env / .env.local's DATABASE_URL if not passed inline) */
+/* override:false (the default) here is deliberate: a DATABASE_URL already
+   set in the shell (e.g. a real production string, passed inline) must win
+   over .env.local's dev database — override:true silently discarded an
+   explicitly-provided production URL the first time this ran, and the
+   "diagnostic" quietly reported the LOCAL dev database's conflicts instead
+   without any error. */
 import "dotenv/config";
-try { const dotenv = await import("dotenv"); dotenv.config({ path: ".env.local", override: true }); } catch {}
+try { const dotenv = await import("dotenv"); dotenv.config({ path: ".env.local" }); } catch {}
 
 import pg from "pg";
 

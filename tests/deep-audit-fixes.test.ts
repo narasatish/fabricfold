@@ -497,7 +497,7 @@ describe("Sheet is a real dialog: focus moves in, Escape closes it, focus return
   it("has role=dialog/aria-modal and an Escape key handler", () => {
     const src = read("components/chrome.tsx");
     const fn = src.slice(src.indexOf("export function Sheet"));
-    expect(fn).toMatch(/role="dialog" aria-modal="true"/);
+    expect(fn).toMatch(/role="dialog"\s+aria-modal="true"/);
     expect(fn).toMatch(/e\.key === "Escape"/);
     expect(fn).toMatch(/panelRef\.current\?\.focus\(\)/);
     expect(fn).toMatch(/restoreFocusTo\.current\?\.focus\?\.\(\)/);

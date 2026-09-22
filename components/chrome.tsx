@@ -79,6 +79,24 @@ export function Sheet({ open, onClose, children }: { open: boolean; onClose: () 
   const [show, setShow] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocusTo = useRef<HTMLElement | null>(null);
+  /* CSS `vh`/`dvh` are sized against the LAYOUT viewport, which iOS Safari
+     does NOT shrink for the on-screen keyboard by default — so a sheet's
+     `max-height:90vh` stays a fixed height even once the keyboard covers
+     the bottom third of the screen, pushing the sheet's own submit button
+     (walk-in order, compensation, register — every form lives in a Sheet)
+     down behind the keyboard: visible in the DOM, unreachable to a tap.
+     `window.visualViewport` tracks the actually-visible area including the
+     keyboard on both iOS and Android, so cap the sheet to THAT instead
+     whenever it's smaller than the CSS max-height would otherwise allow. */
+  const [vvh, setVvh] = useState<number | null>(null);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => setVvh(vv.height);
+    update();
+    vv.addEventListener("resize", update);
+    return () => vv.removeEventListener("resize", update);
+  }, []);
   useEffect(() => {
     if (open) {
       setRender(true);
@@ -119,7 +137,14 @@ export function Sheet({ open, onClose, children }: { open: boolean; onClose: () 
   if (!render) return null;
   return (
     <div className={`sheet-bg ${show ? "show" : ""}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="sheet" ref={panelRef} role="dialog" aria-modal="true" tabIndex={-1}>
+      <div
+        className="sheet"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
+        style={vvh ? { maxHeight: Math.round(vvh * 0.92) } : undefined}
+      >
         <div className="grab" />
         {children}
       </div>

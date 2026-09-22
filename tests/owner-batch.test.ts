@@ -158,6 +158,14 @@ describe("the import route", () => {
   it("refuses a code already on someone's active bag", () => {
     expect(src).toMatch(/status: "active" \}, include: \{ student: true \}/);
   });
+  it("refuses a NUMBER already used under a different letter (owner, Sep 22: \"1003, 1004, 1005 — everything should be unique\")", () => {
+    // The exact-code check above only catches "G1003" twice; it says
+    // nothing about "G1003" and "B1003" sharing a number, which is the
+    // actual invariant the shared FySequence depends on — found live
+    // after the owner reported two students both holding "1003".
+    expect(src).toMatch(/usedNumbers/);
+    expect(src).toMatch(/numbers must be unique regardless of letter/);
+  });
 });
 
 describe("import refuses a broken plan", () => {

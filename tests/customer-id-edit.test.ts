@@ -39,6 +39,13 @@ describe("what it refuses", () => {
   it("a released bag — that code belongs to the pool now", () => {
     expect(fn).toMatch(/This code has been released/);
   });
+  it("a NUMBER another live student holds under a DIFFERENT letter (owner, Sep 22: \"1003, 1004, 1005 — everything should be unique\")", () => {
+    // The exact-code check above catches "B1003" twice; it says nothing
+    // about "B1003" landing on a number "G1003" already holds — found live
+    // after the owner reported two students both holding "1003".
+    expect(fn).toMatch(/numberClashCodes/);
+    expect(fn).toMatch(/numbers must be unique regardless of letter/);
+  });
 });
 
 describe("it cannot be raced", () => {

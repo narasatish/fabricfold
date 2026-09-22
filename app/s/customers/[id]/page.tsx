@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import StaffCustomerClient from "./_components/CustomerClient";
 import { resolveCollegeRates, type RateTable } from "@/lib/money";
+import { featureOn } from "@/lib/features";
 
 export default async function StaffCustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -57,7 +58,8 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
      Mary's-style pricing on screen while the actual charge (computed
      server-side in walkInOrder, already college-aware) differs, which reads
      as the total being wrong even though it isn't. */
-  const collegeRatesRow = await db.college.findUnique({ where: { id: student.collegeId }, select: { rates: true, expressRates: true } });
+  const collegeRatesRow = await db.college.findUnique({ where: { id: student.collegeId }, select: { rates: true, expressRates: true, features: true } });
+  const expressEnabled = featureOn(collegeRatesRow?.features, "express");
   const effectiveRates = resolveCollegeRates(cfg.rates as unknown as RateTable, collegeRatesRow?.rates as unknown as RateTable | null);
   const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFold: "Wash & Fold", ironOnly: "Iron Only", dryClean: "Dry Clean" };
   const collegePlans = (await db.plan.findMany({ where: { collegeId: student.collegeId, active: true }, orderBy: { price: "asc" } })).map((p) => {
@@ -112,6 +114,7 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
         collegeHasRatesOverride={!!collegeRatesRow?.rates}
         collegeExpressOverride={collegeRatesRow?.expressRates as Record<string, number> | null}
         gstEnabled={gstOn}
+        expressEnabled={expressEnabled}
       />
     </div>
   );

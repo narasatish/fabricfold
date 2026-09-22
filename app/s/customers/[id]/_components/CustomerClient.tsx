@@ -42,7 +42,7 @@ type CollegePlan = { id: string; name: string; tier: string | null; price: numbe
 
 type Rates = Record<string, { label: string; items: [string, number][] }>;
 
-export default function StaffCustomerClient({ student, displayId, staffRole, plans, rates, collegeHasRatesOverride, collegeExpressOverride, gstEnabled, colleges }: { student: Student; displayId: string; staffRole: number; plans: CollegePlan[]; rates: Rates; collegeHasRatesOverride: boolean; collegeExpressOverride: Record<string, number> | null; gstEnabled: boolean; colleges: { id: string; name: string; closedWeekday: number | null }[] }) {
+export default function StaffCustomerClient({ student, displayId, staffRole, plans, rates, collegeHasRatesOverride, collegeExpressOverride, gstEnabled, colleges, expressEnabled }: { student: Student; displayId: string; staffRole: number; plans: CollegePlan[]; rates: Rates; collegeHasRatesOverride: boolean; collegeExpressOverride: Record<string, number> | null; gstEnabled: boolean; colleges: { id: string; name: string; closedWeekday: number | null }[]; expressEnabled: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const tier = loyaltyBadge(student.lifetimePieces);
@@ -83,8 +83,13 @@ export default function StaffCustomerClient({ student, displayId, staffRole, pla
 
   // Walk-in order (student at the counter without a booking)
   const serviceKeys = Object.keys(rates);
+  // Wash & Fold is the default service everywhere — Dry Clean happening to be
+  // first in the college's rates object made IT the default instead, which
+  // is wrong for the overwhelming majority of walk-ins (owner, Sep 22).
+  const defaultWiService = serviceKeys.includes("washFold") ? "washFold" : serviceKeys[0] || "washIron";
+  const subHasCycles = !!student.subscription?.active;
   const [showWalkIn, setShowWalkIn] = useState(false);
-  const [wiService, setWiService] = useState(serviceKeys[0] || "washIron");
+  const [wiService, setWiService] = useState(defaultWiService);
   const [wiQty, setWiQty] = useState<Record<string, number>>({});
   const [wiCycles, setWiCycles] = useState(1);
   const [packSvc, setPackSvc] = useState<"washFold" | "washIron">("washFold");
@@ -94,7 +99,12 @@ export default function StaffCustomerClient({ student, displayId, staffRole, pla
   const [assignApplyCredits, setAssignApplyCredits] = useState(false);
   const [packBusy, setPackBusy] = useState(false);
   const [wiWeight, setWiWeight] = useState(0);
-  const [wiUseCycle, setWiUseCycle] = useState(false);
+  // On a plan, burning a cycle is the normal case at the counter — buying a
+  // new cycle mid-order isn't offered at all right now (owner, Sep 22: "no
+  // scope for students paying for cycles for now... when they are exhausted
+  // they can buy the cycles later on"), so defaulting this ON matches how
+  // every walk-in for a subscribed student is actually meant to be billed.
+  const [wiUseCycle, setWiUseCycle] = useState(subHasCycles);
   const [wiNoGst, setWiNoGst] = useState(false);
   const [wiExpress, setWiExpress] = useState(false);
   const [wiLoading, setWiLoading] = useState(false);
@@ -118,7 +128,6 @@ export default function StaffCustomerClient({ student, displayId, staffRole, pla
      colleges already priced the premium into wiSubtotal above. */
   const wiExpressSurcharge = wiExpress && !wiUseCycle && wiCycleBased ? collegeExpressFee(wiService, collegeExpressOverride) : 0;
   const wiGst = wiUseCycle || wiNoGst || !gstEnabled ? 0 : Math.round((wiSubtotal + wiExpressSurcharge) * 0.18);
-  const subHasCycles = !!student.subscription?.active;
 
   // Bags — first is complimentary, replacements are sold at the counter
   const activeBag = student.bags.find((b) => b.status === "active") || null;
@@ -369,6 +378,15 @@ Currently ${current}. Type the code printed on the bag they are being given.
   };
 
   const doWalkIn = async () => {
+    // Weight is what tells staff how many cycles a bag actually needs — a
+    // cycle-based order placed with no weight recorded has nothing behind
+    // the cycle count staff picked (owner, Sep 22: "adding weight is
+    // mandatory for st marys students and faculty"). BVRIT is per-piece and
+    // never hits this (wiCycleBased is false there).
+    if (wiCycleBased && !wiWeight) {
+      toast("Enter the weight (kg) before creating this order", true);
+      return;
+    }
     const intake = {
       studentId: student.id,
       studentLabel: student.name,
@@ -870,8 +888,8 @@ Currently ${current}. Type the code printed on the bag they are being given.
           )}
           {wiCycleBased && (
             <div className="field mt8">
-              <label>Weight (kg)</label>
-              <input className="input" type="number" step="0.1" value={wiWeight || ""} onChange={(e) => setWiWeight(Number(e.target.value))} />
+              <label>Weight (kg) — required</label>
+              <input className="input" type="number" step="0.1" required value={wiWeight || ""} onChange={(e) => setWiWeight(Number(e.target.value))} />
             </div>
           )}
           {subHasCycles && (
@@ -892,19 +910,21 @@ Currently ${current}. Type the code printed on the bag they are being given.
               <Switch on={wiNoGst} onToggle={() => setWiNoGst(!wiNoGst)} />
             </div>
           )}
-          <div className="chip-toggle" style={{ marginBottom: "12px" }}>
-            <div>
-              <div className="h-sm">Urgent (same day)</div>
-              <div className="muted" style={{ fontSize: "12px" }}>
-                {wiUseCycle
-                  ? `Cycle already covers the wash — only the flat ₹${collegeExpressFee(wiService, collegeExpressOverride)} same-day fee is charged, in cash`
-                  : wiCycleBased
-                    ? `Flat ₹${collegeExpressFee(wiService, collegeExpressOverride)} — same-day turnaround`
-                    : "50% more per piece — same-day turnaround"}
+          {expressEnabled && (
+            <div className="chip-toggle" style={{ marginBottom: "12px" }}>
+              <div>
+                <div className="h-sm">Urgent (same day)</div>
+                <div className="muted" style={{ fontSize: "12px" }}>
+                  {wiUseCycle
+                    ? `Cycle already covers the wash — only the flat ₹${collegeExpressFee(wiService, collegeExpressOverride)} same-day fee is charged, in cash`
+                    : wiCycleBased
+                      ? `Flat ₹${collegeExpressFee(wiService, collegeExpressOverride)} — same-day turnaround`
+                      : "50% more per piece — same-day turnaround"}
+                </div>
               </div>
+              <Switch on={wiExpress} onToggle={() => setWiExpress(!wiExpress)} />
             </div>
-            <Switch on={wiExpress} onToggle={() => setWiExpress(!wiExpress)} />
-          </div>
+          )}
           <div className="card pad" style={{ background: "var(--teal-tint)" }}>
             <div className="kv"><span className="k">Pieces</span><span className="mono">{wiPieces}</span></div>
             <div className="kv"><span className="k">Subtotal</span><span className="mono">{fmt(wiSubtotal)}</span></div>
@@ -918,7 +938,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
               gating on it left Place order permanently disabled for the two
               main services at the counter. Same bug, same fix, as the
               customer pre-book button. */}
-          <button className="btn mt16" onClick={doWalkIn} disabled={wiLoading || (!wiCycleBased && wiPieces === 0)}>
+          <button className="btn mt16" onClick={doWalkIn} disabled={wiLoading || (!wiCycleBased && wiPieces === 0) || (wiCycleBased && !wiWeight)}>
             <Svg name="check" size={18} /> {wiLoading ? "Creating…" : "Create & receive order"}
           </button>
         </div>

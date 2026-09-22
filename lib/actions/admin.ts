@@ -8,7 +8,7 @@ import { FEATURE_DEFAULTS, featureOn, type FeatureKey } from "../features";
 import { requireStaff, assertSameCollege, assertGlobalScope } from "../auth";
 import { PERM_DEFS } from "../perms";
 import { rosterSoon } from "../sheets-sync";
-import { audit } from "../notify";
+import { audit, pushNotif } from "../notify";
 import { publish } from "../realtime";
 import { notifyOwner } from "../mail";
 import { isTier } from "../bagcode";
@@ -134,6 +134,20 @@ export async function registerStudent(input: { name: string; phone: string; coll
   );
   rosterSoon();
   void notifyOwner("New student registered", `${name} (+91 ${phone}) registered at the counter (${college.name}) by ${st.name}${planName ? ` — plan "${planName}"` : ""} — ID ${bagCode || stu.id}.${planError ? ` ⚠ ${planError}` : ""}`);
+  // BVRIT's own self-registration (wa-register.ts) sends this same welcome —
+  // a counter registration was silently missing it, so a St Mary's student
+  // (the primary path this whole codebase's registration work targets) had
+  // no way to learn their own customer ID except being told out loud at the
+  // counter (owner, Sep 22: "make sure students get whatsapp notifications
+  // for everything"). planName lets a Bronze/Silver/Gold buyer see the plan
+  // sold, not just the code.
+  if (bagCode) {
+    void pushNotif(
+      stu.id,
+      `Welcome to FabricFold! Your customer ID is ${bagCode}${planName ? ` (${planName} plan)` : ""}. Show this at the counter.`,
+      "status",
+    ).catch(() => {});
+  }
   return { ok: true as const, id: stu.id, bagCode, planError };
 }
 

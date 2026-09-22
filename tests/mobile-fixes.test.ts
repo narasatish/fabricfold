@@ -14,8 +14,10 @@ describe("staff Place order was dead on cycle services", () => {
     // isCycleService(wiService) became wiCycleBased (college-aware — see
     // collegeUsesCycleBasedPricing) when BVRIT's per-piece pricing landed,
     // but the underlying fix this test guards — no longer gating on pieces
-    // for a cycle service — is unchanged.
-    expect(ui).toMatch(/disabled=\{wiLoading \|\| \(!wiCycleBased && wiPieces === 0\)\}/);
+    // for a cycle service — is unchanged. A second clause was added Sep 22
+    // (mandatory weight on a cycle order), so this only checks the pieces
+    // clause survived, not the exact whole expression any more.
+    expect(ui).toMatch(/disabled=\{wiLoading \|\| \(!wiCycleBased && wiPieces === 0\)/);
   });
 });
 

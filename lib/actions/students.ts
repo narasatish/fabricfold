@@ -2,7 +2,7 @@
 /* Admin student tools: bulk import and campus-wide broadcast. */
 import { db } from "../db";
 import { requireStaff, assertSameCollege } from "../auth";
-import { audit } from "../notify";
+import { audit, sendWhatsApp } from "../notify";
 
 /**
  * Find students by customer ID, phone or name — on the SERVER.
@@ -129,7 +129,7 @@ export async function broadcastNotice(scope: string, text: string) {
     return { ok: false as const, error: "You can only notify your own campus" };
   }
   const where = scope === "all" ? {} : { collegeId: scope };
-  const students = await db.student.findMany({ where, select: { id: true } });
+  const students = await db.student.findMany({ where, select: { id: true, phone: true } });
   if (!students.length) return { ok: false as const, error: "No students to notify" };
   const ids = students.map((s) => s.id);
 
@@ -149,6 +149,23 @@ export async function broadcastNotice(scope: string, text: string) {
           if (code === 404 || code === 410) await db.pushSubscription.delete({ where: { id: s.id } }).catch(() => {});
         }),
     ));
+  }
+
+  /* Every other notification in the app also reaches WhatsApp (pushNotif in
+     lib/notify.ts) — a broadcast only did in-app + web push, so a staff
+     notice to the whole campus silently missed the one channel students
+     actually check (owner, Sep 22: "make sure students get whatsapp
+     notifications for everything"). Fire-and-forget via after(), same as
+     pushNotif: hundreds of WhatsApp sends must not hold the response open,
+     and one student's failed send must never block another's. */
+  const deliverWhatsApp = async () => {
+    await Promise.allSettled(students.map((s) => sendWhatsApp(s.phone, msg)));
+  };
+  try {
+    const { after } = await import("next/server");
+    after(deliverWhatsApp());
+  } catch {
+    void deliverWhatsApp();
   }
 
   const label = scope === "all" ? "all campuses" : (await db.college.findUnique({ where: { id: scope } }))?.name || scope;

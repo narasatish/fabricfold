@@ -117,6 +117,21 @@ export async function POST(req: Request) {
   // auto-minted codes draw from.
   let maxImported = 0;
 
+  /* The NUMBER must be unique across every letter (owner, Sep 22: "1003,
+     1004, 1005: everything should be unique... by seeing the number we need
+     to know how many students are active") — G1003 and B1003 must never both
+     exist. The check below this one only catches the exact code repeating
+     ("G1003" twice); it says nothing about "G1003" and "B1003" sharing a
+     number, which is the actual invariant this scheme depends on. Seeded
+     from every currently-active bag so a duplicate against an EXISTING
+     student is caught too, not just duplicates within this one sheet. */
+  const activeBags = await db.bag.findMany({ where: { status: { not: "released" } }, select: { code: true } });
+  const usedNumbers = new Map<number, string>();
+  for (const b of activeBags) {
+    const p = parseBagCode(b.code);
+    if (p) usedNumbers.set(p.n, b.code);
+  }
+
   for (let r = 2; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
     const name = cellText(row, cols.name).trim();
@@ -158,6 +173,11 @@ export async function POST(req: Request) {
     if (existsPhone) { skipped.push(`row ${r}: ${phone} already registered (${existsPhone.name})`); continue; }
     const codeTaken = await db.bag.findFirst({ where: { code: codeRaw, status: "active" }, include: { student: true } });
     if (codeTaken) { problems.push(`row ${r}: "${name}" — ${codeRaw} is already ${codeTaken.student.name}'s active bag`); continue; }
+    const numberTaken = usedNumbers.get(parsed.n);
+    if (numberTaken && numberTaken !== codeRaw) {
+      problems.push(`row ${r}: "${name}" — ${codeRaw}'s number is already used by ${numberTaken} — numbers must be unique regardless of letter; fix the sheet`);
+      continue;
+    }
 
     try {
       await db.$transaction(async (tx) => {
@@ -187,6 +207,7 @@ export async function POST(req: Request) {
       });
       added.push(`${name} — ${codeRaw}`);
       maxImported = Math.max(maxImported, parsed.n);
+      usedNumbers.set(parsed.n, codeRaw); // catches a duplicate number LATER in this same sheet too
     } catch (e) {
       problems.push(`row ${r}: "${name}" — ${(e as Error).message.split("\n")[0].slice(0, 120)}`);
     }

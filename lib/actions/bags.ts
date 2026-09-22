@@ -16,7 +16,7 @@ import { pushNotif, audit } from "../notify";
 import { rosterSoon } from "../sheets-sync";
 import { publish } from "../realtime";
 import { notifyOwner } from "../mail";
-import { allocateBagCode, bagKindFor, isTier, BAG_LABEL, BAG_LETTER, parseBagCode, codesRemaining, WARN_AT, MAX_PER_KIND } from "../bagcode";
+import { allocateBagCode, bagKindFor, isTier, BAG_LABEL, BAG_LETTER, parseBagCode, formatBagCode, codesRemaining, WARN_AT, MAX_PER_KIND } from "../bagcode";
 
 /** Issue a bag to a student. First one is free; later ones take a price. */
 export async function issueBag(
@@ -339,6 +339,25 @@ export async function setBagCode(bagId: string, rawCode: string) {
     include: { student: { select: { name: true } } },
   });
   if (clash) return { ok: false as const, error: `${code} is already held by ${clash.student.name}` };
+
+  /* The NUMBER, not just the exact code, must be unique across every letter
+     (owner, Sep 22: "1003, 1004, 1005 — everything should be unique") — the
+     check above only catches "B1003" twice, not "B1003" landing on a number
+     "G1003" already holds. Every letter this number could legally be
+     formatted under is checked in one query rather than scanning every
+     active bag. */
+  const numberClashCodes = (Object.keys(BAG_LETTER) as (keyof typeof BAG_LETTER)[])
+    .map((k) => formatBagCode(k, parsed.n))
+    .filter((c): c is string => !!c && c !== code);
+  if (numberClashCodes.length) {
+    const numberClash = await db.bag.findFirst({
+      where: { code: { in: numberClashCodes }, status: { not: "released" }, NOT: { id: bagId } },
+      include: { student: { select: { name: true } } },
+    });
+    if (numberClash) {
+      return { ok: false as const, error: `That number is already ${numberClash.student.name}'s (${numberClash.code}) — numbers must be unique regardless of letter` };
+    }
+  }
 
   const before = bag.code;
   try {

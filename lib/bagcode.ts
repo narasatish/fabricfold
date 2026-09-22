@@ -216,7 +216,13 @@ export async function customerIdFor(
   const everHadABag = await db.bag.findFirst({ where: { studentId: student.id }, select: { id: true } });
   if (everHadABag) return student.id;
 
-  let kind: BagKind | null = null;
+  // Every student gets a real customer-facing code the moment they have none —
+  // "walkin" (W-series) is exactly this fallback (see BagKind above), previously
+  // defined but never reached here: a plan-less, non-BVRIT, non-faculty student
+  // (the common case for a newly registered St Mary's walk-in) fell all the way
+  // through to `return student.id`, showing the internal 6-digit row key as
+  // their "customer ID" everywhere in the app — found live (owner, Sep 21).
+  let kind: BagKind;
   if (student.kind === "faculty") {
     kind = "faculty";
   } else if (collegeName?.trim().toUpperCase() === "BVRIT") {
@@ -226,9 +232,8 @@ export async function customerIdFor(
       where: { studentId: student.id },
       select: { active: true, planRef: { select: { tier: true } } },
     });
-    if (sub?.active && isTier(sub.planRef?.tier)) kind = sub.planRef!.tier as Tier;
+    kind = sub?.active && isTier(sub.planRef?.tier) ? (sub.planRef!.tier as Tier) : "walkin";
   }
-  if (!kind) return student.id;
 
   return db.$transaction(async (tx: Prisma.TransactionClient) => {
     const code = await allocateBagCode(tx, kind!);

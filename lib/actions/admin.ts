@@ -59,15 +59,20 @@ export async function registerStudent(input: { name: string; phone: string; coll
       // bag; without this they'd be left with no customer ID until they
       // happened to trigger issueBag (owner, Sep 2026: "we have given code
       // as F ... it will be same like F1100").
-      if (isBvrit || isFaculty) {
-        const { allocateBagCode } = await import("../bagcode");
-        const code = await allocateBagCode(tx, isBvrit && !isFaculty ? "bvrit" : "faculty");
-        await tx.bag.create({
-          data: { code, studentId: created.id, tier: null, complimentary: true, issuedBy: st.id, status: "active" },
-        });
-        return { stu: created, code };
-      }
-      return { stu: created, code: null as string | null };
+      //
+      // Every OTHER student (a plan-less walk-in, the common case — no plan
+      // has been sold yet) gets a "walkin" W-series code the same way. Found
+      // live (owner, Sep 21): registering one of these showed the raw
+      // internal 6-digit row id as the "customer ID" instead — this was the
+      // one case the mirror above didn't cover, even though "walkin" already
+      // existed in lib/bagcode.ts for exactly this.
+      const { allocateBagCode } = await import("../bagcode");
+      const bagKind = isFaculty ? "faculty" : isBvrit ? "bvrit" : "walkin";
+      const code = await allocateBagCode(tx, bagKind);
+      await tx.bag.create({
+        data: { code, studentId: created.id, tier: null, complimentary: true, issuedBy: st.id, status: "active" },
+      });
+      return { stu: created, code };
     });
     stu = result.stu;
     bagCode = result.code;

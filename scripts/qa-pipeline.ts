@@ -150,7 +150,7 @@ async function main() {
   // ─────────────────────────────────────────────────────────────────
   section("Walk-in buys a bag (no plan = not free)");
   const wCode = await db.$transaction((tx) => allocateBagCode(tx, bagKindFor(null)));
-  check("walk-in gets a W code", parseBagCode(wCode)?.kind === "walkin", wCode);
+  check("walk-in gets a Bronze code (no separate walk-in series — owner, Sep 22)", parseBagCode(wCode)?.kind === "bronze", wCode);
   const wBag = await db.bag.create({
     data: { code: wCode, studentId: stu.id, tier: null, complimentary: false, price: 250, issuedBy: "qa", status: "active" },
   });

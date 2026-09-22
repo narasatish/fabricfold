@@ -59,7 +59,7 @@ describe("the letter matches the tier", () => {
     expect(BAG_LETTER[bagKindFor("bronze")]).toBe("B");
     expect(BAG_LETTER[bagKindFor("silver")]).toBe("S");
     expect(BAG_LETTER[bagKindFor("gold")]).toBe("G");
-    expect(BAG_LETTER[bagKindFor(null)]).toBe("W");
+    expect(BAG_LETTER[bagKindFor(null)]).toBe("B"); // no separate walk-in series — defaults to Bronze (owner, Sep 22)
   });
 });
 

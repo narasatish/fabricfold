@@ -10,7 +10,7 @@ describe("bag code formatting", () => {
     expect(formatBagCode("bronze", 1)).toBe("B001");
     expect(formatBagCode("silver", 1)).toBe("S001");
     expect(formatBagCode("gold", 1)).toBe("G001");
-    expect(formatBagCode("walkin", 1)).toBe("W001");
+    expect(formatBagCode("faculty", 1)).toBe("F001");
     expect(formatBagCode("bronze", 42)).toBe("B042");
     expect(formatBagCode("gold", 999)).toBe("G999");
   });
@@ -23,7 +23,7 @@ describe("bag code formatting", () => {
   });
 
   it("round-trips through parseBagCode", () => {
-    for (const kind of ["bronze", "silver", "gold", "walkin"] as const) {
+    for (const kind of ["bronze", "silver", "gold", "faculty", "bvrit"] as const) {
       for (const n of [1, 7, 250, 999]) {
         expect(parseBagCode(formatBagCode(kind, n)!)).toEqual({ kind, n });
       }
@@ -45,10 +45,10 @@ describe("bag code formatting", () => {
     expect(new Set(letters).size).toBe(letters.length);
   });
 
-  it("maps a missing or unknown tier to the walk-in kind", () => {
+  it("maps a missing or unknown tier to Bronze — no separate walk-in series (owner, Sep 22)", () => {
     expect(bagKindFor("gold")).toBe("gold");
-    expect(bagKindFor(null)).toBe("walkin");
-    expect(bagKindFor(undefined)).toBe("walkin");
-    expect(bagKindFor("platinum")).toBe("walkin");
+    expect(bagKindFor(null)).toBe("bronze");
+    expect(bagKindFor(undefined)).toBe("bronze");
+    expect(bagKindFor("platinum")).toBe("bronze");
   });
 });

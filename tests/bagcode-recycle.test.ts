@@ -121,9 +121,9 @@ describe("allocation prefers released codes", () => {
     expect(await allocateBagCode(tx, "faculty")).toBe("F1004");
   });
 
-  it("recycles walk-in codes too", async () => {
-    const tx = fakeTx([{ code: "W002", status: "released" }], { shared: 1008 });
-    expect(await allocateBagCode(tx, "walkin")).toBe("W002");
+  it("recycles faculty codes too", async () => {
+    const tx = fakeTx([{ code: "F002", status: "released" }], { shared: 1008 });
+    expect(await allocateBagCode(tx, "faculty")).toBe("F002");
   });
 
   it("accepts the owner's four-digit printed codes", async () => {
@@ -140,9 +140,9 @@ describe("code format is unchanged by recycling", () => {
   it("round-trips", () => {
     expect(parseBagCode(formatBagCode("silver", 42)!)).toEqual({ kind: "silver", n: 42 });
   });
-  it("tier drives the letter, no plan means walk-in", () => {
+  it("tier drives the letter; no plan defaults to Bronze — no separate walk-in series (owner, Sep 22)", () => {
     expect(bagKindFor("gold")).toBe("gold");
-    expect(bagKindFor(null)).toBe("walkin");
+    expect(bagKindFor(null)).toBe("bronze");
   });
 });
 

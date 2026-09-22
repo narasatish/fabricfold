@@ -66,6 +66,14 @@ export default async function StaffHomePage() {
     select: { id: true, name: true },
     orderBy: { name: "asc" },
   });
+  /* Registration is NOT campus-scoped (owner, Sep 22: "staff should have
+     right to register students in both colleges") — unlike `colleges` above,
+     which still drives the dashboard filter and must stay scoped to what
+     THIS staff member is allowed to see. A separate, always-unscoped list so
+     the Register-student campus picker offers both campuses to everyone. */
+  const registerColleges = staff.collegeId
+    ? await db.college.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } })
+    : colleges;
 
   // Attendance state for THIS staff member (IST business day)
   const istDate = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
@@ -140,6 +148,7 @@ export default async function StaffHomePage() {
         orders={plainOrders}
         pendingSubs={pendingSubs}
         colleges={colleges}
+        registerColleges={registerColleges}
         metrics={metrics}
         attendance={attendance}
         openComplaints={openComplaints}

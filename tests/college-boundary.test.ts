@@ -87,12 +87,24 @@ describe("the boundary is actually enforced at every server action the audit fou
     expect(students).toMatch(/You can only notify your own campus/); // broadcastNotice
   });
 
-  it("admin.ts: registration, phone/detail edits, plans, rates, features and staff management all check it", () => {
-    const fns = ["registerStudent", "updateStudentPhone", "updateStudentDetails", "savePlan", "togglePlan", "saveCollegeRates", "toggleFeature", "saveStaff", "setStaffActive", "createPayslip"];
+  it("admin.ts: phone/detail edits, plans, rates, features and staff management all check it", () => {
+    // registerStudent is DELIBERATELY excluded — see the dedicated describe
+    // block below (owner, Sep 22: "staff should have right to register
+    // students in both colleges"). Every action on an EXISTING student/order
+    // still stays campus-walled; only creating a brand-new account does not.
+    const fns = ["updateStudentPhone", "updateStudentDetails", "savePlan", "togglePlan", "saveCollegeRates", "toggleFeature", "saveStaff", "setStaffActive", "createPayslip"];
     for (const fn of fns) {
       const body = admin.slice(admin.indexOf(`export async function ${fn}`), admin.indexOf(`export async function ${fn}`) + 1800);
       expect(body, fn).toMatch(/assertSameCollege\(st,/);
     }
+  });
+
+  it("registerStudent is deliberately NOT campus-scoped (owner, Sep 22: any staff member may register at either college)", () => {
+    const body = admin.slice(admin.indexOf("export async function registerStudent"), admin.indexOf("export async function registerStudent") + 1800);
+    expect(body).not.toMatch(/assertSameCollege\(st, input\.collegeId\)/);
+    // it must still check the college itself exists and is active — the
+    // relaxation is about WHO may register, not about registering into thin air
+    expect(body).toMatch(/if \(!college \|\| !college\.active\)/);
   });
 
   it("subscription.ts: every plan/cycle action on a student checks it", () => {

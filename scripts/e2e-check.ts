@@ -89,7 +89,7 @@ async function main() {
 
   // 3. Bag codes allocate, are well-formed, and never repeat
   const codes: string[] = [];
-  for (const kind of ["bronze", "silver", "gold", "walkin"] as const) {
+  for (const kind of ["bronze", "silver", "gold", "faculty"] as const) {
     const code = await db.$transaction((tx) => allocateBagCode(tx, kind));
     codes.push(code);
     const parsed = parseBagCode(code);
@@ -97,7 +97,7 @@ async function main() {
   }
   const second = await db.$transaction((tx) => allocateBagCode(tx, "bronze"));
   check("consecutive codes never repeat", second !== codes[0], `${codes[0]} then ${second}`);
-  check("tier maps to kind", bagKindFor("gold") === "gold" && bagKindFor(null) === "walkin");
+  check("tier maps to kind", bagKindFor("gold") === "gold" && bagKindFor(null) === "bronze");
 
   // 4. A bag row persists, first one complimentary
   const bag = await db.bag.create({

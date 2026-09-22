@@ -32,15 +32,19 @@ import type { Prisma } from "./generated/prisma/client";
 export const TIERS = ["bronze", "silver", "gold"] as const;
 export type Tier = (typeof TIERS)[number];
 
-/** Subscribed students get their tier's letter; non-subscribers "walkin";
-    college FACULTY get their own F series (Sep 2026) — they buy cycle packs
-    rather than tiered plans, so no tier letter fits them, and the counter
-    needs to see at a glance that a bag belongs to a teacher. BVRIT self-register
-    via WhatsApp and get V series (Oct 2026). */
-export type BagKind = Tier | "walkin" | "faculty" | "bvrit";
+/** Subscribed students get their tier's letter; a St Mary's student with no
+    plan yet defaults to Bronze (owner, Sep 22: "for st marys we need to use
+    B,S,G thats all... no need of W for walkins") — it is corrected to their
+    real tier the moment they subscribe (syncBagToPlan). College FACULTY get
+    their own F series (Sep 2026) — they buy cycle packs rather than tiered
+    plans, so no tier letter fits them, and the counter needs to see at a
+    glance that a bag belongs to a teacher. BVRIT is ALWAYS V, students and
+    faculty alike (owner, Sep 22: "for bvrit we need to use only V as code") —
+    see registerStudent, which special-cases BVRIT before this even runs. */
+export type BagKind = Tier | "faculty" | "bvrit";
 
-export const BAG_LETTER: Record<BagKind, string> = { bronze: "B", silver: "S", gold: "G", walkin: "W", faculty: "F", bvrit: "V" };
-export const BAG_LABEL: Record<BagKind, string> = { bronze: "Bronze", silver: "Silver", gold: "Gold", walkin: "Walk-in", faculty: "Faculty", bvrit: "BVRIT" };
+export const BAG_LETTER: Record<BagKind, string> = { bronze: "B", silver: "S", gold: "G", faculty: "F", bvrit: "V" };
+export const BAG_LABEL: Record<BagKind, string> = { bronze: "Bronze", silver: "Silver", gold: "Gold", faculty: "Faculty", bvrit: "BVRIT" };
 
 /** Highest sequence a single kind can issue before the scheme needs widening.
 
@@ -66,9 +70,10 @@ export function isTier(v: unknown): v is Tier {
   return typeof v === "string" && (TIERS as readonly string[]).includes(v);
 }
 
-/** A plan tier if there is one, otherwise the walk-in kind. */
+/** A plan tier if there is one, otherwise Bronze — the default until a real
+ *  plan is chosen (owner, Sep 22: no separate walk-in series any more). */
 export function bagKindFor(tier: string | null | undefined): BagKind {
-  return isTier(tier) ? tier : "walkin";
+  return isTier(tier) ? tier : "bronze";
 }
 
 /** "bronze", 42 → "B042"; "gold", 1002 → "G1002". Three digits below 1000
@@ -217,11 +222,14 @@ export async function customerIdFor(
   if (everHadABag) return student.id;
 
   // Every student gets a real customer-facing code the moment they have none —
-  // "walkin" (W-series) is exactly this fallback (see BagKind above), previously
-  // defined but never reached here: a plan-less, non-BVRIT, non-faculty student
-  // (the common case for a newly registered St Mary's walk-in) fell all the way
-  // through to `return student.id`, showing the internal 6-digit row key as
-  // their "customer ID" everywhere in the app — found live (owner, Sep 21).
+  // previously this fell all the way through to `return student.id` for a
+  // plan-less, non-BVRIT, non-faculty student, showing the internal 6-digit
+  // row key as their "customer ID" everywhere in the app — found live (owner,
+  // Sep 21). Faculty are F at either college (a college-agnostic rule, set
+  // earlier); otherwise BVRIT is always V (owner, Sep 22: "for bvrit... only
+  // V"), and St Mary's defaults to Bronze until a real plan is chosen
+  // (bagKindFor) — staff assign the plan right after registering a walk-in,
+  // and syncBagToPlan then swaps this provisional code for the real tier.
   let kind: BagKind;
   if (student.kind === "faculty") {
     kind = "faculty";
@@ -232,7 +240,7 @@ export async function customerIdFor(
       where: { studentId: student.id },
       select: { active: true, planRef: { select: { tier: true } } },
     });
-    kind = sub?.active && isTier(sub.planRef?.tier) ? (sub.planRef!.tier as Tier) : "walkin";
+    kind = bagKindFor(sub?.active ? sub.planRef?.tier : null);
   }
 
   return db.$transaction(async (tx: Prisma.TransactionClient) => {

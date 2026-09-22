@@ -99,11 +99,11 @@ describe("scenario: walk-in with no subscription", () => {
 });
 
 describe("scenario: bags handed over at the counter", () => {
-  it("gives each tier its own letter, and non-subscribers a separate series", () => {
+  it("gives each tier its own letter; a non-subscriber defaults to Bronze — no separate walk-in series (owner, Sep 22)", () => {
     expect(formatBagCode(bagKindFor("bronze"), 1)).toBe("B001");
     expect(formatBagCode(bagKindFor("silver"), 1)).toBe("S001");
     expect(formatBagCode(bagKindFor("gold"), 1)).toBe("G001");
-    expect(formatBagCode(bagKindFor(null), 1)).toBe("W001");
+    expect(formatBagCode(bagKindFor(null), 1)).toBe("B001");
   });
 
   it("keeps tier series independent — B001 and G001 coexist", () => {
@@ -112,7 +112,7 @@ describe("scenario: bags handed over at the counter", () => {
 
   it("a code read off a bag maps back to exactly one student's tier", () => {
     expect(parseBagCode("G014")).toEqual({ kind: "gold", n: 14 });
-    expect(parseBagCode("W001")).toEqual({ kind: "walkin", n: 1 });
+    expect(parseBagCode("F001")).toEqual({ kind: "faculty", n: 1 });
   });
 
   it("refuses to mint a code past the printable range instead of wrapping", () => {

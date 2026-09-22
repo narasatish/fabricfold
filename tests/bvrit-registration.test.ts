@@ -438,7 +438,7 @@ describe("bag code format and parsing", () => {
 
   it("distinguishes V from other letters", () => {
     expect(parseBagCode("V1001")?.kind).toBe("bvrit");
-    expect(parseBagCode("W1001")?.kind).toBe("walkin");
+    expect(parseBagCode("F1001")?.kind).toBe("faculty");
     expect(parseBagCode("B1001")?.kind).toBe("bronze");
   });
 });

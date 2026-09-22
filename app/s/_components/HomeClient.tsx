@@ -45,6 +45,7 @@ export default function StaffHomeClient({
   orders,
   pendingSubs,
   colleges,
+  registerColleges,
   metrics,
   attendance,
   openComplaints,
@@ -53,6 +54,7 @@ export default function StaffHomeClient({
   orders: Order[];
   pendingSubs: PendingSub[];
   colleges: { id: string; name: string }[];
+  registerColleges: { id: string; name: string }[];
   metrics: Record<string, Metrics>;
   attendance: { clockedIn: boolean; clockedOut: boolean; since: number | null };
   openComplaints: OpenComplaint[];
@@ -76,7 +78,7 @@ export default function StaffHomeClient({
   const [batchMode, setBatchMode] = useState(false);
   const [batchIds, setBatchIds] = useState<Set<string>>(new Set());
   const [batchBusy, setBatchBusy] = useState(false);
-  const [reg, setReg] = useState({ name: "", phone: "", collegeId: colleges[0]?.id || "", kind: "student" as "student" | "faculty" });
+  const [reg, setReg] = useState({ name: "", phone: "", collegeId: registerColleges[0]?.id || "", kind: "student" as "student" | "faculty" });
   const [regLoading, setRegLoading] = useState(false);
 
   const q = search.trim().toLowerCase();
@@ -144,7 +146,7 @@ export default function StaffHomeClient({
       if (!r.ok) return toast(r.error || "Failed", true);
       toast(`Student registered — ID ${r.bagCode || r.id}`);
       setShowRegister(false);
-      setReg({ name: "", phone: "", collegeId: colleges[0]?.id || "", kind: "student" });
+      setReg({ name: "", phone: "", collegeId: registerColleges[0]?.id || "", kind: "student" });
       router.push(`/s/customers/${r.id}`);
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
@@ -521,7 +523,7 @@ export default function StaffHomeClient({
           <div className="field">
             <label>Campus</label>
             <select className="input" value={reg.collegeId} onChange={(e) => setReg({ ...reg, collegeId: e.target.value })}>
-              {colleges.map((c) => (
+              {registerColleges.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>

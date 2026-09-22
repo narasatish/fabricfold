@@ -137,7 +137,7 @@ export async function POST(req: Request) {
     if (name.length < 2) { problems.push(`row ${r}: name missing`); continue; }
     if (phone.length !== 10) { problems.push(`row ${r}: "${name}" — mobile must be 10 digits`); continue; }
     const parsed = parseBagCode(codeRaw);
-    if (!parsed || parsed.kind === "walkin") { problems.push(`row ${r}: "${name}" — customer ID "${codeRaw}" isn't B/S/G/F + number`); continue; }
+    if (!parsed) { problems.push(`row ${r}: "${name}" — customer ID "${codeRaw}" isn't B/S/G/F + number`); continue; }
 
     /* FACULTY rows (F codes) register the person and their bag, nothing
        more: faculty buy cycle packs at the counter (sellCyclePack), so an

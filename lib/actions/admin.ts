@@ -29,7 +29,11 @@ export async function registerStudent(input: { name: string; phone: string; coll
   // Indian mobiles start 6-9; 0000000000 / 1234567890 can never receive a message.
   if (!/^[6-9]\d{9}$/.test(phone)) return { ok: false as const, error: "Enter a valid 10-digit mobile number" };
   if (await db.student.findUnique({ where: { phone } })) return { ok: false as const, error: "This number is already registered" };
-  assertSameCollege(st, input.collegeId);
+  // Registration is deliberately NOT campus-scoped (owner, Sep 22: "staff should
+  // have right to register students in both colleges") — unlike every other
+  // action on an EXISTING student/order, which stays campus-walled. A new
+  // account belongs to whichever campus is picked on the form, not to the
+  // registering staff member's own assignment.
   const college = await db.college.findUnique({ where: { id: input.collegeId } });
   if (!college || !college.active) return { ok: false as const, error: "Pick a campus" };
 
@@ -61,13 +65,14 @@ export async function registerStudent(input: { name: string; phone: string; coll
       // as F ... it will be same like F1100").
       //
       // Every OTHER student (a plan-less walk-in, the common case — no plan
-      // has been sold yet) gets a "walkin" W-series code the same way. Found
-      // live (owner, Sep 21): registering one of these showed the raw
-      // internal 6-digit row id as the "customer ID" instead — this was the
-      // one case the mirror above didn't cover, even though "walkin" already
-      // existed in lib/bagcode.ts for exactly this.
-      const { allocateBagCode } = await import("../bagcode");
-      const bagKind = isFaculty ? "faculty" : isBvrit ? "bvrit" : "walkin";
+      // has been sold yet) gets a Bronze code the same way (owner, Sep 22:
+      // "for st marys we need to use B,S,G thats all... no need of W") —
+      // corrected to their real tier the moment they subscribe
+      // (syncBagToPlan). Found live (owner, Sep 21): registering one of
+      // these showed the raw internal 6-digit row id as the "customer ID"
+      // instead — this was the one case the mirror above didn't cover.
+      const { allocateBagCode, bagKindFor } = await import("../bagcode");
+      const bagKind = isFaculty ? "faculty" : isBvrit ? "bvrit" : bagKindFor(null);
       const code = await allocateBagCode(tx, bagKind);
       await tx.bag.create({
         data: { code, studentId: created.id, tier: null, complimentary: true, issuedBy: st.id, status: "active" },

@@ -54,11 +54,16 @@ describe("subscription writes are locked against concurrent top-ups/assigns/upgr
   it("assignSubscription locks (by advisory lock, not a row lock — a first-ever plan has no row to lock) and re-checks 'already active' fresh", () => {
     // CORRECTED 2026-09-05: same class of bug as sellCyclePack above — a
     // student's FIRST plan has no Subscription row yet, so a row lock was a
-    // no-op for exactly the case its own comment described.
-    const body = subs.slice(subs.indexOf("export async function assignSubscription"), subs.indexOf("export async function upgradeSubscription"));
-    expect(body).toMatch(/await tx\.\$executeRaw`SELECT pg_advisory_xact_lock\(hashtext\(\$\{`subscription\|\$\{studentId\}`\}\)\)`/);
-    expect(body).toMatch(/if \(fresh\?\.active\) throw new Error\("This student already has an active plan"\)/);
-    expect(body).toMatch(/catch \(e\) \{[\s\S]*?return \{ ok: false as const, error: \(e as Error\)\.message \};/);
+    // no-op for exactly the case its own comment described. The lock/recheck
+    // itself moved into lib/plan-activation.ts's activatePlan (Sep 22),
+    // shared with registerStudent's now-mandatory plan step; assignSubscription
+    // just delegates to it.
+    const wrapper = subs.slice(subs.indexOf("export async function assignSubscription"), subs.indexOf("export async function upgradeSubscription"));
+    expect(wrapper).toMatch(/const result = await activatePlan\(stu, planId, method, applyCredits\)/);
+    const core = fs.readFileSync(path.resolve(__dirname, "..", "lib/plan-activation.ts"), "utf8");
+    expect(core).toMatch(/await tx\.\$executeRaw`SELECT pg_advisory_xact_lock\(hashtext\(\$\{`subscription\|\$\{stu\.id\}`\}\)\)`/);
+    expect(core).toMatch(/if \(fresh\?\.active\) throw new Error\("This student already has an active plan"\)/);
+    expect(core).toMatch(/catch \(e\) \{[\s\S]*?return \{ ok: false as const, error: \(e as Error\)\.message \};/);
   });
 
   it("upgradeSubscription locks the row and rebuilds buckets from a fresh read, not `cur` fetched before the transaction", () => {

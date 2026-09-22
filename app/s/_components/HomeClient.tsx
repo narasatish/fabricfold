@@ -46,6 +46,7 @@ export default function StaffHomeClient({
   pendingSubs,
   colleges,
   registerColleges,
+  registerPlans,
   metrics,
   attendance,
   openComplaints,
@@ -55,6 +56,7 @@ export default function StaffHomeClient({
   pendingSubs: PendingSub[];
   colleges: { id: string; name: string }[];
   registerColleges: { id: string; name: string }[];
+  registerPlans: { id: string; collegeId: string; name: string; tier: string | null; gross: number }[];
   metrics: Record<string, Metrics>;
   attendance: { clockedIn: boolean; clockedOut: boolean; since: number | null };
   openComplaints: OpenComplaint[];
@@ -78,8 +80,16 @@ export default function StaffHomeClient({
   const [batchMode, setBatchMode] = useState(false);
   const [batchIds, setBatchIds] = useState<Set<string>>(new Set());
   const [batchBusy, setBatchBusy] = useState(false);
-  const [reg, setReg] = useState({ name: "", phone: "", collegeId: registerColleges[0]?.id || "", kind: "student" as "student" | "faculty" });
+  const [reg, setReg] = useState({ name: "", phone: "", collegeId: registerColleges[0]?.id || "", kind: "student" as "student" | "faculty", planId: "", method: "cash" as "cash" | "upi" });
   const [regLoading, setRegLoading] = useState(false);
+  // A plan is mandatory for a non-faculty registration at any college that
+  // HAS plans to sell (BVRIT never does — see requireCyclesEnabled; its
+  // registerPlans list is simply empty, so this is naturally false there
+  // without special-casing the college name here too). Owner, Sep 22:
+  // "staff need to give plan as mandatory then obviously code with B/S/G
+  // will be assigned... no need [of] a provisional code".
+  const regCollegePlans = useMemo(() => registerPlans.filter((p) => p.collegeId === reg.collegeId), [registerPlans, reg.collegeId]);
+  const regNeedsPlan = reg.kind === "student" && regCollegePlans.length > 0;
 
   const q = search.trim().toLowerCase();
 
@@ -142,11 +152,11 @@ export default function StaffHomeClient({
   const handleRegister = async () => {
     setRegLoading(true);
     try {
-      const r = await registerStudent(reg);
+      const r = await registerStudent(regNeedsPlan ? reg : { name: reg.name, phone: reg.phone, collegeId: reg.collegeId, kind: reg.kind });
       if (!r.ok) return toast(r.error || "Failed", true);
-      toast(`Student registered — ID ${r.bagCode || r.id}`);
+      toast(r.planError ? r.planError : `Student registered — ID ${r.bagCode || r.id}`, !!r.planError);
       setShowRegister(false);
-      setReg({ name: "", phone: "", collegeId: registerColleges[0]?.id || "", kind: "student" });
+      setReg({ name: "", phone: "", collegeId: registerColleges[0]?.id || "", kind: "student", planId: "", method: "cash" });
       router.push(`/s/customers/${r.id}`);
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
@@ -522,7 +532,7 @@ export default function StaffHomeClient({
           </div>
           <div className="field">
             <label>Campus</label>
-            <select className="input" value={reg.collegeId} onChange={(e) => setReg({ ...reg, collegeId: e.target.value })}>
+            <select className="input" value={reg.collegeId} onChange={(e) => setReg({ ...reg, collegeId: e.target.value, planId: "" })}>
               {registerColleges.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
@@ -535,10 +545,31 @@ export default function StaffHomeClient({
               <div className="h-sm">College faculty</div>
               <div className="muted" style={{ fontSize: 12 }}>F-series ID · buys cycle packs, not plans</div>
             </div>
-            <Switch on={reg.kind === "faculty"} onToggle={() => setReg({ ...reg, kind: reg.kind === "faculty" ? "student" : "faculty" })} />
+            <Switch on={reg.kind === "faculty"} onToggle={() => setReg({ ...reg, kind: reg.kind === "faculty" ? "student" : "faculty", planId: "" })} />
           </div>
-          <button className="btn mt16" onClick={handleRegister} disabled={regLoading || !reg.name.trim() || reg.phone.length !== 10}>
-            <Svg name="check" size={18} /> {regLoading ? "Registering…" : "Register student"}
+          {/* A plan is mandatory the moment this campus HAS plans to sell —
+              BVRIT never does, so this simply never appears there. Owner,
+              Sep 22: "staff need to give plan as mandatory then obviously
+              code with B/S/G will be assigned". */}
+          {regNeedsPlan && (
+            <>
+              <div className="field mt8">
+                <label>Plan (required — decides their customer ID)</label>
+                <select className="input" value={reg.planId} onChange={(e) => setReg({ ...reg, planId: e.target.value })}>
+                  <option value="">Pick a plan…</option>
+                  {regCollegePlans.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name} — {fmt(p.gross)}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field mt8">
+                <label>Paid by</label>
+                <Seg<"cash" | "upi"> options={[["cash", "Cash"], ["upi", "UPI"]]} value={reg.method} onChange={(method) => setReg({ ...reg, method })} />
+              </div>
+            </>
+          )}
+          <button className="btn mt16" onClick={handleRegister} disabled={regLoading || !reg.name.trim() || reg.phone.length !== 10 || (regNeedsPlan && !reg.planId)}>
+            <Svg name="check" size={18} /> {regLoading ? "Registering…" : regNeedsPlan ? "Register & sell plan" : "Register student"}
           </button>
         </div>
       </Sheet>

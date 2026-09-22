@@ -22,20 +22,11 @@ import { rosterSoon } from "@/lib/sheets-sync";
 import { requireStaff, assertSameCollege, AuthError } from "@/lib/auth";
 import { parseBagCode, type Tier } from "@/lib/bagcode";
 
-/* Mirrors the private helpers in lib/actions/subscription.ts — they live in a
-   "use server" module, which may only export async functions, so they cannot
-   be imported here. Kept byte-for-byte in step; a drift would let an imported
-   subscription snapshot differently from a sold one. */
-type PlanBucket = { service: string; cycles: number; kgPerCycle: number };
-function usageBuckets(buckets: PlanBucket[]) {
-  return buckets.map((b) => ({ service: b.service, cycles: b.cycles, used: 0, kgPerCycle: b.kgPerCycle }));
-}
-async function planGross(plan: { price: unknown; gstFree: boolean }) {
-  const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
-  const gstOn = (cfg.settings as Record<string, unknown>)?.gstEnabled !== false && !plan.gstFree;
-  const price = Number(plan.price);
-  return price + (gstOn ? Math.round(price * Number(cfg.gstPct) / 100) : 0);
-}
+/* usageBuckets/planGross now live in lib/plan-activation.ts (Sep 22) — moved
+   out of lib/actions/subscription.ts (a "use server" file, which may only
+   export async server actions) so this route and registerStudent (admin.ts)
+   could both reuse the real ones instead of each keeping its own copy. */
+import { usageBuckets, planGross, type PlanBucket } from "@/lib/plan-activation";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;

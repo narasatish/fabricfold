@@ -75,6 +75,20 @@ export default async function StaffHomePage() {
     ? await db.college.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } })
     : colleges;
 
+  /* Plans for the mandatory plan-picker on a St Mary's-style registration
+     (owner, Sep 22: "staff need to give plan as mandatory"). Unscoped, same
+     reasoning as registerColleges — whichever campus is picked on the form
+     needs its own plans available, not just the signed-in staff's own. BVRIT
+     never has plans (requireCyclesEnabled refuses it), so this is empty for
+     BVRIT and the register sheet simply won't ask for one there. */
+  const registerPlansCfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
+  const registerGstOn = (registerPlansCfg.settings as Record<string, unknown>)?.gstEnabled !== false;
+  const registerPlans = (await db.plan.findMany({ where: { active: true }, orderBy: { price: "asc" } })).map((p) => {
+    const price = Number(p.price);
+    const gstApplies = registerGstOn && !p.gstFree;
+    return { id: p.id, collegeId: p.collegeId, name: p.name, tier: p.tier, gross: price + (gstApplies ? Math.round(price * Number(registerPlansCfg.gstPct) / 100) : 0) };
+  });
+
   // Attendance state for THIS staff member (IST business day)
   const istDate = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
   const att = await db.attendance.findUnique({ where: { staffId_date: { staffId: staff.id, date: istDate } } });
@@ -149,6 +163,7 @@ export default async function StaffHomePage() {
         pendingSubs={pendingSubs}
         colleges={colleges}
         registerColleges={registerColleges}
+        registerPlans={registerPlans}
         metrics={metrics}
         attendance={attendance}
         openComplaints={openComplaints}

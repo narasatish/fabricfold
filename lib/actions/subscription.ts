@@ -12,9 +12,9 @@ import { pushNotif, audit } from "../notify";
 import { notifyOwner } from "../mail";
 import { syncBagToPlan } from "./bags";
 import { CYCLE_RATES } from "../money";
-import { featureOn } from "../features";
 import { enqueueSheetEvent, enqueuePaymentEvent, customerIdFor, flushSoon, istStamp } from "../sheet-events";
 import { rosterSoon } from "../sheets-sync";
+import { requireCyclesEnabled, planGross, usageBuckets, activatePlan, type PlanBucket } from "../plan-activation";
 
 const rid = (n: number) => { let s = ""; for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10); return s; };
 
@@ -32,34 +32,10 @@ const rid = (n: number) => { let s = ""; for (let i = 0; i < n; i++) s += Math.f
    admin-facing "subscriptions" feature flag (features.ts / AdminClient.tsx),
    which existed in the toggle UI but, like the rates-override case, nothing
    server-side ever actually read. */
-async function requireCyclesEnabled(collegeId: string) {
-  const college = await db.college.findUniqueOrThrow({ where: { id: collegeId }, select: { name: true, features: true, rates: true } });
-  /* Owner's explicit, repeated instruction (Sep 2026): BVRIT is never sold
-     cycles — plans or packs — for students OR staff, full stop. The
-     rates-override check below is the general rule for any per-piece
-     campus, and should already cover BVRIT once its `rates` column is set
-     in the live database — but this session has no way to directly confirm
-     that column's live production value (no Render DB credentials
-     available here; the local .env points at the old Sydney/dev Supabase
-     project, not production — see docs/claude-playbook.md's "Infrastructure
-     reality" section on why that distinction matters). Matching on name is
-     a deliberate belt-and-suspenders backstop so the rule holds even if
-     BVRIT's `rates`/`features.subscriptions` ever end up unset or wrong in
-     production — it does not replace the general check below, which still
-     protects every OTHER per-piece campus. */
-  if (college.name.trim().toUpperCase() === "BVRIT") {
-    return "BVRIT bills per piece — cycle-based plans and packs are never sold here, for students or staff.";
-  }
-  if (college.rates != null) {
-    return "This campus bills per piece (its own item rates are set) — cycle-based plans and packs aren't available here.";
-  }
-  if (!featureOn(college.features, "subscriptions")) {
-    return "Cycle-based plans and packs are disabled for this campus.";
-  }
-  return null;
-}
-
-type PlanBucket = { service: string; cycles: number; kgPerCycle: number };
+/* requireCyclesEnabled, PlanBucket, planGross, usageBuckets moved to
+   ../plan-activation.ts (Sep 22) so registerStudent (admin.ts) can reuse them
+   too — a "use server" file may only export async server actions, so they
+   could not be imported from here directly. */
 
 /**
  * Manually correct how many cycles a student has used, per service bucket —
@@ -108,17 +84,6 @@ export async function adjustCycleUsage(studentId: string, updates: { service: st
   rosterSoon();
   publish([`student:${studentId}`], { type: "subscription", payload: { studentId } });
   return { ok: true as const, changed: true, changes };
-}
-
-async function planGross(plan: { price: unknown; gstFree: boolean }) {
-  const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
-  const gstOn = (cfg.settings as Record<string, unknown>)?.gstEnabled !== false && !plan.gstFree;
-  const price = Number(plan.price);
-  return price + (gstOn ? Math.round(price * Number(cfg.gstPct) / 100) : 0);
-}
-
-function usageBuckets(buckets: PlanBucket[]) {
-  return buckets.map((b) => ({ service: b.service, cycles: b.cycles, used: 0, kgPerCycle: b.kgPerCycle }));
 }
 
 /* Students cannot buy a plan themselves — plans are sold at the counter only,
@@ -216,52 +181,15 @@ export async function assignSubscription(studentId: string, planId: string, meth
   if (gateErr) return { ok: false as const, error: gateErr };
   if (stu.subscription?.active) return { ok: false as const, error: "This student already has an active plan" };
 
-  const plan = await db.plan.findUnique({ where: { id: planId } });
-  if (!plan || !plan.active) return { ok: false as const, error: "Pick a plan" };
-  if (plan.collegeId !== stu.collegeId) return { ok: false as const, error: "That plan belongs to a different campus" };
-
-  const buckets = usageBuckets(plan.buckets as unknown as PlanBucket[]);
-  const cyclesTotal = buckets.reduce((s, b) => s + b.cycles, 0);
-  const gross = await planGross(plan);
-  const creditApplied = applyCredits ? Math.min(Number(stu.credits), gross) : 0;
-  const cash = gross - creditApplied;
-
-  try {
-    await db.$transaction(async (tx) => {
-      /* Locked, then re-checked — the `stu.subscription?.active` guard above
-         ran before this transaction started, so two concurrent assigns for a
-         student with no plan yet would both pass it and both charge a
-         Payment row for the same plan.
-
-         Found 2026-09-05: a `SELECT ... FOR UPDATE` row lock is exactly
-         useless for this — "a student with no plan yet" means there is NO
-         Subscription row to match the WHERE clause, so the lock held
-         nothing and the race this comment describes was still wide open.
-         (Same root-cause bug independently found and fixed in issueBag's
-         "first bag" case and sellCyclePack's "first pack" case — see
-         docs/claude-playbook.md.) A Postgres advisory lock keyed on
-         studentId works whether or not the row exists yet. */
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`subscription|${studentId}`}))`;
-      const fresh = await tx.subscription.findUnique({ where: { studentId } });
-      if (fresh?.active) throw new Error("This student already has an active plan");
-      await tx.subscription.upsert({
-        where: { studentId },
-        create: { studentId, active: true, plan: plan.name, planId: plan.id, buckets, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesTotal, kgPerCycle: buckets[0]?.kgPerCycle ?? 7 },
-        update: { active: true, plan: plan.name, planId: plan.id, buckets, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesTotal, cyclesUsed: 0, kgPerCycle: buckets[0]?.kgPerCycle ?? 7 },
-      });
-      if (creditApplied > 0) {
-        await tx.student.update({ where: { id: studentId }, data: { credits: { decrement: creditApplied } } });
-        await tx.payment.create({ data: { method: "credit", amount: creditApplied, collegeId: stu.collegeId, studentId, note: `Subscription: ${plan.name} (credit applied)` } });
-        await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId, label: `Plan: ${plan.name}`, method: "credit", amount: creditApplied });
-      }
-      if (cash > 0) {
-        await tx.payment.create({ data: { method, amount: cash, collegeId: stu.collegeId, studentId, note: `Subscription: ${plan.name} (assigned at counter)` } });
-        await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId, label: `Plan: ${plan.name}`, method, amount: cash });
-      }
-    }, { timeout: 15_000 }); // advisory lock can queue a concurrent caller past Prisma's 5s default
-  } catch (e) {
-    return { ok: false as const, error: (e as Error).message };
-  }
+  /* The Subscription+Payment transaction itself lives in ../plan-activation.ts
+     (Sep 22), shared with registerStudent — a St Mary's registration now
+     REQUIRES a plan up front (owner: "staff need to give plan as mandatory
+     then obviously code with B/S/G will be assigned"), so the same
+     money/plan logic had to be reachable from admin.ts without duplicating
+     it (a "use server" file may only export async server actions, so
+     admin.ts could not import a plain helper defined here). */
+  const result = await activatePlan(stu, planId, method, applyCredits);
+  if (!result.ok) return result;
   flushSoon();
   await db.otp.deleteMany({ where: { purpose: "subscription", refId: studentId } });
 
@@ -275,11 +203,10 @@ export async function assignSubscription(studentId: string, planId: string, meth
      A failure is reported to the caller, not thrown. */
   const bag = await syncBagToPlan(studentId);
 
-  const paidNote = creditApplied > 0 ? (cash > 0 ? `₹${cash} ${method.toUpperCase()} + ₹${creditApplied} credit` : `₹${creditApplied} credit`) : `₹${gross} (${method.toUpperCase()})`;
-  await pushNotif(studentId, `Your "${plan.name}" plan is active. Happy washing!`, "status");
-  await audit("Subscription assigned", `${stu.name} · ${plan.name} · ${paidNote}${bag.ok && bag.code ? ` · ${bag.code}` : ""}`, st.id);
+  await pushNotif(studentId, `Your "${result.plan.name}" plan is active. Happy washing!`, "status");
+  await audit("Subscription assigned", `${stu.name} · ${result.plan.name} · ${result.paidNote}${bag.ok && bag.code ? ` · ${bag.code}` : ""}`, st.id);
   rosterSoon();
-  void notifyOwner("Subscription assigned", `${stu.name}: "${plan.name}" — ${paidNote} (assigned by ${st.name}).`);
+  void notifyOwner("Subscription assigned", `${stu.name}: "${result.plan.name}" — ${result.paidNote} (assigned by ${st.name}).`);
   publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "subscription", payload: { studentId } });
   return { ok: true as const, code: bag.ok ? bag.code : undefined, bagError: bag.ok ? undefined : bag.error };
 }

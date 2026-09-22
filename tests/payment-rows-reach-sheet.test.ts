@@ -15,10 +15,14 @@ const count = (src: string, re: RegExp) => (src.match(re) || []).length;
    Payment rows written together (an order paid partly by credit, partly cash). */
 const EXPECT: Record<string, [number, number]> = {
   "lib/actions/orders.ts": [3, 2],        // pay order (credit+cash rows -> 1 event), refund
-  "lib/actions/subscription.ts": [6, 5],  // activate, assign (credit + cash), plan change, cycle pack (credit+cash rows -> 1 event)
+  // assignSubscription's own payment.create (credit + cash) moved into
+  // lib/plan-activation.ts's activatePlan (Sep 22, shared with
+  // registerStudent's now-mandatory plan step) — tracked separately below.
+  "lib/actions/subscription.ts": [4, 2],  // activate, plan change, cycle pack (credit+cash rows -> 1 event)
   "lib/actions/ops.ts": [1, 1],           // wallet top-up
   "lib/actions/credits.ts": [1, 1],       // cash compensation
   "lib/actions/bags.ts": [1, 1],          // bag fee
+  "lib/plan-activation.ts": [2, 2],       // activatePlan: credit row, cash row
 };
 
 describe("every Payment row has a Sheet event", () => {

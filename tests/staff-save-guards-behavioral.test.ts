@@ -123,8 +123,11 @@ describe("saveCollege input checks", () => {
 });
 
 describe("registerStudent / updateStudentPhone input checks", () => {
+  // kind: "faculty" — these tests are about name/phone format, not the plan
+  // requirement (owner, Sep 22), so faculty (never needs a plan) sidesteps it
+  // without touching what's actually being tested here.
   const reg = (over: Record<string, unknown> = {}) =>
-    admin.registerStudent({ name: "New Kid", phone: "9811111111", collegeId: "col1", ...over } as never);
+    admin.registerStudent({ name: "New Kid", phone: "9811111111", collegeId: "col1", kind: "faculty", ...over } as never);
   const bad: [string, Record<string, unknown>][] = [
     ["phone starting 1", { phone: "1234567890" }], ["phone all zeros", { phone: "0000000000" }], ["9-digit phone", { phone: "981111111" }],
     ["300-char name", { name: "N".repeat(300) }], ["1-char name", { name: "A" }], ["blank name", { name: "   " }],

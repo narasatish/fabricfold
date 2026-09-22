@@ -120,7 +120,7 @@ describe("registration & phone changes are staff-gated (source-level regression 
 
   it("registerStudent requires a staff session (requireStaff) â€” any role, but never self-serve", () => {
     const fn = adminSrc.slice(adminSrc.indexOf("export async function registerStudent"));
-    expect(fn.slice(0, 200)).toMatch(/requireStaff\(1\)/);
+    expect(fn.slice(0, 260)).toMatch(/requireStaff\(1\)/);
   });
 
   it("updateStudentPhone requires Admin+ (role 3), not just any staff", () => {

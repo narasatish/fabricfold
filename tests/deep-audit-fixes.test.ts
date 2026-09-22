@@ -313,7 +313,12 @@ describe("three more concurrency/state bugs found by a deep hand-traced re-audit
     expect((subs.match(/SELECT id FROM \$\{Prisma\.raw\(`\$\{dbSchemaPrefix\}"Subscription"`\)\} WHERE "studentId" = \$\{studentId\} FOR UPDATE/g) || []).length).toBe(3);
   });
   it("assignSubscription and sellCyclePack use an advisory lock instead, since a first-time student has no row to lock", () => {
-    expect((subs.match(/SELECT pg_advisory_xact_lock\(hashtext\(\$\{`subscription\|\$\{studentId\}`\}\)\)/g) || []).length).toBe(2);
+    // assignSubscription's own lock moved into lib/plan-activation.ts (Sep 22),
+    // shared with registerStudent's now-mandatory plan step — count both files.
+    const core = read("lib/plan-activation.ts");
+    const total = (subs.match(/SELECT pg_advisory_xact_lock\(hashtext\(\$\{`subscription\|\$\{studentId\}`\}\)\)/g) || []).length
+      + (core.match(/SELECT pg_advisory_xact_lock\(hashtext\(\$\{`subscription\|\$\{stu\.id\}`\}\)\)/g) || []).length;
+    expect(total).toBe(2);
   });
 });
 

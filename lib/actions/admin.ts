@@ -20,8 +20,19 @@ import { PAYMENT_KEYS, ratesProblem, expressProblem, gstProblem, paymentProblem,
    can also self-register via WhatsApp (see wa-register.ts), which auto-issues
    a V-series bag in the same transaction as account creation; this function
    mirrors that for BVRIT so a student added here by staff isn't left without
-   one — see the bag-issuance block below. */
-export async function registerStudent(input: { name: string; phone: string; collegeId: string; kind?: "student" | "faculty" }) {
+   one — see the bag-issuance block below.
+
+   A St Mary's (non-faculty) registration REQUIRES a plan (owner, Sep 22:
+   "staff need to give plan as mandatory then obviously code with B/S/G will
+   be assigned... no need [of] a provisional code" — overriding an earlier,
+   narrower fix that defaulted a plan-less walk-in to a provisional Bronze
+   code). BVRIT is always V regardless of any plan (BVRIT never sells plans —
+   see requireCyclesEnabled); faculty are always F at either college and also
+   never pick a plan (they buy cycle packs instead). Selling a plan is money
+   changing hands, so — same threshold as assignSubscription — it requires
+   Manager+, even though a plan-less BVRIT/faculty registration stays Counter
+   level. */
+export async function registerStudent(input: { name: string; phone: string; collegeId: string; kind?: "student" | "faculty"; planId?: string; method?: "cash" | "upi" }) {
   const st = await requireStaff(1);
   const name = String(input.name ?? "").trim();
   const phone = String(input.phone ?? "").replace(/\D/g, "").slice(-10);
@@ -37,20 +48,28 @@ export async function registerStudent(input: { name: string; phone: string; coll
   const college = await db.college.findUnique({ where: { id: input.collegeId } });
   if (!college || !college.active) return { ok: false as const, error: "Pick a campus" };
 
+  const kind = input.kind === "faculty" ? "faculty" : "student";
+  const isBvrit = college.name.trim().toUpperCase() === "BVRIT";
+  const isFaculty = kind === "faculty";
+  const needsPlan = !isBvrit && !isFaculty;
+  if (needsPlan) {
+    if (!input.planId) return { ok: false as const, error: "Pick a plan" };
+    if (input.method !== "cash" && input.method !== "upi") return { ok: false as const, error: "Pick cash or UPI" };
+    if (st.role < 2) return { ok: false as const, error: "Registering with a plan needs a Manager" };
+  }
+
   // permanent random 6-digit FabricFold code, unique (same scheme as self-registration)
   let id = "";
   for (let i = 0; i < 20; i++) {
     id = String(Math.floor(100000 + Math.random() * 900000));
     if (!(await db.student.findUnique({ where: { id } }))) break;
   }
-  const kind = input.kind === "faculty" ? "faculty" : "student";
-  const isBvrit = college.name.trim().toUpperCase() === "BVRIT";
-  const isFaculty = kind === "faculty";
   let stu;
   let bagCode: string | null = null;
   try {
     const result = await db.$transaction(async (tx) => {
       const created = await tx.student.create({ data: { id, phone, name, collegeId: college.id, kind } });
+      if (needsPlan) return { stu: created, code: null as string | null }; // bag comes from the plan below, not here
       // BVRIT students self-registering via WhatsApp get a V-series bag
       // automatically in the same transaction as account creation
       // (wa-register.ts) — mirror that here so a BVRIT student added by
@@ -63,17 +82,8 @@ export async function registerStudent(input: { name: string; phone: string; coll
       // bag; without this they'd be left with no customer ID until they
       // happened to trigger issueBag (owner, Sep 2026: "we have given code
       // as F ... it will be same like F1100").
-      //
-      // Every OTHER student (a plan-less walk-in, the common case — no plan
-      // has been sold yet) gets a Bronze code the same way (owner, Sep 22:
-      // "for st marys we need to use B,S,G thats all... no need of W") —
-      // corrected to their real tier the moment they subscribe
-      // (syncBagToPlan). Found live (owner, Sep 21): registering one of
-      // these showed the raw internal 6-digit row id as the "customer ID"
-      // instead — this was the one case the mirror above didn't cover.
-      const { allocateBagCode, bagKindFor } = await import("../bagcode");
-      const bagKind = isFaculty ? "faculty" : isBvrit ? "bvrit" : bagKindFor(null);
-      const code = await allocateBagCode(tx, bagKind);
+      const { allocateBagCode } = await import("../bagcode");
+      const code = await allocateBagCode(tx, isFaculty ? "faculty" : "bvrit");
       await tx.bag.create({
         data: { code, studentId: created.id, tier: null, complimentary: true, issuedBy: st.id, status: "active" },
       });
@@ -88,14 +98,39 @@ export async function registerStudent(input: { name: string; phone: string; coll
     if ((e as { code?: string }).code === "P2002") return { ok: false as const, error: "This number is already registered" };
     throw e;
   }
+
+  let planError: string | undefined;
+  let planName: string | undefined;
+  if (needsPlan) {
+    const { activatePlan } = await import("../plan-activation");
+    const { syncBagToPlan } = await import("./bags");
+    const result = await activatePlan({ id: stu.id, collegeId: college.id, credits: 0 }, input.planId!, input.method!, false);
+    if (result.ok) {
+      planName = result.plan.name;
+      flushSoon();
+      const bag = await syncBagToPlan(stu.id);
+      bagCode = bag.ok ? bag.code ?? null : null;
+      if (!bag.ok) planError = `Plan sold, but the code failed to issue: ${bag.error} — issue one manually`;
+    } else {
+      // The account is already created (the phone number is claimed) — a failed
+      // plan sale must not silently leave the student with no code at all
+      // (the exact bug this whole feature exists to prevent). Give them the
+      // same safety-net Bronze code syncBagToPlan would mint for "no active
+      // plan", and tell staff plainly so they can retry from the profile.
+      const bag = await syncBagToPlan(stu.id);
+      bagCode = bag.ok ? bag.code ?? null : null;
+      planError = `Registered, but the plan could not be sold: ${result.error} — assign a plan from the student's profile`;
+    }
+  }
+
   await audit(
     kind === "faculty" ? "Faculty registered" : "Student registered",
-    `${name} · +91 ${phone} · ${college.name}${bagCode ? ` · Code ${bagCode}` : ""}`,
+    `${name} · +91 ${phone} · ${college.name}${planName ? ` · ${planName}` : ""}${bagCode ? ` · Code ${bagCode}` : ""}${planError ? ` · ${planError}` : ""}`,
     st.id,
   );
   rosterSoon();
-  void notifyOwner("New student registered", `${name} (+91 ${phone}) registered at the counter (${college.name}) by ${st.name} — ID ${bagCode || stu.id}.`);
-  return { ok: true as const, id: stu.id, bagCode };
+  void notifyOwner("New student registered", `${name} (+91 ${phone}) registered at the counter (${college.name}) by ${st.name}${planName ? ` — plan "${planName}"` : ""} — ID ${bagCode || stu.id}.${planError ? ` ⚠ ${planError}` : ""}`);
+  return { ok: true as const, id: stu.id, bagCode, planError };
 }
 
 /* ----- Change a student's registered mobile number (Admin+ only) -----

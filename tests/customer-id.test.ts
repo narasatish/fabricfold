@@ -29,10 +29,16 @@ describe("every path that turns a plan on allocates the code", () => {
   );
 
   it("allocates AFTER the payment, never inside it", () => {
-    // a paid subscription must not roll back because a code could not be got
+    // a paid subscription must not roll back because a code could not be got.
+    // The payment transaction itself moved into plan-activation.ts (shared with
+    // registerStudent, Sep 22); assignSubscription calls it, then syncBagToPlan.
     const start = subs.indexOf("export async function assignSubscription");
-    const body = subs.slice(start);
-    expect(body.indexOf("db.$transaction")).toBeLessThan(body.indexOf("syncBagToPlan"));
+    const end = subs.indexOf("\nexport async function ", start + 10);
+    const body = subs.slice(start, end);
+    expect(body).toMatch(/const result = await activatePlan\(/);
+    expect(body.indexOf("activatePlan(")).toBeLessThan(body.indexOf("syncBagToPlan"));
+    const core = read("lib/plan-activation.ts");
+    expect(core).toMatch(/db\.\$transaction/);
   });
 });
 

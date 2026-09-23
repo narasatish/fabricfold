@@ -608,7 +608,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
           {/* The reason a plan was cancelled is recorded server-side precisely
               so it isn't lost — showing it here is the other half of that;
               without it staff have no way to see WHY short of a DB query. */}
-          {student.subscription.cancelledAt && (
+          {!student.subscription.active && student.subscription.cancelledAt && (
             <div className="kv"><span className="k">Cancelled</span><span>{dateStr(student.subscription.cancelledAt)}{student.subscription.cancelledReason ? ` — ${student.subscription.cancelledReason}` : ""}</span></div>
           )}
           <div className="row wrap gap8 mt12">

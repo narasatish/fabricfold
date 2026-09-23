@@ -149,4 +149,16 @@ describe("a cancelled subscription is not indistinguishable from a pending one (
     const block = ui.slice(ui.indexOf('{/* Subscription */}'), ui.indexOf('{/* Subscription */}') + 3000);
     expect(block.match(/student\.subscription\.active &&/g)?.length).toBeGreaterThanOrEqual(3);
   });
+  it("the cancelled note only shows while inactive — a re-activated plan can carry a stale cancelledAt from before", () => {
+    // Found live, Sep 23: re-assigning a plan that had been cancelled earlier
+    // the same day left the OLD cancelledAt/cancelledReason on the row (see
+    // lib/plan-activation.ts, now cleared on activation) — this is the other
+    // half of the fix, since a page rendered from a stale row must not show
+    // "Cancelled: ..." next to an Active pill either way.
+    expect(ui).toMatch(/!student\.subscription\.active && student\.subscription\.cancelledAt && \(/);
+  });
+  it("activatePlan clears any earlier cancellation when it (re)activates a subscription", () => {
+    const activation = read("lib/plan-activation.ts");
+    expect(activation).toMatch(/cancelledAt: null, cancelledReason: null, cancelledBy: null/);
+  });
 });

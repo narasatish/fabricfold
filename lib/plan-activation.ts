@@ -88,7 +88,12 @@ export async function activatePlan(
       await tx.subscription.upsert({
         where: { studentId: stu.id },
         create: { studentId: stu.id, active: true, plan: plan.name, planId: plan.id, buckets, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesTotal, kgPerCycle: buckets[0]?.kgPerCycle ?? 7 },
-        update: { active: true, plan: plan.name, planId: plan.id, buckets, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesTotal, cyclesUsed: 0, kgPerCycle: buckets[0]?.kgPerCycle ?? 7 },
+        // A fresh assignment supersedes any earlier cancellation on this
+        // row — left uncleared, the cancelled reason/date stuck around
+        // forever and the customer page kept showing "Cancelled: ..." next
+        // to an Active pill (found live, Sep 23, right after re-assigning a
+        // plan that had been cancelled earlier the same day).
+        update: { active: true, plan: plan.name, planId: plan.id, buckets, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesTotal, cyclesUsed: 0, kgPerCycle: buckets[0]?.kgPerCycle ?? 7, cancelledAt: null, cancelledReason: null, cancelledBy: null },
       });
       if (creditApplied > 0) {
         await tx.student.update({ where: { id: stu.id }, data: { credits: { decrement: creditApplied } } });

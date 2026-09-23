@@ -22,6 +22,15 @@ import crypto from "node:crypto";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+/* Every call below is `await`ed directly with no timeout of its own — the
+   only thing standing between a stalled connection to Google and the Admin
+   "Sync now" button hanging forever is this signal. The Sep 10 fix (see
+   runSheetsSync's comment) only catches a THROWN error; a fetch that never
+   settles at all throws nothing, so it slips straight past that try/catch.
+   Found live Sep 23: the button stuck on "Syncing…" indefinitely again, this
+   time via a stalled request rather than a rejected one. */
+const TIMEOUT_MS = 15_000;
+const withTimeout = (init: RequestInit = {}): RequestInit => ({ ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
 
 export function sheetsConfigured() {
   return !!(process.env.GOOGLE_SA_EMAIL && process.env.GOOGLE_SA_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID);
@@ -45,11 +54,11 @@ async function accessToken(): Promise<string> {
   const signature = b64url(crypto.createSign("RSA-SHA256").update(`${header}.${claim}`).sign(key));
   const assertion = `${header}.${claim}.${signature}`;
 
-  const res = await fetch(TOKEN_URL, {
+  const res = await fetch(TOKEN_URL, withTimeout({
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }),
-  });
+  }));
   if (!res.ok) throw new Error(`Google auth failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
   return ((await res.json()) as { access_token: string }).access_token;
 }
@@ -79,7 +88,7 @@ const safeRows = (rows: (string | number)[][]) => rows.map((r) => r.map((c) => s
 async function gfetch(url: string, init: RequestInit, retries = 3): Promise<Response> {
   const base = Number(process.env.SHEETS_RETRY_BASE_MS ?? 1000);
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, init);
+    const res = await fetch(url, withTimeout(init));
     if ((res.status !== 429 && res.status !== 503) || attempt >= retries) return res;
     const retryAfter = Number(res.headers.get("retry-after"));
     const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 10_000) : base * 2 ** attempt;
@@ -93,9 +102,9 @@ export async function readSheet(tab: string): Promise<string[][]> {
   const id = process.env.GOOGLE_SHEET_ID!;
   const token = await accessToken();
   const range = encodeURIComponent(`${tab}!A1:F200`);
-  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${range}`, {
+  const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${range}`, withTimeout({
     headers: { Authorization: `Bearer ${token}` },
-  });
+  }));
   if (!res.ok) return []; // missing tab -> 400; treat as empty
   const j = (await res.json()) as { values?: string[][] };
   return j.values || [];
@@ -127,10 +136,10 @@ export async function appendSheet(
     const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
     // Create the tab if absent. "already exists" is the normal case — ignore it.
-    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}:batchUpdate`, {
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}:batchUpdate`, withTimeout({
       method: "POST", headers: auth,
       body: JSON.stringify({ requests: [{ addSheet: { properties: { title: tab } } }] }),
-    }).catch(() => {});
+    })).catch(() => {});
 
     /* Header only when the tab is genuinely empty. Checking A1 rather than
        tracking "did I create it" keeps this correct if the tab was made by
@@ -139,7 +148,7 @@ export async function appendSheet(
     if (header) {
       const first = await fetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${encodeURIComponent(`${tab}!A1:A1`)}`,
-        { headers: { Authorization: `Bearer ${token}` } },
+        withTimeout({ headers: { Authorization: `Bearer ${token}` } }),
       );
       const empty = !first.ok || !((await first.json()) as { values?: string[][] }).values?.length;
       if (empty) out.unshift(safeRows([header])[0]);
@@ -167,11 +176,11 @@ export async function writeSheet(tab: string, rows: (string | number)[][]) {
   const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
   // Create the tab if it doesn't exist yet (ignore "already exists").
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}:batchUpdate`, {
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}:batchUpdate`, withTimeout({
     method: "POST",
     headers: auth,
     body: JSON.stringify({ requests: [{ addSheet: { properties: { title: tab } } }] }),
-  }).catch(() => {});
+  })).catch(() => {});
 
   /* Write the new data FIRST, then clear only what's left over — not
      clear-then-write. This tab is the Owner's live operational view (Live,

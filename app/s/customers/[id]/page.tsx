@@ -91,6 +91,8 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
           cyclesUsed: student.subscription.cyclesUsed,
           kgPerCycle: N(student.subscription.kgPerCycle),
           expiresAt: student.subscription.expiresAt ? student.subscription.expiresAt.getTime() : null,
+          cancelledAt: student.subscription.cancelledAt ? student.subscription.cancelledAt.getTime() : null,
+          cancelledReason: student.subscription.cancelledReason,
           cycleLog: student.subscription.cycleLog.map((c) => ({ at: c.at.getTime(), orderId: c.orderId })),
           buckets: ((student.subscription.buckets as unknown as { service: string; cycles: number; used: number; kgPerCycle: number }[] | null) ?? []).map((b) => ({ ...b, label: SERVICE_LABEL[b.service] || b.service })),
         }

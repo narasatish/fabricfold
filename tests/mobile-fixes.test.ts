@@ -127,3 +127,26 @@ describe("iPhone: content no longer cuts off behind the notch or the tab bar", (
     expect(read("app/layout.tsx")).toMatch(/viewportFit: "cover"/);
   });
 });
+
+describe("a cancelled subscription is not indistinguishable from a pending one (found live, Sep 23)", () => {
+  const ui = read("app/s/customers/[id]/_components/CustomerClient.tsx");
+  it("the page fetches the cancellation fields, not just active/expiresAt", () => {
+    const page = read("app/s/customers/[id]/page.tsx");
+    expect(page).toMatch(/cancelledAt: student\.subscription\.cancelledAt/);
+    expect(page).toMatch(/cancelledReason: student\.subscription\.cancelledReason/);
+  });
+  it("the status pill says Cancelled, not Pending, once cancelledAt is set", () => {
+    expect(ui).toMatch(/student\.subscription\.active \? "Active" : student\.subscription\.cancelledAt \? "Cancelled" : "Pending"/);
+  });
+  it("shows the recorded reason and date — the whole point of storing them", () => {
+    expect(ui).toMatch(/student\.subscription\.cancelledAt && \(/);
+    expect(ui).toMatch(/cancelledReason/);
+  });
+  it("Change plan, Correct cycles used and Cancel plan all require an ACTIVE subscription, not just that one exists", () => {
+    // Previously staffRole alone gated these, so a dead (cancelled) plan
+    // still offered "Change plan" — clicking it hit upgradeSubscription's
+    // own "no active plan to change" error, a dead-end round trip.
+    const block = ui.slice(ui.indexOf('{/* Subscription */}'), ui.indexOf('{/* Subscription */}') + 3000);
+    expect(block.match(/student\.subscription\.active &&/g)?.length).toBeGreaterThanOrEqual(3);
+  });
+});

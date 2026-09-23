@@ -27,7 +27,8 @@ type Student = {
   college: { id: string; name: string } | null;
   subscription: {
     active: boolean; plan: string; cyclesTotal: number; cyclesUsed: number; kgPerCycle: number;
-    expiresAt: number | null; cycleLog: { at: number; orderId: string }[];
+    expiresAt: number | null; cancelledAt: number | null; cancelledReason: string | null;
+    cycleLog: { at: number; orderId: string }[];
     buckets: { service: string; label: string; cycles: number; used: number; kgPerCycle: number }[];
   } | null;
   bags: { id: string; code: string; tier: string | null; complimentary: boolean; price: number; status: string; issuedAt: number }[];
@@ -592,7 +593,9 @@ Currently ${current}. Type the code printed on the bag they are being given.
         <div className="card pad mt16">
           <div className="between">
             <div className="h-sm">Subscription</div>
-            <span className={`pill ${student.subscription.active ? "" : "amber"}`}>{student.subscription.active ? "Active" : "Pending"}</span>
+            <span className={`pill ${student.subscription.active ? "" : student.subscription.cancelledAt ? "red" : "amber"}`}>
+              {student.subscription.active ? "Active" : student.subscription.cancelledAt ? "Cancelled" : "Pending"}
+            </span>
           </div>
           <div className="kv mt8"><span className="k">Plan</span><span>{student.subscription.plan}</span></div>
           <div className="kv"><span className="k">Cycles used</span><span className="mono">{student.subscription.cyclesUsed} / {student.subscription.cyclesTotal}</span></div>
@@ -602,13 +605,19 @@ Currently ${current}. Type the code printed on the bag they are being given.
               <span className="mono muted" style={{ fontSize: 12.5 }}>{b.used} / {b.cycles}</span>
             </div>
           ))}
+          {/* The reason a plan was cancelled is recorded server-side precisely
+              so it isn't lost — showing it here is the other half of that;
+              without it staff have no way to see WHY short of a DB query. */}
+          {student.subscription.cancelledAt && (
+            <div className="kv"><span className="k">Cancelled</span><span>{dateStr(student.subscription.cancelledAt)}{student.subscription.cancelledReason ? ` — ${student.subscription.cancelledReason}` : ""}</span></div>
+          )}
           <div className="row wrap gap8 mt12">
-            {staffRole >= 2 && upgradeOptions.length > 0 && (
+            {staffRole >= 2 && student.subscription.active && upgradeOptions.length > 0 && (
               <button className="btn xs sec" onClick={() => { setUpgradePlanId(upgradeOptions[0].id); setShowUpgrade(true); }}>
                 <Svg name="layers" size={13} /> Change plan
               </button>
             )}
-            {staffRole >= 3 && (
+            {staffRole >= 3 && student.subscription.active && (
               <button className="btn xs sec" onClick={openCycleEdit}>
                 <Svg name="edit" size={13} /> Correct cycles used
               </button>

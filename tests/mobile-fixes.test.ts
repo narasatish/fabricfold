@@ -163,6 +163,18 @@ describe("a cancelled subscription is not indistinguishable from a pending one (
   });
 });
 
+describe("Admin App Errors panel actually clears on Mark reviewed (found live, Sep 23)", () => {
+  it("the query filters out already-seen errors instead of showing the last 15 regardless", () => {
+    // Found live: a 2-day-old, already-reviewed error (seen:true in the DB)
+    // was still showing on the Admin page — the query never filtered on
+    // `seen` at all, it just took the 15 most recent errors. The owner read
+    // stale, already-dismissed noise as a fresh crash. Confirmed zero
+    // unseen errors existed in production at the time.
+    const src = read("app/s/admin/page.tsx");
+    expect(src).toMatch(/db\.errorLog\.findMany\(\{ where: \{ seen: false \}, orderBy: \{ at: "desc" \}, take: 15 \}\)/);
+  });
+});
+
 describe("submitCompensation caps the amount like every other money action (found by audit, Sep 23)", () => {
   it("rejects Infinity and absurdly large amounts, not just <= 0", () => {
     // `!amount || amount <= 0` alone lets Infinity through — it's truthy and

@@ -53,8 +53,16 @@ export default async function StaffAdminPage() {
     orderBy: [{ collegeId: "asc" }, { weekday: "asc" }, { startMin: "asc" }],
   });
 
+  /* "Mark reviewed" (markErrorsSeen) sets seen:true, but this query never
+     filtered on it — it just took the 15 most recent errors regardless, so
+     a dismissed error stayed on screen (looking identical to a fresh one,
+     just slightly dimmer) until 15 newer ones pushed it out, sometimes days
+     later. Found live, Sep 23: the owner saw a 2-day-old, already-reviewed
+     error and reasonably read it as a current crash. Reviewed errors are
+     dropped from the query entirely now — "Mark reviewed" actually clears
+     the panel instead of just dimming it. */
   const recentErrors = staff.role >= 4
-    ? await db.errorLog.findMany({ orderBy: { at: "desc" }, take: 15 })
+    ? await db.errorLog.findMany({ where: { seen: false }, orderBy: { at: "desc" }, take: 15 })
     : [];
 
   const N = (x: unknown) => Number(x || 0);

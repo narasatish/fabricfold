@@ -201,13 +201,16 @@ describe("money-moving buttons can't be double-tapped, and refund/compensation c
   it("OrderClient: refund and compensation confirm before firing", () => {
     const src = read("app/s/orders/[id]/_components/OrderClient.tsx");
     expect(src).toMatch(/if \(!confirm\(`Refund \$\{fmt\(refundInput\.amount\)\}/);
-    expect(src).toMatch(/if \(!confirm\(`Issue \$\{fmt\(compInput\.amount\)\} compensation/);
+    // Compensation went credit-only Sep 23 (owner: "compensation should be
+    // used as credits thats all") — the confirm copy changed from "...
+    // compensation (${method})" to "... store credit" to match.
+    expect(src).toMatch(/if \(!confirm\(`Issue \$\{fmt\(compInput\.amount\)\} store credit/);
   });
   it("CustomerClient and ComplaintsClient compensation buttons confirm and guard against double-submit", () => {
     for (const f of ["app/s/customers/[id]/_components/CustomerClient.tsx", "app/s/complaints/_components/ComplaintsClient.tsx"]) {
       const src = read(f);
       expect(src, f).toMatch(/const \[compBusy, setCompBusy\] = useState\(false\)/);
-      expect(src, f).toMatch(/if \(!confirm\(`Issue \$\{fmt\(comp\.amount\)\} compensation/);
+      expect(src, f).toMatch(/if \(!confirm\(`Issue \$\{fmt\(comp\.amount\)\} store credit/);
       // CustomerClient additionally disables on a non-positive amount (fixed
       // 2026-09-11, client-side mirror of the server's own rejection) —
       // match either form, both still guard against double-submit.

@@ -20,7 +20,11 @@ const EXPECT: Record<string, [number, number]> = {
   // registerStudent's now-mandatory plan step) — tracked separately below.
   "lib/actions/subscription.ts": [4, 2],  // activate, plan change, cycle pack (credit+cash rows -> 1 event)
   "lib/actions/ops.ts": [1, 1],           // wallet top-up
-  "lib/actions/credits.ts": [1, 1],       // cash compensation
+  // credits.ts (compensation) intentionally absent here since Sep 23 — cash
+  // compensation was retired (owner: "compensation should be used as
+  // credits thats all"), so submitCompensation no longer creates a Payment
+  // row at all; it's a pure credits increment now, nothing for the Sheet's
+  // Payments log to miss.
   "lib/actions/bags.ts": [1, 1],          // bag fee
   "lib/plan-activation.ts": [2, 2],       // activatePlan: credit row, cash row
 };

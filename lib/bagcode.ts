@@ -36,11 +36,19 @@ export type Tier = (typeof TIERS)[number];
     plan yet defaults to Bronze (owner, Sep 22: "for st marys we need to use
     B,S,G thats all... no need of W for walkins") — it is corrected to their
     real tier the moment they subscribe (syncBagToPlan). College FACULTY get
-    their own F series (Sep 2026) — they buy cycle packs rather than tiered
-    plans, so no tier letter fits them, and the counter needs to see at a
-    glance that a bag belongs to a teacher. BVRIT is ALWAYS V, students and
-    faculty alike (owner, Sep 22: "for bvrit we need to use only V as code") —
-    see registerStudent, which special-cases BVRIT before this even runs. */
+    their own F series regardless of campus (owner, Sep 2026: "we have given
+    code as F ... it will be same like F1100") — they buy cycle packs rather
+    than tiered plans, so no tier letter fits them, and the counter needs to
+    see at a glance that a bag belongs to a teacher, at either college.
+    BVRIT STUDENTS (not faculty) are always V (owner, Sep 22: "for bvrit we
+    need to use only V as code") — see registerStudent, which checks kind ===
+    "faculty" BEFORE college, so a BVRIT student is V but BVRIT faculty is
+    still F, the same as St Mary's faculty. (This comment previously said
+    "BVRIT is ALWAYS V, students and faculty alike" — that was wrong and
+    contradicted the actual allocateBagCode(tx, isFaculty ? "faculty" :
+    "bvrit") call in registerStudent; fixed to match the real, live
+    behavior — a real BVRIT faculty record in the DB carries F1007, not a
+    V-code.) */
 export type BagKind = Tier | "faculty" | "bvrit";
 
 export const BAG_LETTER: Record<BagKind, string> = { bronze: "B", silver: "S", gold: "G", faculty: "F", bvrit: "V" };

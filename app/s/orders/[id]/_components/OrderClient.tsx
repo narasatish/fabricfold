@@ -69,7 +69,6 @@ export default function StaffOrderClient({
   serviceRates,
   staffRole,
   upi,
-  expectedPickupCode,
   baseGarmentRate,
   collegeHasRatesOverride,
   collegeExpressOverride,
@@ -78,7 +77,6 @@ export default function StaffOrderClient({
   serviceRates: { label: string; items: Array<[string, number]> };
   staffRole: number;
   upi: { upiId: string; payeeName: string };
-  expectedPickupCode: string | null;
   baseGarmentRate: number;
   collegeHasRatesOverride: boolean;
   collegeExpressOverride: Record<string, number> | null;
@@ -990,7 +988,9 @@ export default function StaffOrderClient({
       <Sheet open={showCollectSheet} onClose={() => setShowCollectSheet(false)}>
         <div className="pad">
           <h2 style={{ marginBottom: "16px" }}>Collect order</h2>
-          <p className="muted" style={{ fontSize: "13px", marginBottom: "12px" }}>Enter the 4-digit OTP the student shows, or scan the QR tag</p>
+          <p className="muted" style={{ fontSize: "13px", marginBottom: "12px" }}>
+            Ask the student for their 4-digit pickup code or their Order ID / FabricFold ID — you can see this order's own number on screen, but always have the student say or show it themselves before you type it in.
+          </p>
           <div className="field">
             <label>Code or tag</label>
             <input
@@ -1006,11 +1006,6 @@ export default function StaffOrderClient({
           <button className="btn mt16" onClick={handleCollect} disabled={actionBusy}>
             <Svg name="check" size={18} /> {actionBusy ? "Collecting…" : "Verify & collect"}
           </button>
-          {expectedPickupCode && (
-            <div className="muted center mt12" style={{ fontSize: "12px" }}>
-              Expected code: <b className="mono">{expectedPickupCode}</b>
-            </div>
-          )}
         </div>
       </Sheet>
 

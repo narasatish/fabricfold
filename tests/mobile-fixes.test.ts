@@ -21,6 +21,27 @@ describe("staff Place order was dead on cycle services", () => {
   });
 });
 
+describe("the pickup code must come from the student, not be readable off staff's own screen (owner, Sep 23)", () => {
+  it("the staff order page never fetches the pickup OTP at all", () => {
+    // Not just hidden in the UI — a value the server never sends can't be
+    // read from devtools/view-source either. The only correct fix is to
+    // never fetch it here in the first place.
+    const page = read("app/s/orders/[id]/page.tsx");
+    expect(page).not.toMatch(/purpose: "pickup"/);
+    expect(page).not.toMatch(/expectedPickupCode/);
+  });
+  it("the collect sheet has no 'Expected code' answer key", () => {
+    const ui = read("app/s/orders/[id]/_components/OrderClient.tsx");
+    expect(ui).not.toMatch(/Expected code/);
+    expect(ui).not.toMatch(/expectedPickupCode/);
+  });
+  it("the collect sheet tells staff to ask, not just type whatever they already see (owner: staff may see the order number, but must verify it WITH the student)", () => {
+    const ui = read("app/s/orders/[id]/_components/OrderClient.tsx");
+    expect(ui).toMatch(/Ask the student for their 4-digit pickup code/);
+    expect(ui).toMatch(/always have the student say or show it themselves/);
+  });
+});
+
 describe("the 40% commission model is gone, not just hidden", () => {
   it("EXPRESS_PCT, expressSurcharge and urgentCycleCharge no longer exist in money.ts", () => {
     const money = read("lib/money.ts");

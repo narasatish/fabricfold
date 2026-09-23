@@ -33,7 +33,13 @@ export default async function StaffOrderPage({ params }: { params: Promise<{ id:
   const rates = resolveCollegeRates(cfg.rates as unknown as RateTable, order.college?.rates as unknown as RateTable | null);
   const serviceRates = rates[order.service] || { label: order.service, items: [] };
   const payment = cfg.payment as { upiId?: string; payeeName?: string };
-  const pickupOtp = await db.otp.findFirst({ where: { purpose: "pickup", refId: order.id, usedAt: null } });
+  /* The pickup code is deliberately never fetched here for staff to see —
+     the whole point is that staff must ASK the student for it and the
+     student must SUPPLY it (owner, Sep 23: "student should give the
+     number in order to collect the order"). Sending it to the client even
+     just to hide it in the UI would still leave it inspectable in the
+     page's own HTML/RSC payload — not fetching it at all is the only way
+     to actually keep it off the staff member's screen. */
 
   const N = (x: unknown) => Number(x || 0);
   const plain = {
@@ -97,7 +103,6 @@ export default async function StaffOrderPage({ params }: { params: Promise<{ id:
         serviceRates={serviceRates}
         staffRole={staff.role}
         upi={{ upiId: payment.upiId || "", payeeName: payment.payeeName || "FabricFold" }}
-        expectedPickupCode={pickupOtp?.code || null}
         /* Excess weight is billed off the base garment rate (see
            excessWeightCharge). Passed in so the accept sheet can quote the
            charge before staff commit, using the same function that bills it. */

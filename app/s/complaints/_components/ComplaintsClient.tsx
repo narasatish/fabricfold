@@ -33,7 +33,7 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
   const [resolveFor, setResolveFor] = useState<Complaint | null>(null);
   const [resText, setResText] = useState("");
   const [compFor, setCompFor] = useState<Complaint | null>(null);
-  const [comp, setComp] = useState({ kind: "goodwill", amount: 0, method: "credit" as "credit" | "cash", comment: "" });
+  const [comp, setComp] = useState({ kind: "goodwill", amount: 0, comment: "" });
 
   const list = filter === "all" ? complaints : complaints.filter((c) => c.status === filter);
 
@@ -75,16 +75,16 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
   const [compBusy, setCompBusy] = useState(false);
   const doComp = async () => {
     if (!compFor) return;
-    if (!confirm(`Issue ${fmt(comp.amount)} compensation (${comp.method})? This cannot be undone from here.`)) return;
+    if (!confirm(`Issue ${fmt(comp.amount)} store credit? This cannot be undone from here.`)) return;
     setCompBusy(true);
     try {
       // Pass the complaint through so the payout is traceable to the grievance
       // that justified it, not just to the student.
-      const r = await submitCompensation({ studentId: compFor.studentId, orderId: compFor.orderId, complaintId: compFor.id, kind: comp.kind, amount: comp.amount, method: comp.method, comment: comp.comment });
+      const r = await submitCompensation({ studentId: compFor.studentId, orderId: compFor.orderId, complaintId: compFor.id, kind: comp.kind, amount: comp.amount, comment: comp.comment });
       if (!r.ok) return toast(r.error || "Failed", true);
       toast("Compensation issued");
       setCompFor(null);
-      setComp({ kind: "goodwill", amount: 0, method: "credit", comment: "" });
+      setComp({ kind: "goodwill", amount: 0, comment: "" });
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
@@ -216,14 +216,9 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
         <div className="field">
           <label>Amount (₹)</label>
           <input className="input" type="number" value={comp.amount || ""} onChange={(e) => setComp({ ...comp, amount: Number(e.target.value) })} />
-        </div>
-        <div className="field">
-          <label>Method</label>
-          <Seg<"credit" | "cash">
-            options={staffRole >= 2 ? [["credit", "Store credit"], ["cash", "Cash"]] : [["credit", "Store credit"]]}
-            value={comp.method}
-            onChange={(m) => setComp({ ...comp, method: m })}
-          />
+          {comp.amount > 2000 && staffRole < 3 && (
+            <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>Over ₹2,000 needs Admin approval — an Admin or the Owner must submit this.</div>
+          )}
         </div>
         <div className="field">
           <label>Comment</label>

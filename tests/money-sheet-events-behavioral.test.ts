@@ -106,13 +106,11 @@ describe("money movements reach the Sheet outbox", { timeout: 180_000 }, () => {
     expect(ev[0].row[5]).toBe(-15);
   });
 
-  it("cash compensation -> a Payments row, negative", async () => {
+  it("compensation is credit-only now (owner, Sep 23) — no Payments row, since it's a credit grant not a cash payout", async () => {
     const t0 = await snapshot();
-    expect((await credits.submitCompensation({ studentId: "444403", kind: "damage", amount: 40, method: "cash", comment: "QA payout" } as never)).ok).toBe(true);
+    expect((await credits.submitCompensation({ studentId: "444403", kind: "damage", amount: 40, comment: "QA payout" })).ok).toBe(true);
     const ev = await outbox("payment", t0);
-    expect(ev).toHaveLength(1);
-    expect(String(ev[0].row[4])).toMatch(/compensation|payout/i);
-    expect(ev[0].row[5]).toBe(-40);
+    expect(ev).toHaveLength(0);
   });
 
   it("expense -> an Expenses row for the right college", async () => {

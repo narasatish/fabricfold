@@ -148,7 +148,7 @@ export default function StaffOrderClient({
   // first place).
   const stillRefundable = Math.max(0, (order.received || order.total) - (order.refundAmount || 0));
   const [refundInput, setRefundInput] = useState({ amount: stillRefundable, via: "upi" as "upi" | "cash" | "credit", reason: "", restoreCycle: false });
-  const [compInput, setCompInput] = useState({ kind: "damage", amount: 0, method: "credit" as "credit" | "cash", comment: "" });
+  const [compInput, setCompInput] = useState({ kind: "damage", amount: 0, comment: "" });
   // Recount before handing over. Missing items are the commonest complaint and
   // the cheapest moment to catch one is before the student opens the bag.
   const intakeCount = order.actualPieces ?? order.declaredPieces ?? 0;
@@ -386,7 +386,7 @@ export default function StaffOrderClient({
 
   // Handler: compensation
   const handleCompensation = async () => {
-    if (!confirm(`Issue ${fmt(compInput.amount)} compensation (${compInput.method})? This cannot be undone from here.`)) return;
+    if (!confirm(`Issue ${fmt(compInput.amount)} store credit? This cannot be undone from here.`)) return;
     setActionBusy(true);
     try {
       const r = await submitCompensation({
@@ -394,7 +394,6 @@ export default function StaffOrderClient({
         orderId: order.id,
         kind: compInput.kind,
         amount: compInput.amount,
-        method: compInput.method,
         comment: compInput.comment,
       });
       if (!r.ok) {
@@ -1177,14 +1176,9 @@ export default function StaffOrderClient({
               value={compInput.amount}
               onChange={(e) => setCompInput({ ...compInput, amount: Number(e.target.value) })}
             />
-          </div>
-          <div className="field">
-            <label>Method</label>
-            <Seg<"credit" | "cash">
-              options={staffRole >= 2 ? [["credit", "Store credit"], ["cash", "Cash"]] : [["credit", "Store credit"]]}
-              value={compInput.method}
-              onChange={(m) => setCompInput({ ...compInput, method: m })}
-            />
+            {compInput.amount > 2000 && staffRole < 3 && (
+              <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>Over ₹2,000 needs Admin approval — an Admin or the Owner must submit this.</div>
+            )}
           </div>
           <div className="field">
             <label>Comment</label>

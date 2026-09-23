@@ -76,7 +76,6 @@ describe("submitCompensation duplicate guard under real concurrency", () => {
         complaintId: "cmp1",
         kind: "goodwill",
         amount: 100,
-        method: "credit",
         comment: "race test",
       }),
     );

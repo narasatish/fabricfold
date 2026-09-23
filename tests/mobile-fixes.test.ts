@@ -174,6 +174,35 @@ describe("submitCompensation caps the amount like every other money action (foun
   });
 });
 
+describe("compensation is credit-only, capped at ₹2,000 for staff below Admin (owner, Sep 23)", () => {
+  const credits = read("lib/actions/credits.ts");
+  it("cash compensation is retired — method is no longer a caller-supplied input", () => {
+    expect(credits).not.toMatch(/method: "credit" \| "cash"/);
+    expect(credits).not.toMatch(/"cash_out"/);
+  });
+  it("every grant still lands as store credit, unconditionally", () => {
+    expect(credits).toMatch(/await tx\.student\.update\(\{ where: \{ id: stu\.id \}, data: \{ credits: \{ increment: amount \} \} \}\);/);
+  });
+  it("staff below Admin (role 3) are capped at ₹2,000; Admin/Owner can go higher", () => {
+    expect(credits).toMatch(/const STAFF_COMP_CAP = 2000;/);
+    expect(credits).toMatch(/if \(amount > STAFF_COMP_CAP && st\.role < 3\)/);
+  });
+  it("the three staff-facing compensation forms no longer offer a cash option", () => {
+    for (const f of [
+      "app/s/customers/[id]/_components/CustomerClient.tsx",
+      "app/s/complaints/_components/ComplaintsClient.tsx",
+      "app/s/orders/[id]/_components/OrderClient.tsx",
+    ]) {
+      const ui = read(f);
+      expect(ui, f).not.toMatch(/method: "credit" \| "cash"/);
+      // Scoped to the compensation Method selector specifically — other Seg
+      // pickers on these same pages (wallet top-up, bag fee, plan upgrade)
+      // legitimately still offer cash/UPI as a payment method.
+      expect(ui, f).not.toMatch(/\["credit", "Store credit"\], \["cash", "Cash"\]/);
+    }
+  });
+});
+
 describe("grantFreeReservice claims the complaint BEFORE creating the free order, not after (found by audit, Sep 23)", () => {
   const complaints = read("lib/actions/complaints.ts");
   it("the sentinel claim runs before redoOrder() is called", () => {

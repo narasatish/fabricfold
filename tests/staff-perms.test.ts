@@ -45,10 +45,10 @@ describe("the holes that were open", () => {
   it("refunds: was requireStaff(1) — any staff could give money back", () => {
     expect(read("lib/actions/orders.ts")).toMatch(/requireStaffPerm\("refunds"\)/);
   });
-  it("compensation rides the refunds tool; cash still needs a Manager", () => {
+  it("compensation rides the refunds tool; over ₹2,000 needs an Admin (owner, Sep 23)", () => {
     const src = read("lib/actions/credits.ts");
     expect(src).toMatch(/requireStaffPerm\("refunds"\)/);
-    expect(src).toMatch(/Cash compensation needs a Manager/);
+    expect(src).toMatch(/needs Admin approval/);
   });
   it("the transactions Excel needed only requireStaff(1)", () => {
     expect(read("app/api/export/xlsx/route.ts")).toMatch(/requireStaffPerm\("reports"\)/);

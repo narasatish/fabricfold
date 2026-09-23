@@ -75,7 +75,7 @@ export default function StaffCustomerClient({ student, displayId, staffRole, pla
   const [newPhone, setNewPhone] = useState(student.phone);
   const [phoneLoading, setPhoneLoading] = useState(false);
   const [showComp, setShowComp] = useState(false);
-  const [comp, setComp] = useState({ kind: "damage", amount: 0, method: "credit" as "credit" | "cash", comment: "" });
+  const [comp, setComp] = useState({ kind: "damage", amount: 0, comment: "" });
   const [showAssign, setShowAssign] = useState(false);
   const [assignPlanId, setAssignPlanId] = useState(plans[0]?.id || "");
   const [assignMethod, setAssignMethod] = useState<"cash" | "upi">("upi");
@@ -462,10 +462,10 @@ Currently ${current}. Type the code printed on the bag they are being given.
 
   const [compBusy, setCompBusy] = useState(false);
   const doComp = async () => {
-    if (!confirm(`Issue ${fmt(comp.amount)} compensation (${comp.method}) to ${student.name}? This cannot be undone from here.`)) return;
+    if (!confirm(`Issue ${fmt(comp.amount)} store credit to ${student.name}? This cannot be undone from here.`)) return;
     setCompBusy(true);
     try {
-      const r = await submitCompensation({ studentId: student.id, orderId: null, kind: comp.kind, amount: comp.amount, method: comp.method, comment: comp.comment });
+      const r = await submitCompensation({ studentId: student.id, orderId: null, kind: comp.kind, amount: comp.amount, comment: comp.comment });
       if (!r.ok) return toast(r.error || "Failed", true);
       toast("Compensation issued");
       setShowComp(false);
@@ -1180,14 +1180,13 @@ Currently ${current}. Type the code printed on the bag they are being given.
         <div className="field">
           <label>Amount (₹)</label>
           <input className="input" type="number" min={0} value={comp.amount || ""} onChange={(e) => setComp({ ...comp, amount: Number(e.target.value) })} />
-        </div>
-        <div className="field">
-          <label>Method</label>
-          <Seg<"credit" | "cash">
-            options={staffRole >= 2 ? [["credit", "Store credit"], ["cash", "Cash"]] : [["credit", "Store credit"]]}
-            value={comp.method}
-            onChange={(m) => setComp({ ...comp, method: m })}
-          />
+          {/* Owner, Sep 23: compensation is store credit only now, capped at
+              ₹2,000 for staff below Admin — over that, submitCompensation
+              itself rejects it with "needs Admin approval" (server-enforced,
+              this is just telling staff up front instead of after a click). */}
+          {comp.amount > 2000 && staffRole < 3 && (
+            <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>Over ₹2,000 needs Admin approval — an Admin or the Owner must submit this.</div>
+          )}
         </div>
         <div className="field">
           <label>Comment</label>

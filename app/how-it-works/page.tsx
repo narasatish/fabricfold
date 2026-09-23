@@ -23,7 +23,7 @@ const faqLd = {
   mainEntity: [
     { "@type": "Question", name: "Do I need to download an app?", acceptedAnswer: { "@type": "Answer", text: "No. FabricFold runs in your phone's web browser. You can add it to your home screen so it feels like an app, but there's nothing to install from an app store." } },
     { "@type": "Question", name: "How do I sign up?", acceptedAnswer: { "@type": "Answer", text: "With your phone number. You'll get a one-time code by SMS, pick your campus or community, and you're in. No email or password to remember." } },
-    { "@type": "Question", name: "What if a garment is damaged or missing?", acceptedAnswer: { "@type": "Answer", text: "Every piece is counted with you at drop-off and again before collection, so missing items are rare. If something is damaged or lost, our staff issue compensation as store credit (or cash, at a manager's discretion) after checking the order." } },
+    { "@type": "Question", name: "What if a garment is damaged or missing?", acceptedAnswer: { "@type": "Answer", text: "Every piece is counted with you at drop-off and again before collection, so missing items are rare. If something is damaged or lost, our staff issue compensation as store credit after checking the order." } },
     { "@type": "Question", name: "What if I'm not happy with the cleaning?", acceptedAnswer: { "@type": "Answer", text: "We'll re-do it free. Just tell the counter or raise it in the app — no forms, no argument." } },
     { "@type": "Question", name: "How fast is it?", acceptedAnswer: { "@type": "Answer", text: "Standard orders come back in about 48 hours. Need it sooner? Same-day express is available for a small surcharge." } },
   ],
@@ -84,7 +84,7 @@ export default function HowItWorks() {
           <div className="m-faq">
             <details><summary>Do I need to download an app?</summary><p>No. FabricFold runs in your phone&apos;s web browser. You can add it to your home screen so it feels like an app, but there&apos;s nothing to install from an app store.</p></details>
             <details><summary>How do I sign up?</summary><p>With your phone number. You&apos;ll get a one-time code by SMS, pick your campus or community, and you&apos;re in. No email or password to remember.</p></details>
-            <details><summary>What if a garment is damaged or missing?</summary><p>Every piece is counted with you at drop-off and again before collection, so missing items are rare. If something is damaged or lost, our staff issue compensation as store credit (or cash, at a manager&apos;s discretion) after checking the order.</p></details>
+            <details><summary>What if a garment is damaged or missing?</summary><p>Every piece is counted with you at drop-off and again before collection, so missing items are rare. If something is damaged or lost, our staff issue compensation as store credit after checking the order.</p></details>
             <details><summary>What if I&apos;m not happy with the cleaning?</summary><p>We&apos;ll re-do it free. Just tell the counter or raise it in the app — no forms, no argument.</p></details>
             <details><summary>How fast is it?</summary><p>Standard orders come back in about 48 hours. Need it sooner? Same-day express is available for a small surcharge.</p></details>
           </div>

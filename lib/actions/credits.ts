@@ -19,7 +19,11 @@ export async function submitCompensation(input: { studentId: string; orderId?: s
   const st = await requireStaffPerm("refunds");
   if (input.method === "cash" && st.role < 2) return { ok: false as const, error: "Cash compensation needs a Manager" };
   const amount = Math.floor(input.amount);
-  if (!amount || amount <= 0) return { ok: false as const, error: "Enter a valid amount" };
+  // Matches topUpCredits' guard (lib/actions/ops.ts) — without the upper
+  // bound, `amount: Infinity` sailed through `!amount || amount <= 0`
+  // (Infinity is truthy and not <= 0) and reached
+  // `credits: { increment: Infinity }`, permanently corrupting the wallet.
+  if (!amount || amount <= 0 || amount > 50_000) return { ok: false as const, error: "Enter a valid amount" };
   const stu = await db.student.findUniqueOrThrow({ where: { id: input.studentId } });
   assertSameCollege(st, stu.collegeId);
 

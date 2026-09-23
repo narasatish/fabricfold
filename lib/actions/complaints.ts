@@ -137,20 +137,41 @@ export async function grantFreeReservice(complaintId: string) {
   if (!c.orderId) return { ok: false as const, error: "This complaint isn't linked to an order" };
   if (c.redoOrderId) return { ok: false as const, error: "A free re-service was already given for this complaint" };
 
-  const r = await redoOrder(c.orderId);
-  if (!r.ok || !r.id) return { ok: false as const, error: r.error || "Couldn't create the re-service order" };
-
-  /* Claim the complaint atomically before recording the redo — the check
-     above ran before redoOrder(), so two concurrent clicks (or a retried
-     request) could both pass it and both create a free re-service order,
-     with the second write just overwriting the first's redoOrderId and
-     losing any trace that a second one was ever given away. Scoping the
-     update to redoOrderId still null means only the first caller's write
-     actually lands; the loser can't silently give away a second one. */
-  const claimed = await db.complaint.updateMany({ where: { id: complaintId, redoOrderId: null }, data: { redoOrderId: r.id } });
+  /* Claim the complaint BEFORE calling redoOrder(), not after — claiming
+     after meant two concurrent clicks could both pass the check above, both
+     call redoOrder() and both get a real, paid-in-full-for-free order
+     created; only the loser's attempt to link ITS order back to the
+     complaint failed, leaving its order sitting in the queue as an orphaned
+     duplicate free wash nobody could trace back to this complaint (found in
+     review, Sep 23 — the old comment here claimed "the loser can't silently
+     give away a second one," which was true of the complaint record but not
+     of the order that had already been created by then). A sentinel value
+     reserves the complaint first; only the winner goes on to actually create
+     the order, and a failure after claiming releases the sentinel so a retry
+     isn't permanently blocked. */
+  const claimed = await db.complaint.updateMany({ where: { id: complaintId, redoOrderId: null }, data: { redoOrderId: "claiming" } });
   if (claimed.count === 0) {
-    return { ok: false as const, error: "A free re-service was already given for this complaint — this one wasn't linked; check the order queue" };
+    return { ok: false as const, error: "A free re-service was already given for this complaint" };
   }
+
+  // redoOrder() can THROW (e.g. findUniqueOrThrow on a bad orderId) rather
+  // than returning { ok: false } — a plain if-check after the call misses
+  // that path entirely and leaves the sentinel stuck at "claiming" forever,
+  // permanently blocking this complaint from ever getting a free re-service
+  // (caught live, Sep 23, testing this very fix: a bad orderId threw before
+  // the release line ever ran). The release must run on ANY failure.
+  let r: Awaited<ReturnType<typeof redoOrder>>;
+  try {
+    r = await redoOrder(c.orderId);
+  } catch (e) {
+    await db.complaint.updateMany({ where: { id: complaintId, redoOrderId: "claiming" }, data: { redoOrderId: null } });
+    return { ok: false as const, error: (e as Error).message || "Couldn't create the re-service order" };
+  }
+  if (!r.ok || !r.id) {
+    await db.complaint.updateMany({ where: { id: complaintId, redoOrderId: "claiming" }, data: { redoOrderId: null } });
+    return { ok: false as const, error: r.error || "Couldn't create the re-service order" };
+  }
+  await db.complaint.update({ where: { id: complaintId }, data: { redoOrderId: r.id } });
   await db.complaintMessage.create({
     data: { complaintId, from: "staff", by: st.id, text: `Free re-service raised — order #${r.id.slice(-4)}, at no charge.` },
   });

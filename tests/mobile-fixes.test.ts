@@ -162,3 +162,45 @@ describe("a cancelled subscription is not indistinguishable from a pending one (
     expect(activation).toMatch(/cancelledAt: null, cancelledReason: null, cancelledBy: null/);
   });
 });
+
+describe("submitCompensation caps the amount like every other money action (found by audit, Sep 23)", () => {
+  it("rejects Infinity and absurdly large amounts, not just <= 0", () => {
+    // `!amount || amount <= 0` alone lets Infinity through — it's truthy and
+    // not <= 0 — reaching `credits: { increment: Infinity }` and permanently
+    // corrupting the student's wallet balance. topUpCredits already guarded
+    // against this (lib/actions/ops.ts); submitCompensation never matched it.
+    const credits = read("lib/actions/credits.ts");
+    expect(credits).toMatch(/if \(!amount \|\| amount <= 0 \|\| amount > 50_000\) return \{ ok: false as const, error: "Enter a valid amount" \};/);
+  });
+});
+
+describe("grantFreeReservice claims the complaint BEFORE creating the free order, not after (found by audit, Sep 23)", () => {
+  const complaints = read("lib/actions/complaints.ts");
+  it("the sentinel claim runs before redoOrder() is called", () => {
+    // Claiming after redoOrder() meant two concurrent clicks could both pass
+    // the redoOrderId-null check, both create a real free-service order, and
+    // only the LOSER's attempt to link its own order back to the complaint
+    // failed — leaving its order as an untraceable orphaned duplicate free
+    // wash. The order must never be created before the claim succeeds.
+    const claimIdx = complaints.indexOf('data: { redoOrderId: "claiming" }');
+    const redoCallIdx = complaints.indexOf("r = await redoOrder(c.orderId);");
+    expect(claimIdx).toBeGreaterThan(-1);
+    expect(redoCallIdx).toBeGreaterThan(-1);
+    expect(claimIdx).toBeLessThan(redoCallIdx);
+  });
+  it("releases the sentinel if redoOrder() fails, so a retry isn't permanently blocked", () => {
+    expect(complaints).toMatch(/where: \{ id: complaintId, redoOrderId: "claiming" \}, data: \{ redoOrderId: null \}/);
+  });
+  it("also releases the sentinel if redoOrder() THROWS, not just when it returns ok:false", () => {
+    // Found testing the fix above: redoOrder() throws (findUniqueOrThrow on
+    // a bad orderId) rather than returning ok:false in that case, and a
+    // plain if-check after an un-caught call misses it — the sentinel stuck
+    // at "claiming" forever, permanently blocking the complaint from ever
+    // getting a free re-service. There must be a try/catch around the call.
+    const tryIdx = complaints.indexOf("try {");
+    expect(tryIdx).toBeGreaterThan(-1);
+    const catchBlock = complaints.slice(tryIdx, tryIdx + 300);
+    expect(catchBlock).toMatch(/catch \(e\) \{/);
+    expect(catchBlock).toMatch(/redoOrderId: "claiming" \}, data: \{ redoOrderId: null \}/);
+  });
+});

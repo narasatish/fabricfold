@@ -26,6 +26,21 @@ describe("refundOrder input guards", () => {
   });
 });
 
+describe("the staff Refund button stays reachable for a second partial refund (found live, Sep 23)", () => {
+  const ui = fs.readFileSync(path.resolve(__dirname, "..", "app/s/orders/[id]/_components/OrderClient.tsx"), "utf8");
+  it("does not hide on the order.refunded boolean alone — that only means 'at least one refund happened', not 'fully refunded'", () => {
+    // refundOrder's own cap logic supports incremental partial refunds up to
+    // the order total; a ₹50 test refund on a ₹909 order previously made
+    // the button vanish entirely, leaving the remaining ₹859 unrefundable
+    // from this screen even though the server would have accepted it.
+    expect(ui).not.toMatch(/order\.paid && !order\.refunded &&/);
+    expect(ui).toMatch(/stillRefundable/);
+  });
+  it("the refund sheet's default amount subtracts what's already been refunded", () => {
+    expect(ui).toMatch(/const stillRefundable = Math\.max\(0, \(order\.received \|\| order\.total\) - \(order\.refundAmount \|\| 0\)\)/);
+  });
+});
+
 describe("isMoneyAmount", () => {
   it("accepts real amounts, including ones floating point mangles (1.1, 0.29, 33.33)", async () => {
     const { isMoneyAmount } = await import("../lib/money");

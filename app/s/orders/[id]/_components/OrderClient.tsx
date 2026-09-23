@@ -141,7 +141,13 @@ export default function StaffOrderClient({
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "upi">("cash");
   const [applyCredits, setApplyCredits] = useState(false);
   const [staffInvoice, setStaffInvoice] = useState(false);
-  const [refundInput, setRefundInput] = useState({ amount: order.received || order.total, via: "upi" as "upi" | "cash" | "credit", reason: "", restoreCycle: false });
+  // A refund already issued must reduce what's offered next — defaulting to
+  // the full received/total amount again would double-count against a
+  // partial refund already on record (refundOrder's own server-side cap
+  // catches the over-refund, but the field should never suggest it in the
+  // first place).
+  const stillRefundable = Math.max(0, (order.received || order.total) - (order.refundAmount || 0));
+  const [refundInput, setRefundInput] = useState({ amount: stillRefundable, via: "upi" as "upi" | "cash" | "credit", reason: "", restoreCycle: false });
   const [compInput, setCompInput] = useState({ kind: "damage", amount: 0, method: "credit" as "credit" | "cash", comment: "" });
   // Recount before handing over. Missing items are the commonest complaint and
   // the cheapest moment to catch one is before the student opens the bag.
@@ -719,7 +725,13 @@ export default function StaffOrderClient({
         <a href={`https://wa.me/91${order.student.phone}?text=${encodeURIComponent(order.status === "ready" ? `Your ${order.service} order #${order.id.slice(-4)} is ready for collection` : `Hi, about your ${order.service} order #${order.id.slice(-4)} (currently ${STATUS_LABEL[order.status] || order.status})…`)}`} target="_blank" className="btn xs sec" style={{ color: "#0f8a4d", borderColor: "#bfe6cf" }}>
           <Svg name="chat" size={15} /> WhatsApp
         </a>
-        {order.paid && !order.refunded && (
+        {/* order.refunded only means "at least one refund happened" — hiding
+            the button on that flag alone made a SECOND partial refund
+            unreachable from the UI even though refundOrder itself fully
+            supports incremental partial refunds up to the order total
+            (found live, Sep 23: a ₹50 test refund on a ₹909 order made the
+            remaining ₹859 unrefundable through any button on this page). */}
+        {order.paid && stillRefundable > 0 && (
           <button className="btn xs sec danger" onClick={() => setShowRefundSheet(true)}>
             <Svg name="back" size={15} /> Refund
           </button>

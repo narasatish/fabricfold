@@ -28,16 +28,24 @@ export async function issueBag(
     where: { id: studentId },
     // ordered: the free-swap check compares against the MOST RECENT bag, and
     // unordered rows would make that comparison arbitrary
-    include: { subscription: { include: { planRef: true } }, bags: { orderBy: { issuedAt: "desc" } } },
+    include: { subscription: { include: { planRef: true } }, bags: { orderBy: { issuedAt: "desc" } }, college: { select: { name: true } } },
   });
   if (!stu) return { ok: false as const, error: "Student not found" };
   assertSameCollege(st, stu.collegeId);
 
   const tier = stu.subscription?.active ? stu.subscription.planRef?.tier : null;
-  // Faculty carry the F series regardless of what they have bought — the
-  // letter tells the counter WHO this is, and a teacher on a cycle pack is
-  // still a teacher.
-  const kind = stu.kind === "faculty" ? ("faculty" as const) : bagKindFor(tier);
+  // Faculty carry the F series regardless of college or what they've bought
+  // — the letter tells the counter WHO this is, and a teacher on a cycle
+  // pack is still a teacher. Otherwise BVRIT is always V (owner: "for bvrit
+  // we need to use only V as code") — this used to only be applied at
+  // initial registration and in customerIdFor's healing fallback, not here,
+  // so a BVRIT student who already had a bag (e.g. moved campus, or any
+  // other path through issueBag) could keep a stale tier letter from a
+  // different college's scheme forever (found live, Sep 23: moving a
+  // student's campus to BVRIT left them holding a St Mary's "G9006" code).
+  const kind = stu.kind === "faculty" ? ("faculty" as const)
+    : stu.college?.name.trim().toUpperCase() === "BVRIT" ? ("bvrit" as const)
+    : bagKindFor(tier);
   const isFirstEver = stu.bags.length === 0;
   const subscribed = !!stu.subscription?.active;
 
@@ -177,7 +185,7 @@ export async function syncBagToPlan(studentId: string, opts?: { skipCollegeCheck
     const st = await requireStaff(1);
     const stu = await db.student.findUnique({
       where: { id: studentId },
-      include: { subscription: { include: { planRef: true } }, bags: { orderBy: { issuedAt: "desc" } } },
+      include: { subscription: { include: { planRef: true } }, bags: { orderBy: { issuedAt: "desc" } }, college: { select: { name: true } } },
     });
     if (!stu) return { ok: false as const, error: "Student not found" };
     // registerStudent (admin.ts) is deliberately NOT campus-scoped (owner,
@@ -190,10 +198,23 @@ export async function syncBagToPlan(studentId: string, opts?: { skipCollegeCheck
     if (!opts?.skipCollegeCheck) assertSameCollege(st, stu.collegeId);
 
     const tier = stu.subscription?.active ? stu.subscription.planRef?.tier : null;
-    const wanted = bagKindFor(tier);
+    // Same BVRIT/faculty precedence as issueBag — see its comment. In
+    // practice St Mary's is the only college with tiered plans today, but
+    // this stays correct if that ever changes.
+    const wanted = stu.kind === "faculty" ? ("faculty" as const)
+      : stu.college?.name.trim().toUpperCase() === "BVRIT" ? ("bvrit" as const)
+      : bagKindFor(tier);
     const active = stu.bags.find((b) => b.status === "active");
 
-    if (active && bagKindFor(active.tier) === wanted) {
+    // The active bag's own CODE (via its letter) is the source of truth for
+    // what kind it currently is — active.tier is only ever set for a real
+    // tier (bronze/silver/gold) and is null for a bvrit/faculty bag, so
+    // comparing bagKindFor(active.tier) (which defaults null to "bronze")
+    // against `wanted` never matched "bvrit"/"faculty" and would have
+    // silently churned a fresh code for every already-correct BVRIT/faculty
+    // student on every call.
+    const activeKind = active ? parseBagCode(active.code)?.kind : null;
+    if (active && activeKind === wanted) {
       return { ok: true as const, code: active.code, changed: false };
     }
 

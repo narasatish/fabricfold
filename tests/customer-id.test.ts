@@ -44,8 +44,24 @@ describe("every path that turns a plan on allocates the code", () => {
 
 describe("syncBagToPlan", () => {
   it("is idempotent — a correct bag is left alone", () => {
-    expect(bags).toMatch(/if \(active && bagKindFor\(active\.tier\) === wanted\)/);
+    // Found live, Sep 23: comparing bagKindFor(active.tier) against `wanted`
+    // used the bag's TIER column, which is null for a bvrit/faculty bag —
+    // bagKindFor(null) defaults to "bronze", so that comparison could never
+    // match "bvrit"/"faculty" and would have silently reissued a fresh code
+    // for an already-correct BVRIT/faculty student on every call. The
+    // active bag's own CODE (via parseBagCode) is the real source of truth.
+    expect(bags).toMatch(/const activeKind = active \? parseBagCode\(active\.code\)\?\.kind : null;/);
+    expect(bags).toMatch(/if \(active && activeKind === wanted\)/);
     expect(bags).toMatch(/changed: false/);
+  });
+  it("BVRIT and faculty take precedence over the tier default, matching issueBag", () => {
+    // Found live, Sep 23: `wanted` used to be plain bagKindFor(tier), which
+    // knows nothing about BVRIT or faculty — a BVRIT student moved here
+    // from a tiered college (updateStudentDetails) or synced after any
+    // future BVRIT plan would have been given a St Mary's tier letter.
+    const fn = bags.slice(bags.indexOf("export async function syncBagToPlan"), bags.indexOf("export async function syncBagToPlan") + 2200);
+    expect(fn).toMatch(/const wanted = stu\.kind === "faculty"/);
+    expect(fn).toMatch(/stu\.college\?\.name\.trim\(\)\.toUpperCase\(\) === "BVRIT" \? \("bvrit" as const\)/);
   });
 
   it("retires the old code before issuing the new letter", () => {

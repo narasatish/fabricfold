@@ -248,6 +248,21 @@ export async function updateStudentDetails(
 
   await db.student.update({ where: { id: studentId }, data });
 
+  /* The bag code's LETTER names the college's own scheme (BVRIT → V, St
+     Mary's → their plan tier), same as it names a plan tier — a campus move
+     that leaves the old letter is exactly the kind of "ID mixup between
+     colleges" the letter exists to prevent. No active plan can survive to
+     this point (blocked above), so there's nothing to preserve; sync now
+     rather than waiting for the student to next buy something (found live,
+     Sep 23: a St Mary's Gold "G9006" code survived a move to BVRIT with
+     nothing left to trigger a resync). Best-effort — a sync failure here
+     must not undo an otherwise-successful campus move. */
+  if (data.collegeId) {
+    const { syncBagToPlan } = await import("./bags");
+    const bagSync = await syncBagToPlan(studentId, { skipCollegeCheck: true });
+    if (!bagSync.ok) console.error("[updateStudentDetails] bag resync after campus move failed:", bagSync.error);
+  }
+
   await audit("Student updated", `${stu.name} (${stu.id}) · ${changes.join("; ")}`, st.id);
   rosterSoon();
   const channels = [`student:${studentId}`, `orders:${stu.collegeId}`];

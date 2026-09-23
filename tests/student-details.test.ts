@@ -43,6 +43,16 @@ describe("moving campus is guarded", () => {
        every per-campus statement already issued. */
     expect(fn).not.toMatch(/order\.updateMany/);
   });
+  it("re-syncs the bag code after a successful move, so the letter matches the new campus (found live, Sep 23)", () => {
+    // A moved student can hold no active plan by the time this runs (blocked
+    // above), so there's nothing to preserve — but their bag code's LETTER
+    // still named the OLD college's scheme (a St Mary's "G9006" surviving a
+    // move to BVRIT is exactly the cross-college ID mixup the letter exists
+    // to prevent), and nothing else would ever trigger a resync for them.
+    expect(fn).toMatch(/if \(data\.collegeId\) \{/);
+    expect(fn).toMatch(/const \{ syncBagToPlan \} = await import\("\.\/bags"\);/);
+    expect(fn).toMatch(/syncBagToPlan\(studentId, \{ skipCollegeCheck: true \}\)/);
+  });
 });
 
 describe("no-op safety", () => {

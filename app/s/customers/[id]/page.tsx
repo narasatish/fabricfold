@@ -53,6 +53,7 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
   });
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const gstOn = (cfg.settings as Record<string, unknown>)?.gstEnabled !== false;
+  const payment = cfg.payment as unknown as { upiId?: string; payeeName?: string };
   /* Staff placing a walk-in order for THIS student must see THEIR college's
      rates, not the global default — otherwise a BVRIT walk-in shows St
      Mary's-style pricing on screen while the actual charge (computed
@@ -117,6 +118,8 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
         collegeExpressOverride={collegeRatesRow?.expressRates as Record<string, number> | null}
         gstEnabled={gstOn}
         expressEnabled={expressEnabled}
+        paymentUpiId={payment?.upiId || ""}
+        paymentPayeeName={payment?.payeeName || "FabricFold"}
       />
     </div>
   );

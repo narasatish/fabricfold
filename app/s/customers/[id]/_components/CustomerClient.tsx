@@ -3,7 +3,8 @@ import { TimeAgo } from "@/components/time-ago";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
-import { fmt, dateStr, initials, STATUS_LABEL, loyaltyBadge } from "@/lib/format";
+import { Qr } from "@/components/qr";
+import { fmt, dateStr, initials, STATUS_LABEL, loyaltyBadge, upiLink } from "@/lib/format";
 import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
 import { assignSubscription, upgradeSubscription, cancelSubscription, adjustCycleUsage } from "@/lib/actions/subscription";
@@ -43,7 +44,7 @@ type CollegePlan = { id: string; name: string; tier: string | null; price: numbe
 
 type Rates = Record<string, { label: string; items: [string, number][] }>;
 
-export default function StaffCustomerClient({ student, displayId, staffRole, plans, rates, collegeHasRatesOverride, collegeExpressOverride, gstEnabled, colleges, expressEnabled }: { student: Student; displayId: string; staffRole: number; plans: CollegePlan[]; rates: Rates; collegeHasRatesOverride: boolean; collegeExpressOverride: Record<string, number> | null; gstEnabled: boolean; colleges: { id: string; name: string; closedWeekday: number | null }[]; expressEnabled: boolean }) {
+export default function StaffCustomerClient({ student, displayId, staffRole, plans, rates, collegeHasRatesOverride, collegeExpressOverride, gstEnabled, colleges, expressEnabled, paymentUpiId, paymentPayeeName }: { student: Student; displayId: string; staffRole: number; plans: CollegePlan[]; rates: Rates; collegeHasRatesOverride: boolean; collegeExpressOverride: Record<string, number> | null; gstEnabled: boolean; colleges: { id: string; name: string; closedWeekday: number | null }[]; expressEnabled: boolean; paymentUpiId: string; paymentPayeeName: string }) {
   const router = useRouter();
   const toast = useToast();
   const tier = loyaltyBadge(student.lifetimePieces);
@@ -1105,6 +1106,15 @@ Currently ${current}. Type the code printed on the bag they are being given.
               onChange={setAssignMethod}
             />
           </div>
+          {assignMethod === "upi" && assignPlan && paymentUpiId && (
+            <div className="card pad mt10" style={{ textAlign: "center" }}>
+              <Qr
+                text={upiLink(paymentUpiId, paymentPayeeName, (assignPlan.gross || 0) - (assignApplyCredits ? assignCreditCover : 0), `${assignPlan.name} — ${student.name}`)}
+                size={180}
+              />
+              <div className="muted mt8" style={{ fontSize: "12px" }}>Have {student.name} scan to pay</div>
+            </div>
+          )}
           {student.credits > 0 && (
             <div className="chip-toggle mt16">
               <div>

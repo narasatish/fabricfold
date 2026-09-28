@@ -77,6 +77,40 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
   const subRevenueApprox = activeSubs * plan.price;
   const cohortPct = subRevenueApprox + payRevenue > 0 ? Math.round((subRevenueApprox / (subRevenueApprox + payRevenue)) * 100) : 0;
 
+  /* Staff activity — refunds, paid-order cancellations, and compensation,
+     grouped by who did it. Not a fraud finding on its own: a Manager who
+     handles 200 orders a week will always show more refunds than someone
+     on 20. It's a visibility tool — the owner can't watch every counter in
+     person, and today the only way to notice "one staff member refunds/
+     comps far more than everyone else on the same shift" was reading the
+     raw AuditLog by hand. AuditLog has no collegeId column, so campus
+     scoping goes through staffList's ids (already scoped above) instead. */
+  const ACTIVITY_ACTIONS = ["Refund", "Cancel order", "Compensation"] as const;
+  const activityLog = await db.auditLog.findMany({
+    where: {
+      action: { in: [...ACTIVITY_ACTIONS] },
+      ...(period.from ? { at: { gte: period.from, ...(period.to ? { lt: period.to } : {}) } } : {}),
+      ...(selectedCollegeId ? { by: { in: staffList.map((s) => s.id) } } : {}),
+    },
+    orderBy: { at: "desc" },
+  });
+  const AMOUNT_RE = /₹([\d,]+(?:\.\d+)?)/;
+  type ActivityRow = { staffId: string; name: string; refunds: number; refundAmt: number; cancels: number; comps: number; compAmt: number };
+  const activityById = new Map<string, ActivityRow>();
+  for (const row of activityLog) {
+    if (!activityById.has(row.by)) {
+      activityById.set(row.by, { staffId: row.by, name: byId(row.by), refunds: 0, refundAmt: 0, cancels: 0, comps: 0, compAmt: 0 });
+    }
+    const a = activityById.get(row.by)!;
+    const amt = Number((row.detail.match(AMOUNT_RE)?.[1] || "0").replace(/,/g, ""));
+    if (row.action === "Refund") { a.refunds++; a.refundAmt += amt; }
+    else if (row.action === "Cancel order") a.cancels++;
+    else if (row.action === "Compensation") { a.comps++; a.compAmt += amt; }
+  }
+  const staffActivity = [...activityById.values()].sort(
+    (x, y) => (y.refunds + y.cancels + y.comps) - (x.refunds + x.cancels + x.comps),
+  );
+
   const qs = (over: Record<string, string>) => {
     const params = new URLSearchParams({ p: period.kind, ...(sp.d ? { d: sp.d } : {}), ...(sp.m ? { m: sp.m } : {}), ...(sp.y ? { y: sp.y } : {}), ...(selectedCollegeId ? { c: selectedCollegeId } : {}), ...over });
     return params.toString();
@@ -129,6 +163,28 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
               <div className="kv"><span className="k">Cash payouts</span><span className="mono">−{fmt(r.cashOut)}</span></div>
               <div className="kv"><span className="k">Cash expenses</span><span className="mono">−{fmt(r.cashExpenses)}</span></div>
               <div className="kv total"><span>Expected in drawer</span><span className="mono">{fmt(r.expectedDrawer)}</span></div>
+            </div>
+          </>
+        )}
+
+        {/* Staff activity — refunds / cancellations / compensation by who did it */}
+        {staffActivity.length > 0 && (
+          <>
+            <div className="sec-title mt20">Staff activity — refunds, cancels &amp; compensation</div>
+            <div className="card pad">
+              <div className="muted mb8" style={{ fontSize: "12px" }}>
+                Not a verdict on its own — a busier counter naturally shows more. Worth a look when one name stands well above the rest.
+              </div>
+              {staffActivity.map((a) => (
+                <div key={a.staffId} className="kv" style={{ alignItems: "flex-start" }}>
+                  <span className="k">{a.name}</span>
+                  <span className="mono" style={{ textAlign: "right", fontSize: "12.5px" }}>
+                    {a.refunds > 0 && <div>{a.refunds} refund{a.refunds === 1 ? "" : "s"} · {fmt(a.refundAmt)}</div>}
+                    {a.cancels > 0 && <div>{a.cancels} paid cancel{a.cancels === 1 ? "" : "s"}</div>}
+                    {a.comps > 0 && <div>{a.comps} comp{a.comps === 1 ? "" : "s"} · {fmt(a.compAmt)}</div>}
+                  </span>
+                </div>
+              ))}
             </div>
           </>
         )}

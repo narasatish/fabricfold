@@ -64,6 +64,12 @@ describe("the holes that were open", () => {
   it("day close is the dayclose tool", () => {
     expect(read("lib/actions/ops.ts")).toMatch(/requireStaffPerm\("dayclose"\)/);
   });
+  it("cancelling an order paid with real money needed only requireStaff(1) — same trust as a refund, same gate now (a subscriber's own prepaid cycle is excluded — no money to protect there)", () => {
+    const src = read("lib/actions/orders.ts");
+    const fn = src.slice(src.indexOf("export async function cancelOrder"), src.indexOf("\nexport ", src.indexOf("export async function cancelOrder") + 30));
+    expect(fn).toMatch(/ord\.paid && ord\.paymentMethod !== "cycle" && ord\.paymentMethod !== "redo"/);
+    expect(fn).toMatch(/staffCan\(st, "refunds"\)/);
+  });
 });
 
 describe("the tab bar tells the truth", () => {

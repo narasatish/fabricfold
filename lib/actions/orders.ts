@@ -940,6 +940,33 @@ export async function cancelOrder(orderId: string): Promise<ActionResult> {
   assertSameCollege(st, ord.collegeId);
   if (ord.status === "cancelled") return { ok: false as const, error: "This order is already cancelled" };
   if (ord.status === "collected") return { ok: false as const, error: "This order has already been collected" };
+  /* Cancelling an UNPAID order is routine (a student changes their mind
+     before paying) and stays open to any staff. Cancelling an order paid
+     with REAL MONEY (cash/UPI, not a subscriber's own prepaid cycle) is the
+     same shape of trust as a refund — the student either gets their wash or
+     gets their money back, and staff shouldn't be able to make already-paid
+     cash/UPI simply disappear without the same "refunds" permission gate
+     refundOrder() itself requires (Manager+ by default, see PERM_DEFS).
+     Without this, refunding was gated but an equivalent way to make paid
+     money "go away" from the queue wasn't.
+
+     A cycle-based order (paymentMethod "cycle") is deliberately excluded —
+     `paid` is set true there too, but no cash/UPI/credit ever changed
+     hands; the "payment" is a cycle the student already bought with their
+     subscription, and cancelling it just returns that cycle (its own,
+     already race-safe, concurrency-tested restore below). Gating that the
+     same way would have blocked routine counter work for zero money-safety
+     gain. Same for a free complaint re-do ("redo") — nothing of value to
+     protect there either. Written as a deny-by-default exclusion list
+     (only these two named methods skip the gate) rather than an allow-list
+     of methods to catch, so a future payment method is gated by default
+     instead of silently slipping through ungated. */
+  if (ord.paid && ord.paymentMethod !== "cycle" && ord.paymentMethod !== "redo") {
+    const { staffCan, PERM_DEFS } = await import("../perms");
+    if (!staffCan(st, "refunds")) {
+      return { ok: false as const, error: `This order is paid — cancelling it needs "${PERM_DEFS.refunds.label}" (ask the owner)` };
+    }
+  }
 
   try {
     await db.$transaction(async (tx) => {

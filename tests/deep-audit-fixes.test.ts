@@ -88,7 +88,12 @@ describe("flushSheetOutbox claims its batch before appending, holding the lock t
 
 describe("issueBag can't create two active bags for one student under concurrency", () => {
   const bagsSrc = read("lib/actions/bags.ts");
-  const fn = bagsSrc.slice(bagsSrc.indexOf("export async function issueBag"), bagsSrc.indexOf("export async function issueBag") + 5500);
+  const fnStart = bagsSrc.indexOf("export async function issueBag");
+  // Slice to the next top-level export rather than a fixed char count — a
+  // fixed window silently stops matching source further down whenever a
+  // comment grows (broke 2026-09 when the advisory-lock explanation grew
+  // past the old 5500-char cutoff, pushing isCodeCollision out of range).
+  const fn = bagsSrc.slice(fnStart, bagsSrc.indexOf("\nexport ", fnStart + 30));
   it("locks and re-checks 'already active' fresh, inside the transaction", () => {
     expect(fn).toMatch(/FOR UPDATE`/);
     expect(fn).toMatch(/const stillActive = await tx\.bag\.findFirst/);

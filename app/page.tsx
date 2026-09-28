@@ -42,10 +42,14 @@ const jsonLd = {
   priceRange: "₹₹",
   currenciesAccepted: "INR",
   paymentAccepted: "Cash, UPI",
+  // Each campus counter sets its own weekly holiday (College.closedWeekday) — BVRIT
+  // is Wednesday, St Mary's is Thursday, etc. There's no single day the whole
+  // business is closed, so the schema can only truthfully claim the daily hours,
+  // not a shared closed day.
   openingHoursSpecification: {
     "@type": "OpeningHoursSpecification",
-    dayOfWeek: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
-    opens: "09:00", closes: "19:00",
+    dayOfWeek: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+    opens: "09:00", closes: "20:00",
   },
   knowsAbout: ["campus laundry", "hostel laundry", "community laundry", "dry cleaning", "wash and fold", "wash and iron", "garment tracking"],
 };

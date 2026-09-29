@@ -84,6 +84,14 @@ model Student {
   lifetimePieces Int      @default(0)
   washDay        Int? // assigned weekly drop-off day, 0=Sun..6=Sat; spreads load evenly across the week (soft guidance, not enforced)
   createdAt      DateTime @default(now())
+  /**
+   * Denormalized "last changed" stamp so the staff Students list can sort by
+   * recent activity without a live cross-table scan (refunds, cancellations,
+   * compensation, plan changes, bag changes, credit top-ups, walk-in orders,
+   * payments, detail edits — see touchStudentActivity() call sites). Null
+   * until the first such event; the UI falls back to createdAt for those.
+   */
+  lastActivityAt DateTime?
 
   /**
    * Optional passcode, so a student who has signed in once by OTP can get back
@@ -133,6 +141,7 @@ model Student {
    */
   @@index([collegeId])
   @@index([createdAt])
+  @@index([lastActivityAt])
 }
 
 model Staff {

@@ -2,11 +2,12 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
+import { TimeAgo } from "@/components/time-ago";
 import { Seg, Sheet, TopBar, useToast, CampusSwitch, useCampusSwitch } from "@/components/chrome";
 import { fmt, initials } from "@/lib/format";
 import { bulkRegisterStudents, broadcastNotice } from "@/lib/actions/students";
 
-type Student = { id: string; displayId: string; name: string; phone: string; credits: number; lifetimePieces: number; collegeId: string; subActive: boolean };
+type Student = { id: string; displayId: string; name: string; phone: string; credits: number; lifetimePieces: number; collegeId: string; subActive: boolean; createdAt: number; lastActivityAt: number | null };
 type College = { id: string; name: string; active?: boolean };
 
 export default function StudentsClient({ students, colleges, staffRole }: { students: Student[]; colleges: College[]; staffRole: number }) {
@@ -24,6 +25,12 @@ export default function StudentsClient({ students, colleges, staffRole }: { stud
   const [q, setQ] = useState("");
   const [campus, setCampus] = useCampusSwitch(colleges);
   const [sub, setSub] = useState<"all" | "active" | "none">("all");
+  // Default to "recently changed" — the point of this control is surfacing
+  // who just had something happen on their account (a refund, a plan
+  // change, a cycle correction, a new order...) without scrolling the
+  // whole roster. "Recently added" and "Name" cover the other two things
+  // staff actually look a list up by.
+  const [sortBy, setSortBy] = useState<"changed" | "added" | "name">("changed");
 
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState("");
@@ -37,14 +44,20 @@ export default function StudentsClient({ students, colleges, staffRole }: { stud
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return students.filter((st) => {
+    const rows = students.filter((st) => {
       if (campus !== "all" && st.collegeId !== campus) return false;
       if (sub === "active" && !st.subActive) return false;
       if (sub === "none" && st.subActive) return false;
       if (s && !(st.id.includes(s) || st.displayId.toLowerCase().includes(s) || st.phone.includes(s) || st.name.toLowerCase().includes(s))) return false;
       return true;
     });
-  }, [students, q, campus, sub]);
+    if (sortBy === "name") return rows.sort((a, b) => a.name.localeCompare(b.name));
+    if (sortBy === "added") return rows.sort((a, b) => b.createdAt - a.createdAt);
+    // "changed" — a student with no activity yet (lastActivityAt null) falls
+    // back to their join date, so a brand-new account still sits sensibly
+    // among "nothing has happened yet" rather than sorting as infinitely old.
+    return rows.sort((a, b) => (b.lastActivityAt ?? b.createdAt) - (a.lastActivityAt ?? a.createdAt));
+  }, [students, q, campus, sub, sortBy]);
 
   const doImport = async () => {
     setBusy(true);
@@ -119,6 +132,13 @@ export default function StudentsClient({ students, colleges, staffRole }: { stud
         />
       </div>
 
+      <div className="mt10">
+        <Seg<"changed" | "added" | "name">
+          options={[["changed", "Recently changed"], ["added", "Recently added"], ["name", "Name"]]}
+          value={sortBy} onChange={setSortBy}
+        />
+      </div>
+
       <div className="between mt16" style={{ padding: "0 4px" }}>
         <span className="sec-title" style={{ padding: 0 }}>Students</span>
         <span className="pill gray">{filtered.length}</span>
@@ -134,7 +154,11 @@ export default function StudentsClient({ students, colleges, staffRole }: { stud
                 {st.subActive && <span className="pill" style={{ fontSize: "10.5px" }}>Plan</span>}
               </div>
               <div className="muted" style={{ fontSize: "12.5px" }}>ID {st.displayId} · +91 {st.phone} · {colName(st.collegeId)}</div>
-              <div className="muted" style={{ fontSize: "12px" }}>{st.lifetimePieces} pcs · {fmt(st.credits)} credit</div>
+              <div className="muted" style={{ fontSize: "12px" }}>
+                {st.lifetimePieces} pcs · {fmt(st.credits)} credit
+                {sortBy === "changed" && st.lastActivityAt && <> · changed <TimeAgo at={st.lastActivityAt} /></>}
+                {sortBy === "added" && <> · joined <TimeAgo at={st.createdAt} /></>}
+              </div>
             </div>
             <Svg name="chevR" size={18} />
           </button>

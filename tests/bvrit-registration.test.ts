@@ -52,6 +52,7 @@ beforeAll(async () => {
     try {
       await (await import("../lib/db")).db.college.findFirst({ select: { rates: true } });
       await (await import("../lib/db")).db.waVerify.findFirst({ select: { studentName: true } });
+      await (await import("../lib/db")).db.student.findFirst({ select: { lastActivityAt: true } });
       return true;
     } catch {
       return false;

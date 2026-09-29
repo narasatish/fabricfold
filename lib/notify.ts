@@ -1,6 +1,7 @@
 import { db } from "./db";
 import { publish } from "./realtime";
 import { sendPushTo } from "./push";
+import type { Prisma } from "./generated/prisma/client";
 
 /* WhatsApp via Meta's WhatsApp Cloud API. Activates when WHATSAPP_TOKEN +
    WHATSAPP_PHONE_ID are set; silently skipped until then. Fire-and-forget —
@@ -235,4 +236,23 @@ export async function pushNotif(studentId: string, text: string, kind = "status"
 
 export async function audit(action: string, detail: string, by: string) {
   await db.auditLog.create({ data: { action, detail, by } });
+}
+
+/* Bumps Student.lastActivityAt so the staff Students list can sort by
+   "recently changed" without a live cross-table scan over orders, payments,
+   compensation, cycle use, etc. every render. Call this from the same
+   transaction as the change when one exists (accepts `tx`), so the stamp
+   can never land without the change it's recording, or vice versa — a
+   separate best-effort call outside the transaction could drift (the write
+   commits but this doesn't, or this runs then the write rolls back). A
+   failed update here is swallowed rather than thrown: the sort going stale
+   for one student is a rendering nuisance, not a reason to fail the actual
+   refund/order/payment/etc. that called it. */
+export async function touchStudentActivity(client: Prisma.TransactionClient | typeof db, studentId: string) {
+  try {
+    await client.student.update({ where: { id: studentId }, data: { lastActivityAt: new Date() } });
+  } catch {
+    /* student may not exist yet in an edge case (e.g. mid-erase), or the
+       update lost a race with a delete — never let this break the caller */
+  }
 }

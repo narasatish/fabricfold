@@ -165,7 +165,7 @@ export async function updateStudentPhone(studentId: string, newPhone: string) {
   if (!stu) return { ok: false as const, error: "Student not found" };
   assertSameCollege(st, stu.collegeId);
   try {
-    await db.student.update({ where: { id: studentId }, data: { phone } });
+    await db.student.update({ where: { id: studentId }, data: { phone, lastActivityAt: new Date() } });
   } catch (e) {
     // Same TOCTOU registerStudent already guards against: the `existing`
     // check above ran before this write, so two concurrent phone-change
@@ -246,7 +246,7 @@ export async function updateStudentDetails(
 
   if (!changes.length) return { ok: true as const, changed: false };
 
-  await db.student.update({ where: { id: studentId }, data });
+  await db.student.update({ where: { id: studentId }, data: { ...data, lastActivityAt: new Date() } });
 
   /* The bag code's LETTER names the college's own scheme (BVRIT → V, St
      Mary's → their plan tier), same as it names a plan tier — a campus move

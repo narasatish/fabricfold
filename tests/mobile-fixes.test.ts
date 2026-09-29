@@ -193,7 +193,7 @@ describe("compensation is credit-only, capped at ₹2,000 for staff below Admin 
     expect(credits).not.toMatch(/"cash_out"/);
   });
   it("every grant still lands as store credit, unconditionally", () => {
-    expect(credits).toMatch(/await tx\.student\.update\(\{ where: \{ id: stu\.id \}, data: \{ credits: \{ increment: amount \} \} \}\);/);
+    expect(credits).toMatch(/await tx\.student\.update\(\{ where: \{ id: stu\.id \}, data: \{ credits: \{ increment: amount \}, lastActivityAt: new Date\(\) \} \}\);/);
   });
   it("staff below Admin (role 3) are capped at ₹2,000; Admin/Owner can go higher", () => {
     expect(credits).toMatch(/const STAFF_COMP_CAP = 2000;/);

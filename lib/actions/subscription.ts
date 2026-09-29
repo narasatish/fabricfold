@@ -8,7 +8,7 @@ import { db, dbSchemaPrefix } from "../db";
 import { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff, assertSameCollege } from "../auth";
 import { publish } from "../realtime";
-import { pushNotif, audit } from "../notify";
+import { pushNotif, audit, touchStudentActivity } from "../notify";
 import { notifyOwner } from "../mail";
 import { syncBagToPlan } from "./bags";
 import { CYCLE_RATES } from "../money";
@@ -77,6 +77,7 @@ export async function adjustCycleUsage(studentId: string, updates: { service: st
     if (!changes.length) return false;
     const cyclesUsed = newBuckets.reduce((s, b) => s + b.used, 0);
     await tx.subscription.update({ where: { studentId }, data: { buckets: newBuckets, cyclesUsed } });
+    await touchStudentActivity(tx, studentId);
     return true;
   }, { timeout: 15_000 }); // row lock can queue concurrent corrections
   if (!changed) return { ok: true as const, changed: false };
@@ -205,6 +206,7 @@ export async function assignSubscription(studentId: string, planId: string, meth
 
   await pushNotif(studentId, `Your "${result.plan.name}" plan is active. Happy washing!`, "status");
   await audit("Subscription assigned", `${stu.name} · ${result.plan.name} · ${result.paidNote}${bag.ok && bag.code ? ` · ${bag.code}` : ""}`, st.id);
+  await touchStudentActivity(db, studentId);
   rosterSoon();
   void notifyOwner("Subscription assigned", `${stu.name}: "${result.plan.name}" — ${result.paidNote} (assigned by ${st.name}).`);
   publish([`student:${studentId}`, `orders:${stu.collegeId}`], { type: "subscription", payload: { studentId } });
@@ -306,6 +308,7 @@ export async function upgradeSubscription(studentId: string, planId: string, met
       data: { method, amount: difference, collegeId: stu.collegeId, studentId, note: `Plan change: ${cur.plan} → ${plan.name}` },
     });
     await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId, label: `Plan change: ${cur.plan} → ${plan.name}`, method, amount: difference });
+    await touchStudentActivity(tx, studentId);
   }, { timeout: 15_000 }); // row lock can queue concurrent upgrade attempts
 
   flushSoon();
@@ -370,6 +373,7 @@ export async function cancelSubscription(studentId: string, reason: string) {
     "status",
   );
   await audit("Subscription cancelled", `${stu.name} · ${sub.plan} · ${left} cycles unused · ${note}`, st.id);
+  await touchStudentActivity(db, studentId);
   rosterSoon();
   void notifyOwner(
     "Subscription cancelled",
@@ -537,6 +541,7 @@ export async function sellCyclePack(
       0,
       "—",
     ], stu.collegeId);
+    await touchStudentActivity(tx, studentId);
   }, { timeout: 15_000 }); // advisory lock can queue a concurrent caller past Prisma's 5s default — found 2026-09-11 when this exact scenario threw "commit on expired transaction" under test
 
   const paidNote = creditApplied > 0 ? (cash > 0 ? `₹${cash} ${input.method} + ₹${creditApplied} credit` : `₹${creditApplied} credit`) : `₹${price} ${input.method}`;

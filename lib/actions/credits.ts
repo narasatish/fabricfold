@@ -57,7 +57,7 @@ export async function submitCompensation(input: { studentId: string; orderId?: s
         // still need to read back correctly) but every new grant is credit.
         data: { studentId: stu.id, orderId: input.orderId || null, complaintId: input.complaintId || null, kind: input.kind, amount, comment: input.comment.trim() || null, by: st.id, method: "credit" },
       });
-      await tx.student.update({ where: { id: stu.id }, data: { credits: { increment: amount } } });
+      await tx.student.update({ where: { id: stu.id }, data: { credits: { increment: amount }, lastActivityAt: new Date() } });
     });
   } catch (e) {
     // Backstop for the findFirst-inside-the-transaction check above: that read

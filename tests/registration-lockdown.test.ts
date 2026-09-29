@@ -40,6 +40,7 @@ async function schemaIsCurrent(): Promise<boolean> {
     // probe the NEWEST additions — an old-table probe lets later columns drift
     await db.college.findFirst({ select: { rates: true } });
     await db.waVerify.findFirst({ select: { collegeId: true } });
+    await db.student.findFirst({ select: { lastActivityAt: true } });
     return true;
   } catch {
     return false;

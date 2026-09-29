@@ -12,7 +12,7 @@
 import { enqueuePaymentEvent, flushSoon } from "../sheet-events";
 import { db } from "../db";
 import { requireStaff, assertSameCollege } from "../auth";
-import { pushNotif, audit } from "../notify";
+import { pushNotif, audit, touchStudentActivity } from "../notify";
 import { rosterSoon } from "../sheets-sync";
 import { publish } from "../realtime";
 import { notifyOwner } from "../mail";
@@ -113,6 +113,7 @@ export async function issueBag(
           });
           await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId, label: `Bag ${code}`, method: input.method || "cash", amount: price });
         }
+        await touchStudentActivity(tx, studentId);
         return b;
       }, { timeout: 15_000 }); // advisory lock can queue a concurrent caller past Prisma's 5s default — same class as orders.ts's acceptOrder/walkInOrder
       break;
@@ -285,7 +286,7 @@ export async function reissueBagSameCode(bagId: string, reason: "lost" | "damage
         where: { id: bagId },
         data: { status: "lost", note: `${reason} — reissued with the same code` },
       });
-      return tx.bag.create({
+      const created = await tx.bag.create({
         data: {
           code: bag.code, // the whole point: same number, new bag
           studentId: bag.studentId,
@@ -296,6 +297,8 @@ export async function reissueBagSameCode(bagId: string, reason: "lost" | "damage
           note: `Replacement for a ${reason} bag`,
         },
       });
+      await touchStudentActivity(tx, bag.studentId);
+      return created;
     });
 
     await pushNotif(bag.studentId, `Your replacement bag is ready — same number, ${bag.code}. Collect it at the counter.`, "status");
@@ -389,6 +392,7 @@ export async function setBagCode(bagId: string, rawCode: string) {
   }
 
   await audit("Customer ID changed", `${bag.student.name} · ${before} → ${code}`, st.id);
+  await touchStudentActivity(db, bag.studentId);
   rosterSoon();
   // They carry this number and quote it at the counter, so they are told.
   await pushNotif(bag.studentId, `Your FabricFold customer ID is now ${code} (was ${before}).`, "status");
@@ -461,6 +465,7 @@ export async function retireBag(bagId: string, status: "lost" | "replaced", note
   });
   if (claimed.count === 0) return { ok: false as const, error: "This bag was just updated by someone else — refresh and try again" };
   await audit("Bag retired", `${bag.code} · ${bag.student.name} · ${status}${note ? ` — ${note}` : ""}`, st.id);
+  await touchStudentActivity(db, bag.studentId);
   publish([`student:${bag.studentId}`], { type: "bag", payload: { studentId: bag.studentId } });
   return { ok: true as const };
 }

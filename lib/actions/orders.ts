@@ -10,7 +10,7 @@ import { requireStudent, requireStaff, requireStaffPerm, assertSameCollege } fro
 import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, expressFlatFee, collegeExpressFee, expressItemRate, isCycleService, collegeUsesCycleBasedPricing, resolveCollegeRates, validWeight, isMoneyAmount } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
-import { pushNotif, audit } from "../notify";
+import { pushNotif, audit, touchStudentActivity } from "../notify";
 import { notifyOwner } from "../mail";
 
 /* Random N-digit string — used for the pickup OTP code (not order ids,
@@ -285,6 +285,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       usedCycle ? "yes" : "no",
       "received",
     ], o.collegeId);
+    await touchStudentActivity(tx, o.studentId);
     return updated;
     }, { timeout: 25_000 }); // was 15s: found live 2026-09-17 (cycle-consume-race-behavioral.test.ts)
     // that 15s itself was not always enough — the SELECT...FOR UPDATE lock can queue
@@ -445,6 +446,7 @@ export async function walkInOrder(
         usedCycle ? "yes" : "no",
         "received (walk-in)",
       ], stu.collegeId);
+      await touchStudentActivity(tx, stu.id);
       return o;
     }, { timeout: 25_000 }); // see acceptOrder's identical comment (found live 2026-09-17) — the
     // Subscription row lock can queue this transaction behind a concurrent accept/walk-in
@@ -643,7 +645,7 @@ export async function collectOrder(orderId: string, code: string) {
       const updated = await tx.order.updateMany({ where: { id: o.id, status: "ready" }, data: { status: "collected" } });
       if (updated.count === 0) throw new Error("This order was already collected");
       await tx.orderEvent.create({ data: { orderId: o.id, status: "collected" } });
-      await tx.student.update({ where: { id: o.studentId }, data: { lifetimePieces: { increment: o.actualPieces || 0 } } });
+      await tx.student.update({ where: { id: o.studentId }, data: { lifetimePieces: { increment: o.actualPieces || 0 }, lastActivityAt: new Date() } });
       if (otp) await tx.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
       const stu = await tx.student.findUniqueOrThrow({ where: { id: o.studentId }, select: { name: true } });
       await enqueueSheetEvent(tx, "collection", [
@@ -717,6 +719,7 @@ async function payInner(orderId: string, method: "upi" | "cash", creditApplied: 
       Number(updated.gst) || 0,
       (invoice as { number?: string } | null)?.number ?? "—",
     ], o.collegeId);
+    await touchStudentActivity(tx, o.studentId);
     return updated;
   }, { timeout: 15_000 }); // enqueueSheetEvent makes a real Google Sheets API call inside the transaction
 }
@@ -812,6 +815,7 @@ export async function refundOrder(orderId: string, amount: number, via: "upi" | 
       const newRefundAmount = Number(fresh.refundAmount || 0) + amount;
       await tx.order.update({ where: { id: o.id }, data: { refunded: true, refundAmount: newRefundAmount } });
       if (restoreCycle) await restoreCycleFor(tx, o, o.student.subscription);
+      await touchStudentActivity(tx, o.studentId);
     }, { timeout: 15_000 }); // may call restoreCycleFor which locks the subscription row
   } catch (e) {
     return { ok: false, error: (e as Error).message };
@@ -849,6 +853,7 @@ export async function redoOrder(orderId: string): Promise<ActionResult> {
   });
   await pushNotif(o.studentId, `A free re-do was created for order #${o.id.slice(-4)} at no charge.`, "status");
   await audit("Free re-do", `from #${o.id.slice(-4)} → #${n.id.slice(-4)}`, st.id);
+  await touchStudentActivity(db, o.studentId);
   /* Re-dos belong in the log too: they are real work at zero revenue, and the
      Sheet is where the cost of service failures should be visible. */
   const stu = await db.student.findUnique({ where: { id: o.studentId }, select: { name: true, collegeId: true } });
@@ -992,6 +997,7 @@ export async function cancelOrder(orderId: string): Promise<ActionResult> {
       await tx.orderEvent.create({ data: { orderId: ord.id, status: "cancelled" } });
       // Cancelling means the wash never happened, so the cycle always goes back.
       await restoreCycleFor(tx, ord, ord.student.subscription);
+      await touchStudentActivity(tx, ord.studentId);
     }, { timeout: 15_000 }); // restoreCycleFor locks the subscription row, which can queue under concurrent cancels
   } catch (e) {
     return { ok: false as const, error: (e as Error).message };

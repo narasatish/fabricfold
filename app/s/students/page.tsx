@@ -23,9 +23,13 @@ export default async function StaffStudentsPage() {
   const [rows, colleges] = await Promise.all([
     db.student.findMany({
       where: scope,
+      // Sorted client-side (StudentsClient) so staff can flip between
+      // "recently changed" and "recently added" without a round trip —
+      // fetch order here doesn't matter, both timestamps are selected below.
       orderBy: { createdAt: "desc" },
       select: {
         id: true, name: true, phone: true, credits: true, lifetimePieces: true, collegeId: true,
+        createdAt: true, lastActivityAt: true,
         subscription: { select: { active: true } },
         bags: { where: { status: "active" }, select: { code: true }, take: 1 },
       },
@@ -46,6 +50,7 @@ export default async function StaffStudentsPage() {
     id: r.id, displayId: r.bags[0]?.code ?? r.id, name: r.name, phone: r.phone,
     credits: Number(r.credits), lifetimePieces: r.lifetimePieces,
     collegeId: r.collegeId, subActive: !!r.subscription?.active,
+    createdAt: r.createdAt.getTime(), lastActivityAt: r.lastActivityAt?.getTime() ?? null,
   }));
 
   return (

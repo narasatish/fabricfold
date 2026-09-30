@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { notifyOwnersWhatsApp } from "./notify";
 
 /* Owner email notifications.
    Provider: Resend (free tier: 100/day) when RESEND_API_KEY is set; until
@@ -33,13 +34,18 @@ export async function sendMail(to: string, subject: string, text: string) {
   if (!res.ok) console.error("mail send failed", res.status, await res.text().catch(() => ""));
 }
 
-/** Notify the owner about a business event. Never throws. */
+/** Notify the owner about a business event — email AND instant WhatsApp
+    (Admin -> Settings -> alert phone numbers), independently of each other:
+    email being unconfigured must not silently skip WhatsApp, or vice versa.
+    Never throws. */
 export async function notifyOwner(subject: string, text: string) {
-  try {
-    const to = await ownerEmail();
-    if (!to) return; // owner email not configured yet
-    await sendMail(to, `FabricFold · ${subject}`, text);
-  } catch (e) {
-    console.error("notifyOwner failed", e);
-  }
+  const [emailResult] = await Promise.allSettled([
+    (async () => {
+      const to = await ownerEmail();
+      if (!to) return; // owner email not configured yet
+      await sendMail(to, `FabricFold · ${subject}`, text);
+    })(),
+    notifyOwnersWhatsApp(`${subject}\n${text}`),
+  ]);
+  if (emailResult.status === "rejected") console.error("notifyOwner (email) failed", emailResult.reason);
 }

@@ -465,7 +465,13 @@ export async function walkInOrder(
   await audit("Walk-in order", `#${result.id.slice(-4)} · ${stu.name} · ₹${Number(result.total)}${result.usedCycle ? " (cycle)" : ""}${result.noGst ? " (no GST)" : ""}`, st.id);
   if (result.noGst) await audit("No-GST billing", `#${result.id.slice(-4)} ₹${Number(result.total)}`, st.id);
   if (result.usedCycle && Number(result.surcharge) > 0) await audit("Urgent cycle charge", `#${result.id.slice(-4)} · ${stu.name} · ₹${Number(result.surcharge)} cash (cycle order)`, st.id);
-  void notifyOwner(`Walk-in order #${result.id.slice(-4)}`, `${stu.name}: ${result.actualPieces} pieces of ${cfg.rates[result.service].label} — ₹${Number(result.total)}${result.usedCycle ? " (plan cycle)" : ""}. Logged by ${st.name}.`);
+  void (async () => {
+    const displayId = await customerIdFor(db, stu.id);
+    void notifyOwner(
+      `Walk-in order #${result.id.slice(-4)}`,
+      `${stu.name} (${stu.college.name}, ID ${displayId}): ${result.actualPieces} pieces of ${cfg.rates[result.service].label} — ₹${Number(result.total)}${result.usedCycle ? " (plan cycle)" : ""}, ${result.paid ? "paid" : "UNPAID"}. Logged by ${st.name}.`,
+    );
+  })();
   bcast(result, "order.created");
   flushSoon();
   return { ok: true as const, id: result.id };
@@ -632,6 +638,7 @@ export async function collectOrder(orderId: string, code: string) {
   // declared piece count as the final lifetimePieces figure.
   if (o.status !== "ready") return { ok: false as const, error: `Order is ${o.status}, not ready for collection` };
 
+  let collectedStuName = "", collectedDisplayId = "";
   try {
     await db.$transaction(async (tx) => {
       /* A plain `update` can't stop two concurrent taps (double-tap on a slow
@@ -648,10 +655,12 @@ export async function collectOrder(orderId: string, code: string) {
       await tx.student.update({ where: { id: o.studentId }, data: { lifetimePieces: { increment: o.actualPieces || 0 }, lastActivityAt: new Date() } });
       if (otp) await tx.otp.update({ where: { id: otp.id }, data: { usedAt: new Date() } });
       const stu = await tx.student.findUniqueOrThrow({ where: { id: o.studentId }, select: { name: true } });
+      collectedStuName = stu.name;
+      collectedDisplayId = await customerIdFor(tx, o.studentId);
       await enqueueSheetEvent(tx, "collection", [
         istStamp(),
         "#" + o.id.slice(-6),
-        await customerIdFor(tx, o.studentId),
+        collectedDisplayId,
         stu.name,
         o.actualPieces || 0,
         st.name,
@@ -662,6 +671,10 @@ export async function collectOrder(orderId: string, code: string) {
   }
   bcast(o);
   flushSoon();
+  void notifyOwner(
+    `Order collected #${o.id.slice(-4)}`,
+    `${collectedStuName} (${college?.name ?? "—"}, ID ${collectedDisplayId}) picked up their order — ₹${Number(o.total)}, ${o.paid ? "paid" : "UNPAID"}. Handed over by ${st.name}.`,
+  );
   return { ok: true as const };
 }
 

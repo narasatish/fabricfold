@@ -100,6 +100,13 @@ async function cleanup(db: typeof import("../lib/db").db) {
   if (ids.length) {
     await db.order.deleteMany({ where: { studentId: { in: ids } } });
     await db.notification.deleteMany({ where: { studentId: { in: ids } } });
+    // Found 2026-09-30: a real /c page visit during the test can issue a
+    // subscriber's complimentary bag as a side effect, so Bag rows for
+    // these synthetic students are a real possibility, not just a
+    // theoretical one — cleanup crashed on the FK constraint and left
+    // students/bags behind in the shared ff_test schema every time this
+    // ran into that case.
+    await db.bag.deleteMany({ where: { studentId: { in: ids } } });
     await db.student.deleteMany({ where: { id: { in: ids } } });
   }
   await db.college.deleteMany({ where: { id: { startsWith: TAG } } });

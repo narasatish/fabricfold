@@ -386,6 +386,16 @@ export async function saveSettings(settings: Record<string, unknown>) {
   const st = await requireStaff(3);
   assertGlobalScope(st);
   if ("reportEmail" in settings) { const problem = emailProblem(settings.reportEmail); if (problem) return { ok: false as const, error: problem }; }
+  if ("alertPhones" in settings) {
+    const raw = settings.alertPhones;
+    if (!Array.isArray(raw)) return { ok: false as const, error: "alertPhones must be a list" };
+    const cleaned = raw.map((p) => String(p).replace(/\D/g, "").slice(-10));
+    if (cleaned.some((p) => !/^[6-9]\d{9}$/.test(p))) {
+      return { ok: false as const, error: "Each alert number must be a valid 10-digit mobile number" };
+    }
+    if (cleaned.length > 5) return { ok: false as const, error: "Up to 5 alert numbers" };
+    settings.alertPhones = cleaned;
+  }
   const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const merged = { ...(cfg.settings as Record<string, unknown>), ...settings };
   await db.appConfig.update({ where: { id: "main" }, data: { settings: JSON.parse(JSON.stringify(merged)) } });

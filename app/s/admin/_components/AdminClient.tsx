@@ -30,7 +30,7 @@ type Props = {
     plan: { price: number; cycles: number; kgPerCycle: number };
     rates: Rates;
     payment: { upiId: string; payeeName: string; bankName: string; accountName: string; accountNo: string; ifsc: string; gatewayKey: string };
-    settings: { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number; gstEnabled?: boolean; garmentTagsEnabled?: boolean };
+    settings: { reportEmail?: string; dailyEmail?: boolean; sendHour?: number; openingFloat?: number; gstEnabled?: boolean; garmentTagsEnabled?: boolean; alertPhones?: string[] };
   };
   colleges: { id: string; name: string; address: string; closedWeekday: number | null; active: boolean; features: Record<string, boolean>; rates?: Rates }[];
   staff: { id: string; name: string; phone: string; role: number; collegeId: string | null; active: boolean; perms: Record<string, boolean> }[];
@@ -86,6 +86,10 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   const [planEdit, setPlanEdit] = useState<ReturnType<typeof emptyPlan>>(emptyPlan(colleges[0]?.id || ""));
   const [pay, setPay] = useState({ ...config.payment });
   const [settings, setSettings] = useState({ reportEmail: config.settings.reportEmail || "", dailyEmail: !!config.settings.dailyEmail, sendHour: config.settings.sendHour ?? 21, openingFloat: config.settings.openingFloat ?? 0, garmentTagsEnabled: config.settings.garmentTagsEnabled === true });
+  // Comma-separated in the UI for a single easy-to-edit field; saveSettings
+  // splits, cleans and validates each number server-side before storing the
+  // array — this local string is never trusted as-is.
+  const [alertPhonesText, setAlertPhonesText] = useState((config.settings.alertPhones || []).join(", "));
   const [colEdit, setColEdit] = useState<{ id?: string; name: string; address: string; closedWeekday: number | null }>({ name: "", address: "", closedWeekday: null });
   const [stEdit, setStEdit] = useState<{ id?: string; name: string; phone: string; role: number; collegeId: string | null; active?: boolean; perms: Record<string, boolean> }>({ name: "", phone: "", role: 1, collegeId: colleges[0]?.id ?? null, perms: {} });
   const [impCollege, setImpCollege] = useState(colleges.find((c) => c.active)?.id || colleges[0]?.id || "");
@@ -692,7 +696,24 @@ Students already registered there keep their records and can be restored with th
         <div className="field"><label>Opening cash float (₹)</label><input className="input" type="number" value={settings.openingFloat} onChange={(e) => setSettings({ ...settings, openingFloat: Number(e.target.value) })} /></div>
         {/* Per-garment QR tagging toggle removed (owner, Sep 2026) — the
             backend flag still exists but stays off; restore from git if wanted. */}
-        <button disabled={runBusy} className="btn" onClick={() => run(() => saveSettings(settings), "Settings saved")}>Save settings</button>
+        <div className="h-md" style={{ padding: "16px 4px 8px" }}>WhatsApp alerts</div>
+        <div className="muted" style={{ padding: "0 4px 10px", fontSize: 12 }}>
+          Up to 5 numbers get an instant WhatsApp for every new registration, complaint, order placed, order collected and payment received.
+        </div>
+        <div className="field">
+          <label>Alert phone numbers (comma-separated)</label>
+          <input className="input" placeholder="9876543210, 9812345678" value={alertPhonesText} onChange={(e) => setAlertPhonesText(e.target.value)} />
+        </div>
+        <button
+          disabled={runBusy}
+          className="btn"
+          onClick={() => run(
+            () => saveSettings({ ...settings, alertPhones: alertPhonesText.split(",").map((s) => s.trim()).filter(Boolean) }),
+            "Settings saved",
+          )}
+        >
+          Save settings
+        </button>
       </Sheet>
 
       <Sheet open={sheet === "college"} onClose={() => setSheet(null)}>

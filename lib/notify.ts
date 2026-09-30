@@ -256,3 +256,22 @@ export async function touchStudentActivity(client: Prisma.TransactionClient | ty
        update lost a race with a delete — never let this break the caller */
   }
 }
+
+/* Instant WhatsApp alerts to a small fixed list of numbers (owner + up to a
+   couple of managers), stored in AppConfig.settings.alertPhones — editable
+   in Admin without a redeploy, same pattern as reportEmail. Reuses the
+   existing generic-template sendWhatsApp() (see its own comment): one
+   approved utility template with a free-text {{1}} body covers every event
+   type, no per-event template needed. Called from notifyOwner() (lib/mail.ts)
+   so every existing owner-alert call site (registrations, complaints,
+   orders, payments) gets WhatsApp for free, not just email. Best-effort —
+   one bad number must never break the event that triggered it. */
+export async function notifyOwnersWhatsApp(text: string) {
+  try {
+    const cfg = await db.appConfig.findUnique({ where: { id: "main" }, select: { settings: true } });
+    const phones = (cfg?.settings as { alertPhones?: string[] } | null)?.alertPhones || [];
+    await Promise.allSettled(phones.filter(Boolean).map((p) => sendWhatsApp(p, text)));
+  } catch (e) {
+    console.error("notifyOwnersWhatsApp failed", e);
+  }
+}

@@ -199,6 +199,27 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
   const removeCollegeRateItem = (svc: string, i: number) => {
     setCollegeRatesEdit((s) => ({ ...s, rates: { ...s.rates, [svc]: { ...s.rates[svc], items: s.rates[svc].items.filter((_, j) => j !== i) } } }));
   };
+  /* The gap this closes: openCollegeRates seeds this editor from whatever
+     service keys the campus's OWN stored override already has (deliberately
+     — see its comment), so a campus overriding only washFold/washIron had
+     no way to ALSO override ironOnly/dryClean short of an engineer hand-
+     editing the database. There was no "+Add category" next to "+Add item"
+     — this is that missing control, for whichever of the 4 known services
+     the campus hasn't already got a card for. */
+  const addCollegeRateCategory = (svc: string) => {
+    if (collegeRatesEdit.rates[svc]) return; // already has a card — nothing to add
+    setCollegeRatesEdit((s) => ({
+      ...s,
+      rates: { ...s.rates, [svc]: { label: SERVICE_LABEL[svc] || svc, items: [["Regular garment", 0]] } },
+    }));
+  };
+  const removeCollegeRateCategory = (svc: string) => {
+    setCollegeRatesEdit((s) => {
+      const rates = { ...s.rates };
+      delete rates[svc];
+      return { ...s, rates };
+    });
+  };
 
   return (
     <div className="pad">
@@ -568,7 +589,10 @@ Students already registered there keep their records and can be restored with th
         </div>
         {collegeRatesEdit.useOverride && Object.entries(collegeRatesEdit.rates).map(([svc, r]) => (
           <div key={svc} className="card pad" style={{ marginBottom: 12 }}>
-            <div className="h-sm" style={{ marginBottom: 8 }}>{r.label}</div>
+            <div className="between" style={{ marginBottom: 8 }}>
+              <div className="h-sm">{r.label}</div>
+              <button className="btn xs sec" onClick={() => removeCollegeRateCategory(svc)}>Remove service</button>
+            </div>
             {r.items.map(([name, price], i) => (
               <div key={i} className="row gap8" style={{ padding: "5px 0", alignItems: "center" }}>
                 <input className="input" value={name} style={{ flex: 1, height: 38 }} onChange={(e) => setCollegeRateItem(svc, i, e.target.value, price)} />
@@ -579,6 +603,13 @@ Students already registered there keep their records and can be restored with th
             <button className="btn xs ghost mt8" onClick={() => addCollegeRateItem(svc)}>+ Add item</button>
           </div>
         ))}
+        {collegeRatesEdit.useOverride && Object.keys(SERVICE_LABEL).some((svc) => !collegeRatesEdit.rates[svc]) && (
+          <div className="row gap8 wrap" style={{ marginBottom: 14 }}>
+            {Object.entries(SERVICE_LABEL).filter(([svc]) => !collegeRatesEdit.rates[svc]).map(([svc, label]) => (
+              <button key={svc} className="btn xs sec" onClick={() => addCollegeRateCategory(svc)}>+ {label}</button>
+            ))}
+          </div>
+        )}
         <button
           disabled={runBusy}
           className="btn"

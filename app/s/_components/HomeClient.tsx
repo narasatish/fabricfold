@@ -528,7 +528,7 @@ export default function StaffHomeClient({
           <div className="field">
             <label>Mobile number</label>
             <input className="input" type="tel" inputMode="numeric" placeholder="10-digit number" value={reg.phone}
-              onChange={(e) => setReg({ ...reg, phone: e.target.value.replace(/\D/g, "").slice(0, 10) })} />
+              onChange={(e) => setReg({ ...reg, phone: e.target.value.replace(/\D/g, "").slice(-10) })} />
           </div>
           <div className="field">
             <label>Campus</label>

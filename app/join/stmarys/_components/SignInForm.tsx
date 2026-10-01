@@ -205,7 +205,7 @@ export default function SignInForm({ collegeName }: SignInFormProps) {
                         placeholder="10-digit number"
                         autoFocus
                         value={phone}
-                        onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                        onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(-10))}
                         onKeyDown={(e) => { if (e.key === "Enter" && phone.length === 10 && !loading) handleContinue(); }}
                         inputMode="numeric"
                       />

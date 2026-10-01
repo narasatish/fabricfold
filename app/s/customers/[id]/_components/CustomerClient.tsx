@@ -663,8 +663,18 @@ Currently ${current}. Type the code printed on the bag they are being given.
           issue a brand-new student's bag without this split, since "Bag"
           was nested in the same gate. Only Order history genuinely needs
           `orders.length > 0` (nothing to list otherwise), so that's the
-          only one still gated on it, standalone, below. */}
-      {staffRole >= 2 && (
+          only one still gated on it, standalone, below.
+
+          Also hidden for BVRIT entirely (owner: "BVRIT is never sold
+          cycles — no subscription plans, no cycle packs — for students or
+          staff, full stop"). sellCyclePack's own server-side gate already
+          refuses this for BVRIT (requireCyclesEnabled), so nothing unsafe
+          could happen before this — but showing a form whose only possible
+          outcome is a refusal is its own kind of confusing, and BVRIT is
+          purely per-piece for now; cycle/subscription support for them is
+          a future, separate decision, not something this screen should be
+          offering today. */}
+      {staffRole >= 2 && student.college?.name.trim().toUpperCase() !== "BVRIT" && (
         <>
           <div className="sec-title mt20">Cycle pack (top-up)</div>
           <div className="card pad mt10">
@@ -1169,7 +1179,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
             inputMode="numeric"
             maxLength={10}
             value={newPhone}
-            onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+            onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, "").slice(-10))}
           />
         </div>
         <button className="btn" onClick={doPhoneChange} disabled={phoneLoading || newPhone.length !== 10}>

@@ -175,9 +175,15 @@ describe("the screens quote what the server bills", () => {
     expect(ui).toMatch(/const canUseCycle = !!order\.student\.subscription\?\.active && subCyclesLeft > 0 && cycleBased/);
     expect(ui).toMatch(/\{order\.student\.subscription\?\.active && cycleBased && \(/);
   });
-  it("the pack card exists for any student, Manager+, with the 6-months example", () => {
+  it("the pack card exists for any student EXCEPT BVRIT, Manager+, with the 6-months example", () => {
+    // BVRIT is never sold cycles at all (owner: "no subscription plans, no
+    // cycle packs — for students or staff, full stop") — the server already
+    // refused this (requireCyclesEnabled), but the card still appeared and
+    // just failed on submit, confusing for both a BVRIT student (per-piece
+    // only, for now — subscriptions for them are a future, separate plan)
+    // and the staff member filling in a form that could never succeed.
     const ui = read("app/s/customers/[id]/_components/CustomerClient.tsx");
-    expect(ui).toMatch(/\{staffRole >= 2 && \(/);
+    expect(ui).toMatch(/\{staffRole >= 2 && student\.college\?\.name\.trim\(\)\.toUpperCase\(\) !== "BVRIT" && \(/);
     // Copy changed (owner, Sep 2026: "faculty can buy any number of cycles
     // even 1, 2, 10, 20 at once") — the 6-months figure stays as an example,
     // but the card no longer implies only multiples of 4 are sellable; the

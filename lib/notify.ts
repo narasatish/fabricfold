@@ -281,8 +281,21 @@ export async function notifyOwnersWhatsApp(text: string) {
   try {
     const cfg = await db.appConfig.findUnique({ where: { id: "main" }, select: { settings: true } });
     const phones = (cfg?.settings as { alertPhones?: string[] } | null)?.alertPhones || [];
-    await Promise.allSettled(phones.filter(Boolean).map((p) => sendWhatsApp(p, text)));
+    const clean = phones.filter(Boolean);
+    /* Found 2026-10-01, same shape of bug as sendWhatsApp's own "not
+       configured" fix just above: zero phones read back from settings — a
+       save that silently didn't stick, a key-name mismatch, whatever the
+       cause — produced a completely silent no-op here too, console.error
+       only (invisible on Render), nothing in the App Errors panel a real
+       person can see. This is the first thing that would explain "I saved
+       the numbers, triggered an event, got nothing, App Errors shows
+       nothing" — logging it so that specific case stops being invisible. */
+    if (!clean.length) {
+      await logWaFailure("not sent — no alert phone numbers configured in Admin > Settings > WhatsApp alerts");
+      return;
+    }
+    await Promise.allSettled(clean.map((p) => sendWhatsApp(p, text)));
   } catch (e) {
-    console.error("notifyOwnersWhatsApp failed", e);
+    await logWaFailure(`notifyOwnersWhatsApp error: ${e instanceof Error ? e.message : String(e)}`);
   }
 }

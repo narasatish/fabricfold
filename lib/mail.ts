@@ -39,6 +39,17 @@ export async function sendMail(to: string, subject: string, text: string) {
     email being unconfigured must not silently skip WhatsApp, or vice versa.
     Never throws. */
 export async function notifyOwner(subject: string, text: string) {
+  /* TEMPORARY diagnostic (2026-10-01) — remove once the WhatsApp alert
+     investigation is closed. Every known silent-failure path inside the
+     WhatsApp send chain (missing credentials, zero alert numbers, an
+     unexpected exception) now logs to ErrorLog — and still nothing showed
+     up for a real, immediately-checked event. The remaining open question
+     is whether notifyOwner() is being reached AT ALL for that event. This
+     one unconditional line answers that directly: if this doesn't appear
+     in Admin > App Errors right after the next test, the bug is upstream
+     of here (the order/registration/payment action itself), not in the
+     WhatsApp code anyone has been looking at so far. */
+  await db.errorLog.create({ data: { kind: "server", message: `DEBUG: notifyOwner called — "${subject}"`.slice(0, 2000) } }).catch(() => {});
   const [emailResult] = await Promise.allSettled([
     (async () => {
       const to = await ownerEmail();

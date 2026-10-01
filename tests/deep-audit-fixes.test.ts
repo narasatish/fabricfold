@@ -679,7 +679,16 @@ describe("a WhatsApp send failure is persisted, not just console.error'd into th
   it("logWaFailure writes to ErrorLog and is called from every failure branch", () => {
     const src = read("lib/notify.ts");
     expect(src).toMatch(/async function logWaFailure\(message: string\) \{/);
-    expect(src).toMatch(/db\.errorLog\.create\(\{ data: \{ kind: "server", message: `WhatsApp: \$\{message\}`/);
+    // kind is "client", not "server" — found 2026-10-01: notifyOwner() calls
+    // this chain on every notification it sends, including the alerts
+    // cron-watchdog/error-digest themselves send about OTHER errors. A
+    // "server"-kind row from a persistent WhatsApp problem escapes
+    // watchdog's own seen-marking (it lands after the unseen snapshot) and
+    // gets rediscovered by the next 5-minute run, which alerts again (and
+    // fails to send over WhatsApp the same way) — an alert storm that never
+    // goes quiet. Confirmed by this exact test suite catching a real
+    // instance of it live.
+    expect(src).toMatch(/db\.errorLog\.create\(\{ data: \{ kind: "client", message: `WhatsApp: \$\{message\}`/);
     expect((src.match(/await logWaFailure\(/g) || []).length).toBeGreaterThanOrEqual(4);
   });
 });

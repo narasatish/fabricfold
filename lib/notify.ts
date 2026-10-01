@@ -12,10 +12,25 @@ const WA_API = "https://graph.facebook.com/v20.0";
    Vercel serverless — a sustained outage (rate-limit, expired token) meant
    students silently stopped getting "order ready" pings with no trace
    anywhere the owner would see, including the app's own error-digest cron.
-   Record it too, best-effort — logging a failure must never itself throw. */
+   Record it too, best-effort — logging a failure must never itself throw.
+
+   kind MUST be "client", not "server": notifyOwner() calls this chain on
+   EVERY notification, including the ones cron-watchdog and error-digest
+   send to alert the owner about OTHER errors. A "server"-kind row from a
+   persistent WhatsApp problem lands after watchdog's own `unseen` snapshot
+   is taken, so its seen-marking never catches it — the next 5-minute run
+   finds it, alerts again (itself failing to send over WhatsApp the same
+   way), and spawns another one: an alert storm that never goes quiet for
+   as long as WhatsApp stays broken. Confirmed live by a real test failure
+   (cron-watchdog-behavioral.test.ts) the moment a differently-caused but
+   identical row started appearing. The Admin App Errors panel has no kind
+   filter, so this still shows there; only the "server"-only watchdog
+   ignores it, same as any other client-side noise — error-digest (daily,
+   kind-agnostic) still reports it once a day for as long as it recurs,
+   which is the right amount of noise for a standing configuration gap. */
 async function logWaFailure(message: string) {
   try {
-    await db.errorLog.create({ data: { kind: "server", message: `WhatsApp: ${message}`.slice(0, 2000) } });
+    await db.errorLog.create({ data: { kind: "client", message: `WhatsApp: ${message}`.slice(0, 2000) } });
   } catch { /* logging is best-effort */ }
 }
 

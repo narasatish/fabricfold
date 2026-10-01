@@ -48,8 +48,20 @@ export async function notifyOwner(subject: string, text: string) {
      one unconditional line answers that directly: if this doesn't appear
      in Admin > App Errors right after the next test, the bug is upstream
      of here (the order/registration/payment action itself), not in the
-     WhatsApp code anyone has been looking at so far. */
-  await db.errorLog.create({ data: { kind: "server", message: `DEBUG: notifyOwner called — "${subject}"`.slice(0, 2000) } }).catch(() => {});
+     WhatsApp code anyone has been looking at so far.
+
+     kind MUST be "client", not "server": cron-watchdog's own alert-about-
+     errors call is itself a notifyOwner() call, so a "server"-kind row
+     here would self-trigger on every watchdog alert it ever sends — the
+     NEW row lands after the watchdog's own `unseen` snapshot was already
+     taken, so its own `updateMany` never marks it seen, and the NEXT
+     watchdog run (5 min later) finds it, alerts again, and spawns another
+     one — an alert storm that never goes quiet, confirmed by a real test
+     failure (cron-watchdog-behavioral.test.ts) the moment this shipped.
+     The Admin App Errors panel has no kind filter, so "client" still
+     shows there; only the "server"-only watchdog/digest crons ignore it,
+     exactly like any other client-side noise. */
+  await db.errorLog.create({ data: { kind: "client", message: `DEBUG: notifyOwner called — "${subject}"`.slice(0, 2000) } }).catch(() => {});
   const [emailResult] = await Promise.allSettled([
     (async () => {
       const to = await ownerEmail();

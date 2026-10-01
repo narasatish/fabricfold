@@ -117,7 +117,18 @@ export async function sendWhatsApp(phone: string, text: string) {
     await twilioWaSend(phone, text);
     return;
   }
-  if (!waCreds()) return;
+  if (!waCreds()) {
+    /* Found 2026-10-01: this used to just `return` here, completely silent —
+       a real support case where WHATSAPP_TOKEN/WHATSAPP_PHONE_ID were never
+       actually set (or were mistyped) on Render looked IDENTICAL to a
+       successful send from the owner's side: no error anywhere, including
+       the App Errors panel, which only shows an entry when one exists —
+       this path never created one. Logging it the same way a real send
+       failure already is means "nothing happened and nothing was logged"
+       stops being a possible, silent outcome. */
+    await logWaFailure("not sent — WHATSAPP_TOKEN/WHATSAPP_PHONE_ID (or Twilio equivalents) aren't configured");
+    return;
+  }
   const to = "91" + phone;
   const tpl = process.env.WHATSAPP_ORDER_TEMPLATE;
   if (tpl) {

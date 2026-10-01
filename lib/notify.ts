@@ -148,9 +148,17 @@ export async function sendWhatsApp(phone: string, text: string) {
   const tpl = process.env.WHATSAPP_ORDER_TEMPLATE;
   if (tpl) {
     const code = process.env.WHATSAPP_TEMPLATE_LANG || "en";
+    /* Named parameter, not positional (2026-10-01): Meta's current template
+       editor rejects a plain {{1}}-style body outright ("must be lowercase
+       characters, underscores and numbers with two sets of curly brackets,
+       e.g. {{customer_name}}") — only named variables are accepted now. The
+       actual approved template's body is "FabricFold account alert:
+       {{alert_message}} — view details in the app.", so the API call must
+       address that same name, not position 0, or Meta rejects every send
+       with a parameter-mismatch error even once the template is Active. */
     const sent = await waPost({
       messaging_product: "whatsapp", to, type: "template",
-      template: { name: tpl, language: { code }, components: [{ type: "body", parameters: [{ type: "text", text }] }] },
+      template: { name: tpl, language: { code }, components: [{ type: "body", parameters: [{ type: "text", parameter_name: "alert_message", text }] }] },
     });
     if (sent) return;
   }

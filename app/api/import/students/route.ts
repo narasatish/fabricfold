@@ -113,6 +113,10 @@ export async function POST(req: Request) {
   for (const p of plans) grossByTier.set(p.tier as Tier, Number(await planGross(p)));
   // Also accept the plan's listed price (before GST): a sheet can record either.
   const listedByTier = new Map(plans.map((p) => [p.tier as Tier, Number(p.price)]));
+  // St Mary's students pay the plan price PLUS a flat ₹500 that the college keeps
+  // (Bronze 4000 → student pays 4500). That ₹500 is what the student paid, so the
+  // sheet's amount is listed + ₹500 there. BVRIT has no such cut.
+  const collegeCut = /MARY/i.test(college.name) ? 500 : 0;
   const priceList = [...grossByTier.entries()].map(([t, g]) => `${t} ₹${g}`).join(", ");
   const LETTER: Record<Tier, string> = { bronze: "B", silver: "S", gold: "G" };
 
@@ -156,7 +160,7 @@ export async function POST(req: Request) {
     if (amount && amount > 0) {
       for (const [t, g] of grossByTier) {
         const listed = listedByTier.get(t) ?? g;
-        if (Math.abs(amount - g) <= 1 || Math.abs(amount - listed) <= 1) planTier = t;
+        if (Math.abs(amount - g) <= 1 || Math.abs(amount - listed) <= 1 || Math.abs(amount - (listed + collegeCut)) <= 1) planTier = t;
       }
     }
     if (!planTier && cols.plan) {

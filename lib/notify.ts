@@ -146,12 +146,6 @@ export async function sendWhatsApp(phone: string, text: string) {
   }
   const to = "91" + phone;
   const tpl = process.env.WHATSAPP_ORDER_TEMPLATE;
-  /* Free-form text first: Meta delivers it for free while the owner has messaged
-     the sender number in the last 24 hours. Only when that window is closed
-     (Meta rejects it) do we fall back to the approved template below. The failed
-     text attempt is quiet so it doesn't flood App Errors. */
-  const sentText = await waPost({ messaging_product: "whatsapp", to, type: "text", text: { body: text.slice(0, 4000) } }, { quiet: true });
-  if (sentText) return;
   if (tpl) {
     const code = process.env.WHATSAPP_TEMPLATE_LANG || "en";
     /* Named parameter, not positional (2026-10-01): Meta's current template
@@ -175,6 +169,10 @@ export async function sendWhatsApp(phone: string, text: string) {
     });
     if (sent) return;
   }
+  /* Free-form text fallback (template missing or rejected by Meta). It only
+     delivers inside the owner's 24-hour window, so it is a backstop, not the
+     primary path. The failed attempt is quiet so it doesn't flood App Errors. */
+  await waPost({ messaging_product: "whatsapp", to, type: "text", text: { body: text.slice(0, 4000) } }, { quiet: !!tpl });
 }
 
 /* Pull a stored object's bytes back out of Supabase storage. Photos are kept

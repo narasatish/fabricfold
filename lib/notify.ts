@@ -167,6 +167,7 @@ export async function sendWhatsApp(phone: string, text: string) {
       messaging_product: "whatsapp", to, type: "template",
       template: { name: tpl, language: { code }, components: [{ type: "body", parameters: [{ type: "text", parameter_name: "alert_message", text: cleanText }] }] },
     });
+    await logWaFailure(`trace: template ${tpl} ${sent ? "accepted" : "NOT accepted"} (${to})`);
     if (sent) return;
   }
   /* Free-form text fallback (template missing or rejected by Meta). It only
@@ -312,6 +313,8 @@ export async function touchStudentActivity(client: Prisma.TransactionClient | ty
    one bad number must never break the event that triggered it. */
 export async function notifyOwnersWhatsApp(text: string) {
   try {
+    // TEMPORARY trace (2026-10-04): entry into the send chain.
+    await logWaFailure(`trace: notifyOwnersWhatsApp entered — "${text.slice(0, 40).replace(/\s+/g, " ")}"`);
     const cfg = await db.appConfig.findUnique({ where: { id: "main" }, select: { settings: true } });
     const phones = (cfg?.settings as { alertPhones?: string[] } | null)?.alertPhones || [];
     const clean = phones.filter(Boolean);

@@ -36,6 +36,7 @@ const HEADERS = {
   phone: ["phone", "mobile", "mobile number", "phone number", "number"],
   code: ["code", "customer id", "customerid", "bag", "bag code", "id", "tag", "unique code"],
   amount: ["amount", "paid", "price", "fee", "plan price (₹)"],
+  plan: ["plan selected", "plan"],
 };
 
 function headerIndex(row: ExcelJS.Row) {
@@ -136,7 +137,14 @@ export async function POST(req: Request) {
     const row = ws.getRow(r);
     const name = cellText(row, cols.name).trim();
     const phone = cellText(row, cols.phone).replace(/\D/g, "").slice(-10);
-    const codeRaw = cellText(row, cols.code).trim().toUpperCase();
+    let codeRaw = cellText(row, cols.code).trim().toUpperCase().replace(/\s+/g, "");
+    /* A bare number ("1145") has no letter, so the bag letter is taken from the
+       sheet's Plan Selected column (SILVER→S, GOLD→G, BRONZE→B). Only when that
+       column is present and names a known plan; anything else is still reported. */
+    if (/^\d+$/.test(codeRaw) && cols.plan) {
+      const letter = { SILVER: "S", GOLD: "G", BRONZE: "B" }[cellText(row, cols.plan).trim().toUpperCase()];
+      if (letter) codeRaw = letter + codeRaw;
+    }
     const amount = cols.amount ? Number(cellText(row, cols.amount).replace(/[^\d.]/g, "")) : null;
     if (!name && !phone && !codeRaw) continue; // blank row
 

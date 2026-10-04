@@ -65,7 +65,7 @@ describe("the roster refreshes when it changes, not at 2:30am", () => {
   });
   it("registration, imports, staff and plan changes all trigger it", () => {
     const counts = {
-      "lib/actions/admin.ts": 6,        // register, staff add/update/active, student edit, phone
+      "lib/actions/admin.ts": 7,        // register, staff add/update/restore/active, student edit, phone
       "lib/actions/subscription.ts": 6, // assign, activate, change, cancel, cycle pack, cycle usage correction
       "lib/actions/bags.ts": 2,         // customer ID changed / released
       "app/api/import/students/route.ts": 1,

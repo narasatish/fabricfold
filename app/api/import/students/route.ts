@@ -111,6 +111,8 @@ export async function POST(req: Request) {
   // sheet decides the plan, so match against these.
   const grossByTier = new Map<Tier, number>();
   for (const p of plans) grossByTier.set(p.tier as Tier, Number(await planGross(p)));
+  // Also accept the plan's listed price (before GST): a sheet can record either.
+  const listedByTier = new Map(plans.map((p) => [p.tier as Tier, Number(p.price)]));
   const priceList = [...grossByTier.entries()].map(([t, g]) => `${t} ₹${g}`).join(", ");
   const LETTER: Record<Tier, string> = { bronze: "B", silver: "S", gold: "G" };
 
@@ -152,7 +154,10 @@ export async function POST(req: Request) {
        sheet's Plan Selected column is only a fallback when no amount is given. */
     let planTier: Tier | null = null;
     if (amount && amount > 0) {
-      for (const [t, g] of grossByTier) if (Math.abs(amount - g) <= 1) planTier = t;
+      for (const [t, g] of grossByTier) {
+        const listed = listedByTier.get(t) ?? g;
+        if (Math.abs(amount - g) <= 1 || Math.abs(amount - listed) <= 1) planTier = t;
+      }
     }
     if (!planTier && cols.plan) {
       const named = cellText(row, cols.plan).trim().toLowerCase();

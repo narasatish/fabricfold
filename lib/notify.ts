@@ -54,6 +54,10 @@ async function waPost(body: unknown) {
       await logWaFailure(`send failed (${res.status}) ${detail}`);
       return false;
     }
+    /* TEMPORARY trace (2026-10-04): record Meta's message id per accepted send,
+       so an alert can be matched to Meta's own records. Remove once fixed. */
+    const accepted = (await res.json().catch(() => null)) as { messages?: { id?: string }[] } | null;
+    await logWaFailure(`trace: Meta accepted ${(body as { type?: string }).type ?? "message"} → id ${accepted?.messages?.[0]?.id ?? "none"}`);
     return true;
   } catch (e) {
     console.error("WhatsApp send error", e);

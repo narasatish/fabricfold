@@ -156,9 +156,16 @@ export async function sendWhatsApp(phone: string, text: string) {
        {{alert_message}} — view details in the app.", so the API call must
        address that same name, not position 0, or Meta rejects every send
        with a parameter-mismatch error even once the template is Active. */
+    /* Meta error 132018 ("issue with the parameters in your template") —
+       template parameters may not contain newlines, tabs, or 4+ consecutive
+       spaces. notifyOwner() joins subject and body with "\n", so every
+       owner alert was being rejected. Collapse whitespace here, at the one
+       choke point every template send passes through, rather than trusting
+       each caller to remember it. */
+    const cleanText = text.replace(/\s+/g, " ").trim().slice(0, 1000);
     const sent = await waPost({
       messaging_product: "whatsapp", to, type: "template",
-      template: { name: tpl, language: { code }, components: [{ type: "body", parameters: [{ type: "text", parameter_name: "alert_message", text }] }] },
+      template: { name: tpl, language: { code }, components: [{ type: "body", parameters: [{ type: "text", parameter_name: "alert_message", text: cleanText }] }] },
     });
     if (sent) return;
   }

@@ -61,7 +61,6 @@ export async function notifyOwner(subject: string, text: string) {
      The Admin App Errors panel has no kind filter, so "client" still
      shows there; only the "server"-only watchdog/digest crons ignore it,
      exactly like any other client-side noise. */
-  await db.errorLog.create({ data: { kind: "client", message: `DEBUG: notifyOwner called — "${subject}"`.slice(0, 2000) } }).catch(() => {});
   const [emailResult] = await Promise.allSettled([
     (async () => {
       const to = await ownerEmail();

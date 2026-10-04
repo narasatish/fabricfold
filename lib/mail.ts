@@ -34,6 +34,12 @@ export async function sendMail(to: string, subject: string, text: string) {
   if (!res.ok) console.error("mail send failed", res.status, await res.text().catch(() => ""));
 }
 
+/* Owner WhatsApp alerts are limited to the few events owners asked for: new
+   registrations, complaints, orders placed, orders collected (delivered) and
+   walk-in orders. Everything else stays email-only. Daily collections are sent
+   by the daily report cron, not through here. */
+const WA_ALERT = /^(New student registered|New BVRIT registration|New complaint|New order #|Walk-in order #|Order collected #)/;
+
 /** Notify the owner about a business event — email AND instant WhatsApp
     (Admin -> Settings -> alert phone numbers), independently of each other:
     email being unconfigured must not silently skip WhatsApp, or vice versa.
@@ -67,7 +73,8 @@ export async function notifyOwner(subject: string, text: string) {
       if (!to) return; // owner email not configured yet
       await sendMail(to, `FabricFold · ${subject}`, text);
     })(),
-    notifyOwnersWhatsApp(`${subject}\n${text}`),
+    WA_ALERT.test(subject) ? notifyOwnersWhatsApp(`${subject}
+${text}`) : Promise.resolve(),
   ]);
   if (emailResult.status === "rejected") console.error("notifyOwner (email) failed", emailResult.reason);
 }

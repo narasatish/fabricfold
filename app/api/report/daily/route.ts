@@ -3,7 +3,8 @@
    vercel.json) or trigger manually from Reports.
    Delivery via lib/mail (Resend when configured; console otherwise). */
 import { db } from "@/lib/db";
-import { dailyEmailReport } from "@/lib/report";
+import { dailyEmailReport, dailyWhatsAppSummary } from "@/lib/report";
+import { notifyOwnersWhatsApp } from "@/lib/notify";
 import { requireStaff } from "@/lib/auth";
 import { sendMail } from "@/lib/mail";
 import { isCronRequest } from "@/lib/cron-auth";
@@ -44,6 +45,9 @@ async function run(guardRetries: boolean) {
   const text = await dailyEmailReport();
   const to = settings.reportEmail || "owner@fabricfold.in";
   await sendMail(to, "FabricFold — daily report", text);
+  // Owners get a one-line per-campus collection total on WhatsApp too. Cron
+  // only: a manual "Email today's report" click must not re-send it.
+  if (guardRetries) await notifyOwnersWhatsApp(await dailyWhatsAppSummary());
   await db.appConfig.update({
     where: { id: "main" },
     data: { settings: JSON.parse(JSON.stringify({ ...settings, lastSent: new Date().toISOString() })) },

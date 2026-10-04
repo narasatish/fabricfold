@@ -236,3 +236,17 @@ export async function dailyEmailReport() {
     ...perCollege,
   ].join("\n");
 }
+
+/* One-line WhatsApp summary of today's collections, per campus. Built from the
+   same computeReport() figures as the email, so the two can never disagree. */
+export async function dailyWhatsAppSummary() {
+  const f = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
+  const colleges = await db.college.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } });
+  const parts: string[] = [];
+  for (const c of colleges) {
+    const t = await computeReport(parsePeriod({ p: "day" }), c.id);
+    parts.push(`${c.name} collected ${f(t.total)} (cash ${f(t.cash)}, UPI ${f(t.upi)})`);
+  }
+  const date = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" });
+  return `Daily collections ${date}: ${parts.join(" | ")}`;
+}

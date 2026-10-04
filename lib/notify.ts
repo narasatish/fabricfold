@@ -54,10 +54,6 @@ async function waPost(body: unknown, opts: { quiet?: boolean } = {}) {
       if (!opts.quiet) await logWaFailure(`send failed (${res.status}) ${detail}`);
       return false;
     }
-    /* TEMPORARY trace (2026-10-04): record Meta's message id per accepted send,
-       so an alert can be matched to Meta's own records. Remove once fixed. */
-    const accepted = (await res.json().catch(() => null)) as { messages?: { id?: string }[] } | null;
-    await logWaFailure(`trace: Meta accepted ${(body as { type?: string }).type ?? "message"} → id ${accepted?.messages?.[0]?.id ?? "none"}`);
     return true;
   } catch (e) {
     console.error("WhatsApp send error", e);
@@ -333,13 +329,7 @@ export async function notifyOwnersWhatsApp(text: string) {
       await logWaFailure("not sent — no alert phone numbers configured in Admin > Settings > WhatsApp alerts");
       return;
     }
-    /* TEMPORARY trace (2026-10-04): an owner alert ran, but Meta shows 0 sent and
-       no error row appears. These two rows show whether the send is reached and
-       how it ends, so the next test says where it stops. Remove once fixed. */
-    await logWaFailure(`trace: alert started to ${clean.map((p) => p.slice(-4)).join(", ")} — "${text.slice(0, 50).replace(/\s+/g, " ")}"`);
-    const results = await Promise.allSettled(clean.map((p) => sendWhatsApp(p, text)));
-    const failed = results.filter((r) => r.status === "rejected").length;
-    await logWaFailure(`trace: alert finished — ${results.length - failed} ok, ${failed} threw`);
+    await Promise.allSettled(clean.map((p) => sendWhatsApp(p, text)));
   } catch (e) {
     await logWaFailure(`notifyOwnersWhatsApp error: ${e instanceof Error ? e.message : String(e)}`);
   }

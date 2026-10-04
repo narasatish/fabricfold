@@ -529,6 +529,24 @@ export async function saveStaff(input: { id?: string; name: string; phone: strin
     await audit("Staff updated", `${input.name} (role ${input.role})${granted ? ` · tools ${granted}` : ""}`, st.id);
   rosterSoon();
   } else {
+    /* Removed staff are deactivated, not deleted (see setStaffActive), so their
+       phone still holds the unique slot. Adding that number again should bring
+       the same login back with the new details, not fail as "already registered". */
+    const removed = await db.staff.findUnique({ where: { phone }, select: { id: true, active: true } });
+    if (removed && removed.active) return { ok: false as const, error: "This number is already registered to another staff member" };
+    if (removed) {
+      await db.staff.update({
+        where: { id: removed.id },
+        data: {
+          name, role: input.role, collegeId: input.collegeId, active: true,
+          ...(perms !== undefined ? { perms } : {}),
+          sessionEpoch: { increment: 1 },
+        },
+      });
+      await audit("Staff restored", `${name} (role ${input.role})`, st.id);
+      rosterSoon();
+      return { ok: true as const };
+    }
     try {
       await db.staff.create({ data: { name, phone, role: input.role, collegeId: input.collegeId } });
     } catch (e) {

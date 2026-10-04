@@ -107,6 +107,12 @@ export async function POST(req: Request) {
   // Plans by tier for this campus, resolved once.
   const plans = await db.plan.findMany({ where: { collegeId, active: true, tier: { in: ["bronze", "silver", "gold"] } } });
   const planByTier = new Map(plans.map((p) => [p.tier as Tier, p]));
+  // Plan price per tier (what a student pays for it). The paid amount on the
+  // sheet decides the plan, so match against these.
+  const grossByTier = new Map<Tier, number>();
+  for (const p of plans) grossByTier.set(p.tier as Tier, Number(await planGross(p)));
+  const priceList = [...grossByTier.entries()].map(([t, g]) => `${t} ₹${g}`).join(", ");
+  const LETTER: Record<Tier, string> = { bronze: "B", silver: "S", gold: "G" };
 
   const added: string[] = [];
   const skipped: string[] = [];
@@ -137,15 +143,35 @@ export async function POST(req: Request) {
     const row = ws.getRow(r);
     const name = cellText(row, cols.name).trim();
     const phone = cellText(row, cols.phone).replace(/\D/g, "").slice(-10);
-    let codeRaw = cellText(row, cols.code).trim().toUpperCase().replace(/\s+/g, "");
-    /* A bare number ("1145") has no letter, so the bag letter is taken from the
-       sheet's Plan Selected column (SILVER→S, GOLD→G, BRONZE→B). Only when that
-       column is present and names a known plan; anything else is still reported. */
-    if (/^\d+$/.test(codeRaw) && cols.plan) {
-      const letter = { SILVER: "S", GOLD: "G", BRONZE: "B" }[cellText(row, cols.plan).trim().toUpperCase()];
-      if (letter) codeRaw = letter + codeRaw;
-    }
+    const codeText = cellText(row, cols.code).trim().toUpperCase().replace(/\s+/g, "");
+    const numPart = codeText.replace(/^[A-Z]+/, "");
     const amount = cols.amount ? Number(cellText(row, cols.amount).replace(/[^\d.]/g, "")) : null;
+    /* The PLAN comes from what the student actually paid, matched to the plan
+       prices above. The bag LETTER then follows from that plan, and the number
+       is kept exactly as the sheet gives it (it is printed on the bag). The
+       sheet's Plan Selected column is only a fallback when no amount is given. */
+    let planTier: Tier | null = null;
+    if (amount && amount > 0) {
+      for (const [t, g] of grossByTier) if (Math.abs(amount - g) <= 1) planTier = t;
+    }
+    if (!planTier && cols.plan) {
+      const named = cellText(row, cols.plan).trim().toLowerCase();
+      if (named === "bronze" || named === "silver" || named === "gold") {
+        planTier = named;
+        if (amount) warnings.push(`row ${r}: "${cellText(row, cols.name).trim()}" paid ₹${amount}, which matches no plan price — used Plan Selected (${named})`);
+      }
+    }
+    const isFacultyCode = codeText.startsWith("F");
+    let codeRaw = codeText;
+    if (!isFacultyCode) {
+      if (!planTier) {
+        if (!(cellText(row, cols.name).trim() === "" && !codeText)) {
+          problems.push(`row ${r}: "${cellText(row, cols.name).trim()}" — paid ₹${amount || 0} matches no plan (${priceList}); fix the amount or plan`);
+        }
+        continue;
+      }
+      codeRaw = LETTER[planTier] + numPart;
+    }
     if (!name && !phone && !codeRaw) continue; // blank row
 
     if (name.length < 2) { problems.push(`row ${r}: name missing`); continue; }
@@ -170,12 +196,6 @@ export async function POST(req: Request) {
       }
     }
     const planBuckets = plan ? ((plan.buckets as unknown as PlanBucket[] | null) ?? []) : [];
-
-    // Amount is a CROSS-CHECK, never the source of truth — the letter is
-    // printed on a physical bag; a discount changes the amount, not the tier.
-    if (plan && amount && Math.abs(amount - Number(await planGross(plan))) > 1) {
-      warnings.push(`row ${r}: "${name}" paid ₹${amount}, ${tier} plan is ₹${await planGross(plan)} — imported as ${tier} (the bag letter wins)`);
-    }
 
     const existsPhone = await db.student.findUnique({ where: { phone } });
     if (existsPhone) { skipped.push(`row ${r}: ${phone} already registered (${existsPhone.name})`); continue; }

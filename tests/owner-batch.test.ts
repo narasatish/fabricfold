@@ -141,8 +141,9 @@ describe("the import route", () => {
   it("honours the printed customer ID exactly", () => {
     expect(src).toMatch(/code: codeRaw/);
   });
-  it("the bag letter beats the amount when they disagree", () => {
-    expect(src).toMatch(/the bag letter wins/);
+  it("the plan comes from the amount paid, and the bag letter follows the plan", () => {
+    expect(src).toMatch(/matches no plan/);
+    expect(src).toMatch(/LETTER\[planTier\] \+ numPart/);
   });
   it("skips an existing mobile rather than overwriting", () => {
     expect(src).toMatch(/already registered/);

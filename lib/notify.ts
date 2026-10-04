@@ -39,7 +39,7 @@ function waCreds() {
   return token && phoneId ? { token, phoneId } : null;
 }
 
-async function waPost(body: unknown) {
+async function waPost(body: unknown, opts: { quiet?: boolean } = {}) {
   const c = waCreds();
   if (!c) return false;
   try {
@@ -51,7 +51,7 @@ async function waPost(body: unknown) {
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
       console.error("WhatsApp send failed", res.status, detail);
-      await logWaFailure(`send failed (${res.status}) ${detail}`);
+      if (!opts.quiet) await logWaFailure(`send failed (${res.status}) ${detail}`);
       return false;
     }
     /* TEMPORARY trace (2026-10-04): record Meta's message id per accepted send,
@@ -150,6 +150,12 @@ export async function sendWhatsApp(phone: string, text: string) {
   }
   const to = "91" + phone;
   const tpl = process.env.WHATSAPP_ORDER_TEMPLATE;
+  /* Free-form text first: Meta delivers it for free while the owner has messaged
+     the sender number in the last 24 hours. Only when that window is closed
+     (Meta rejects it) do we fall back to the approved template below. The failed
+     text attempt is quiet so it doesn't flood App Errors. */
+  const sentText = await waPost({ messaging_product: "whatsapp", to, type: "text", text: { body: text.slice(0, 4000) } }, { quiet: true });
+  if (sentText) return;
   if (tpl) {
     const code = process.env.WHATSAPP_TEMPLATE_LANG || "en";
     /* Named parameter, not positional (2026-10-01): Meta's current template
@@ -173,7 +179,6 @@ export async function sendWhatsApp(phone: string, text: string) {
     });
     if (sent) return;
   }
-  await waPost({ messaging_product: "whatsapp", to, type: "text", text: { body: text } });
 }
 
 /* Pull a stored object's bytes back out of Supabase storage. Photos are kept

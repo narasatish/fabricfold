@@ -50,6 +50,7 @@ export default function StaffHomeClient({
   metrics,
   attendance,
   openComplaints,
+  unpaid,
 }: {
   staff: { name: string; role: number };
   orders: Order[];
@@ -60,6 +61,7 @@ export default function StaffHomeClient({
   metrics: Record<string, Metrics>;
   attendance: { clockedIn: boolean; clockedOut: boolean; since: number | null };
   openComplaints: OpenComplaint[];
+  unpaid: { id: string; name: string; total: number; collegeId: string | null; since: number }[];
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -99,6 +101,9 @@ export default function StaffHomeClient({
   const overdueOrders = actionable.filter(ov);
   /* Ready 5+ days: shelf space and a student who has forgotten. Aged from the
      ready EVENT, not the order date. */
+  // Collected but not paid, for the campus on screen, oldest first.
+  const unpaidShown = (campus === "all" ? unpaid : unpaid.filter((u) => u.collegeId === campus));
+  const unpaidTotal = unpaidShown.reduce((n, u) => n + u.total, 0);
   const staleReady = actionable.filter((o) => o.status === "ready" && o.readyAt !== null && Date.now() - o.readyAt > 5 * 86_400_000);
 
   // Filter by filter type
@@ -109,7 +114,11 @@ export default function StaffHomeClient({
         ? overdueOrders
         : filter === "received"
           ? actionable.filter((o) => o.status === "received" || o.status === "draft")
-          : actionable.filter((o) => o.status === filter);
+          : filter === "ready"
+            // Oldest ready first: the bag waiting longest is the one to clear.
+            // Rows with no recorded ready time go last.
+            ? actionable.filter((o) => o.status === "ready").sort((a, b) => (a.readyAt ?? Infinity) - (b.readyAt ?? Infinity))
+            : actionable.filter((o) => o.status === filter);
 
   /* Students come from the server; orders are already on this page, so they
      stay client-side. Debounced so a four-letter name is one query, not four,
@@ -456,6 +465,19 @@ export default function StaffHomeClient({
 
           {/* Uncollected: not another filter tab — a banner, because it is a
               task ("call these students / clear the shelf"), not a view. */}
+          {unpaidShown.length > 0 && !batchMode && (
+            <div className="card pad mt10" style={{ borderColor: "var(--red)" }}>
+              <div className="h-sm">{unpaidShown.length} collected order{unpaidShown.length === 1 ? "" : "s"} unpaid · ₹{unpaidTotal.toLocaleString("en-IN")}</div>
+              {unpaidShown.slice(0, 8).map((u) => (
+                <button key={u.id} className="between mt6" style={{ width: "100%", textAlign: "left", fontSize: 13 }}
+                  onClick={() => router.push(`/s/orders/${u.id}`)}>
+                  <span># {u.id.slice(-4)} · {u.name} · ₹{u.total}</span>
+                  <span className="muted">{Math.floor((Date.now() - u.since) / 86_400_000)} days</span>
+                </button>
+              ))}
+              {unpaidShown.length > 8 && <div className="muted mt6" style={{ fontSize: 12 }}>…and {unpaidShown.length - 8} more — open each order to take payment</div>}
+            </div>
+          )}
           {staleReady.length > 0 && !batchMode && (
             <div className="card pad mt10" style={{ borderColor: "var(--amber)", background: "var(--amber-soft, #fdf6e7)" }}>
               <div className="h-sm">{staleReady.length} bag{staleReady.length === 1 ? "" : "s"} waiting 5+ days</div>

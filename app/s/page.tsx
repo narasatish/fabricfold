@@ -35,6 +35,26 @@ export default async function StaffHomePage() {
     orderBy: { createdAt: "desc" },
   });
 
+  // Collected but still unpaid: money the counter has not yet taken. Oldest
+  // first, so the longest-outstanding amount is the first thing seen.
+  const unpaidRows = await db.order.findMany({
+    where: { status: "collected", paid: false, ...scope },
+    include: {
+      student: { select: { name: true, collegeId: true } },
+      timeline: { where: { status: "collected" }, orderBy: { at: "desc" }, take: 1 },
+    },
+    take: 200,
+  });
+  const unpaid = unpaidRows
+    .map((o) => ({
+      id: o.id,
+      name: o.student.name,
+      total: N(o.total),
+      collegeId: o.student.collegeId,
+      since: o.timeline[0]?.at.getTime() ?? o.createdAt.getTime(),
+    }))
+    .sort((a, b) => a.since - b.since);
+
   // Pending subscription requests (active=false) + their cash OTP codes
   const pending = await db.subscription.findMany({
     where: { active: false, ...(staff.collegeId ? { student: { collegeId: staff.collegeId } } : {}) },
@@ -167,6 +187,7 @@ export default async function StaffHomePage() {
         metrics={metrics}
         attendance={attendance}
         openComplaints={openComplaints}
+        unpaid={unpaid}
       />
     </div>
   );

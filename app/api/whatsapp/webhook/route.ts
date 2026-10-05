@@ -84,6 +84,13 @@ export async function POST(req: Request) {
 
       /* Meta posts delivery receipts (sent/delivered/read) to this same URL.
          They are not messages and must not be treated as one. */
+      /* TEMPORARY (2026-10-05): log Meta's delivery result for owner alerts, so a
+         message accepted by Meta but not delivered shows its reason in App Errors. */
+      for (const st of (value?.statuses ?? []) as { status?: string; recipient_id?: string; errors?: { code?: number; title?: string; message?: string }[] }[]) {
+        const err = st.errors?.[0];
+        await db.errorLog.create({ data: { kind: "client", message: `WhatsApp: delivery ${st.status ?? "?"} to ${st.recipient_id ?? "?"}${err ? ` — ${err.code} ${err.title ?? ""} ${err.message ?? ""}` : ""}`.slice(0, 500) } }).catch(() => {});
+      }
+
       if (!value?.messages?.length) continue;
 
       for (const msg of value.messages) {

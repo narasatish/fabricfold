@@ -20,6 +20,7 @@ export default async function StaffComplaintsPage() {
     where: staff.collegeId ? { collegeId: staff.collegeId } : undefined,
     select: {
       id: true, studentId: true, orderId: true, redoOrderId: true, text: true, status: true, at: true,
+      assignedStaffId: true, respondBy: true,
       student: { select: { id: true, name: true, college: { select: { name: true } } } },
       messages: { orderBy: { at: "asc" }, select: { id: true, from: true, text: true, at: true } },
     },
@@ -27,7 +28,14 @@ export default async function StaffComplaintsPage() {
     take: 300,
   });
 
+  const ownerIds = [...new Set(complaints.map((c) => c.assignedStaffId).filter((x): x is string => !!x))];
+  const owners = ownerIds.length ? await db.staff.findMany({ where: { id: { in: ownerIds } }, select: { id: true, name: true } }) : [];
+  const ownerName = new Map(owners.map((o) => [o.id, o.name]));
+
   const plain = complaints.map((c) => ({
+    owner: c.assignedStaffId ? (ownerName.get(c.assignedStaffId) ?? "Staff") : null,
+    assignedToMe: c.assignedStaffId === staff.id,
+    respondBy: c.respondBy ? c.respondBy.getTime() : null,
     id: c.id,
     studentId: c.studentId,
     orderId: c.orderId,

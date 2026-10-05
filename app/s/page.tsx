@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import StaffHomeClient from "./_components/HomeClient";
 import SignOut from "./_components/SignOut";
+import { computeReport, parsePeriod } from "@/lib/report";
+import { istDateStr } from "@/lib/slots";
 
 export default async function StaffHomePage() {
   const s = await getSession();
@@ -174,6 +176,26 @@ export default async function StaffHomePage() {
     student: { id: o.student.id, name: o.student.name, phone: o.student.phone },
   }));
 
+  // Cash count (admin+ only): today's expected drawer per campus, and whether
+  // the count has already been recorded for today.
+  const canCount = staff.role >= 3;
+  const cashDay = istDateStr(Date.now());
+  const cashRows = canCount
+    ? await db.dayCashCount.findMany({ where: { day: cashDay, collegeId: { in: colleges.map((c) => c.id) } } })
+    : [];
+  const cash: Record<string, { expected: number; counted: number | null; diff: number | null }> = {};
+  if (canCount) {
+    for (const c of colleges) {
+      const r = await computeReport(parsePeriod({ p: "day" }), c.id);
+      const row = cashRows.find((x) => x.collegeId === c.id);
+      cash[c.id] = {
+        expected: Math.round(Number(r.expectedDrawer)),
+        counted: row ? Math.round(Number(row.countedCash)) : null,
+        diff: row ? Math.round(Number(row.diff)) : null,
+      };
+    }
+  }
+
   return (
     <div className="screen">
       <TopBar title="Counter" sub={`Welcome, ${staff.name.split(" ")[0]}`} right={<SignOut />} />
@@ -188,6 +210,8 @@ export default async function StaffHomePage() {
         attendance={attendance}
         openComplaints={openComplaints}
         unpaid={unpaid}
+        cash={cash}
+        canCount={canCount}
       />
     </div>
   );

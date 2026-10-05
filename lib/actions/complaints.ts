@@ -39,6 +39,7 @@ export async function submitComplaint(text: string, orderId?: string | null, pho
   const c = await db.complaint.create({
     data: {
       studentId: stu.id, collegeId: stu.collegeId, text: t, orderId: orderId || null,
+      respondBy: new Date(Date.now() + 24 * 3_600_000),
       messages: { create: { from: "student", by: stu.id, text: t, photos: pics } },
     },
   });
@@ -107,6 +108,7 @@ export async function reportOrderDamage(orderId: string, input: { comment: strin
   const c = await db.complaint.create({
     data: {
       studentId: o.studentId, collegeId: o.collegeId, orderId: o.id, text: comment,
+      respondBy: new Date(Date.now() + 24 * 3_600_000),
       messages: { create: { from: "staff", by: st.id, text: comment, photos: pics } },
     },
   });
@@ -205,5 +207,18 @@ export async function resolveComplaint(complaintId: string, resolution: string):
   await db.complaintMessage.create({ data: { complaintId, from: "staff", by: st.id, text: "Resolved: " + res } });
   await pushNotif(c.studentId, "Your complaint was resolved: " + res, "status");
   publish([`student:${c.studentId}`, `orders:${c.collegeId}`], { type: "complaint.message", payload: { complaintId } });
+  return { ok: true as const };
+}
+
+/* Take ownership of a complaint: the staff member who will answer it. Campus-
+   scoped like every other staff action. Anyone at Staff level or above can
+   take an unowned complaint or move it to themselves. */
+export async function assignComplaintToMe(complaintId: string) {
+  const st = await requireStaff(2);
+  const c = await db.complaint.findUnique({ where: { id: complaintId }, select: { id: true, collegeId: true, status: true } });
+  if (!c) return { ok: false as const, error: "Complaint not found" };
+  assertSameCollege(st, c.collegeId);
+  if (c.status !== "open") return { ok: false as const, error: "This complaint is already resolved" };
+  await db.complaint.update({ where: { id: c.id }, data: { assignedStaffId: st.id } });
   return { ok: true as const };
 }

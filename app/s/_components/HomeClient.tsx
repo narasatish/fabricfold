@@ -11,6 +11,7 @@ import { activateSubscription } from "@/lib/actions/subscription";
 import { registerStudent } from "@/lib/actions/admin";
 import { searchStudents } from "@/lib/actions/students";
 import { clockIn, clockOut } from "@/lib/actions/ops";
+import { recordCashCount } from "@/lib/actions/cash";
 import { advanceStatusBatch } from "@/lib/actions/orders";
 
 type Order = {
@@ -51,6 +52,8 @@ export default function StaffHomeClient({
   attendance,
   openComplaints,
   unpaid,
+  cash,
+  canCount,
 }: {
   staff: { name: string; role: number };
   orders: Order[];
@@ -62,6 +65,8 @@ export default function StaffHomeClient({
   attendance: { clockedIn: boolean; clockedOut: boolean; since: number | null };
   openComplaints: OpenComplaint[];
   unpaid: { id: string; name: string; total: number; collegeId: string | null; since: number }[];
+  cash: Record<string, { expected: number; counted: number | null; diff: number | null }>;
+  canCount: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -465,6 +470,9 @@ export default function StaffHomeClient({
 
           {/* Uncollected: not another filter tab — a banner, because it is a
               task ("call these students / clear the shelf"), not a view. */}
+          {canCount && campus !== "all" && cash[campus] && (
+            <CashCountCard campusId={campus} state={cash[campus]} onSaved={() => router.refresh()} />
+          )}
           {unpaidShown.length > 0 && !batchMode && (
             <div className="card pad mt10" style={{ borderColor: "var(--red)" }}>
               <div className="h-sm">{unpaidShown.length} collected order{unpaidShown.length === 1 ? "" : "s"} unpaid · ₹{unpaidTotal.toLocaleString("en-IN")}</div>
@@ -632,6 +640,43 @@ export default function StaffHomeClient({
           </button>
         </div>
       </Sheet>
+    </div>
+  );
+}
+
+/* Today's drawer count for one campus: shows what the app expects, takes what
+   was physically counted, and shows the difference. Re-counting replaces it. */
+function CashCountCard({ campusId, state, onSaved }: {
+  campusId: string;
+  state: { expected: number; counted: number | null; diff: number | null };
+  onSaved: () => void;
+}) {
+  const toast = useToast();
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const money = (n: number) => "₹" + n.toLocaleString("en-IN");
+  return (
+    <div className="card pad mt10">
+      <div className="h-sm">Drawer count today</div>
+      <div className="muted mt6" style={{ fontSize: 13 }}>
+        Expected in drawer: <b>{money(state.expected)}</b>
+        {state.counted !== null && (
+          <> · Counted: <b>{money(state.counted)}</b> · Difference: <b style={{ color: state.diff === 0 ? "var(--green, inherit)" : "var(--red)" }}>{state.diff && state.diff > 0 ? "+" : ""}{money(state.diff ?? 0)}</b></>
+        )}
+      </div>
+      <div className="row gap8 mt8">
+        <input className="input" inputMode="numeric" placeholder="Amount counted (₹)" value={value}
+          onChange={(e) => setValue(e.target.value.replace(/[^\d]/g, ""))} style={{ flex: 1 }} />
+        <button className="btn" disabled={busy || !value} onClick={async () => {
+          setBusy(true);
+          const r = await recordCashCount(campusId, Number(value));
+          setBusy(false);
+          if (!r.ok) return toast(r.error, true);
+          toast(r.diff === 0 ? "Drawer matches" : `Saved — difference ${money(r.diff)}`);
+          setValue("");
+          onSaved();
+        }}>{state.counted === null ? "Save count" : "Update count"}</button>
+      </div>
     </div>
   );
 }

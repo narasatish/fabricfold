@@ -527,7 +527,27 @@ model Complaint {
   // Remedies granted for this complaint, so a free re-wash or a payout is
   // always traceable back to the grievance that caused it (and reportable).
   redoOrderId String? // the free re-service order raised for this complaint
+  // Who owns it, and when a first response is due (24h from raising). Null on old rows.
+  assignedStaffId String?
+  respondBy       DateTime?
   messages    ComplaintMessage[]
+}
+
+/* The owner's end-of-day cash count, per campus. `expectedCash` is what the
+   app says should be in the drawer, `countedCash` is what was physically
+   counted, and `diff` is counted minus expected. One count per campus per day. */
+model DayCashCount {
+  id           String   @id @default(cuid())
+  collegeId    String
+  day          String   // IST calendar day, YYYY-MM-DD
+  expectedCash Decimal  @db.Decimal(10, 2)
+  countedCash  Decimal  @db.Decimal(10, 2)
+  diff         Decimal  @db.Decimal(10, 2)
+  staffId      String
+  note         String?
+  createdAt    DateTime @default(now())
+
+  @@unique([collegeId, day])
 }
 
 model ComplaintMessage {

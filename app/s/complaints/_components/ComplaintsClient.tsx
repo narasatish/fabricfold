@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { fmt, initials } from "@/lib/format";
 import { Seg, Sheet, useToast } from "@/components/chrome";
-import { sendComplaintMessage, resolveComplaint, grantFreeReservice } from "@/lib/actions/complaints";
+import { sendComplaintMessage, resolveComplaint, grantFreeReservice, assignComplaintToMe } from "@/lib/actions/complaints";
 import { submitCompensation } from "@/lib/actions/credits";
 
 type Complaint = {
@@ -16,6 +16,9 @@ type Complaint = {
   text: string;
   status: string;
   at: number;
+  owner: string | null;
+  assignedToMe: boolean;
+  respondBy: number | null;
   student: { id: string; name: string; college: string };
   messages: Array<{ id: string; from: string; text: string; at: number }>;
 };
@@ -129,8 +132,24 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
           <div key={c.id} className="card pad mt10">
             <div className="between">
               <span className={`pill ${c.status === "open" ? "amber" : ""}`}>{c.status === "open" ? "Open" : "Resolved"}</span>
+              {c.status === "open" && c.respondBy !== null && (
+                c.respondBy < Date.now()
+                  ? <span className="pill" style={{ background: "var(--red-soft, #fbe9e7)", color: "var(--red)" }}>Overdue</span>
+                  : <span className="muted" style={{ fontSize: "12px" }}>Reply by {new Date(c.respondBy).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })}</span>
+              )}
               <span className="muted" style={{ fontSize: "12px" }}><TimeAgo at={c.at} /></span>
             </div>
+            {c.status === "open" && (
+              <div className="between mt6" style={{ fontSize: "12.5px" }}>
+                <span className="muted">{c.owner ? `Owner: ${c.assignedToMe ? "you" : c.owner}` : "Not taken yet"}</span>
+                {!c.assignedToMe && (
+                  <button className="btn ghost" style={{ padding: "4px 10px", fontSize: 12 }} onClick={async () => {
+                    const r = await assignComplaintToMe(c.id);
+                    if (!r.ok) toast(r.error || "Couldn't take it", true); else { toast("It's yours now"); router.refresh(); }
+                  }}>{c.owner ? "Take over" : "Take it"}</button>
+                )}
+              </div>
+            )}
             <div className="row gap8 mt8" style={{ alignItems: "center" }}>
               <div className="avatar" style={{ width: 34, height: 34, fontSize: 13 }}>{initials(c.student.name)}</div>
               <div>

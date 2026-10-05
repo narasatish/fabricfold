@@ -262,13 +262,19 @@ export async function sendWhatsAppPhotos(phone: string, keys: string[], caption?
     abandoned when Vercel freezes the instance after the response — the exact
     failure that once left Sheet rows unsent for hours. after() keeps the
     function alive until the sends finish, without delaying the response. */
+const STUDENT_WA_KINDS = new Set(["placed", "ready", "collected"]);
+
 export async function pushNotif(studentId: string, text: string, kind = "status") {
   const n = await db.notification.create({ data: { studentId, text, kind } });
   publish([`student:${studentId}`], { type: "notification", payload: { id: n.id, text, kind } });
   const deliver = async () => {
     await sendPushTo("student", studentId, { title: "FabricFold", body: text }).catch(() => {});
-    const s = await db.student.findUnique({ where: { id: studentId }, select: { phone: true } }).catch(() => null);
-    if (s) await sendWhatsApp(s.phone, text).catch(() => {});
+    /* Students get WhatsApp for three events only: order placed, ready for
+       collection, and collected. Everything else stays in the app. */
+    if (STUDENT_WA_KINDS.has(kind)) {
+      const s = await db.student.findUnique({ where: { id: studentId }, select: { phone: true } }).catch(() => null);
+      if (s) await sendWhatsApp(s.phone, text).catch(() => {});
+    }
   };
   try {
     const { after } = await import("next/server");

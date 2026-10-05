@@ -309,7 +309,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
     return { ok: false as const, error: !hasCode ? (e as Error).message : "Order acceptance failed — please try again" };
   }
 
-  await pushNotif(result.studentId, `Order received — ${result.actualPieces} pieces logged for ${cfg.rates[result.service].label}.`, "status");
+  await pushNotif(result.studentId, `Order received — ${result.actualPieces} pieces logged for ${cfg.rates[result.service].label}.`, "placed");
   if (result.noGst) await audit("No-GST billing", `#${result.id.slice(-4)} ₹${Number(result.total)}`, st.id);
   /* A waiver only matters when there was something to waive. Recording who
      skipped the charge is what lets "why was 8 kg free?" be answered later. */
@@ -461,7 +461,7 @@ export async function walkInOrder(
     return { ok: false as const, error: (e as Error).message };
   }
 
-  await pushNotif(stu.id, `Walk-in order received — ${result.actualPieces} pieces logged for ${cfg.rates[result.service].label}.`, "status");
+  await pushNotif(stu.id, `Walk-in order received — ${result.actualPieces} pieces logged for ${cfg.rates[result.service].label}.`, "placed");
   await audit("Walk-in order", `#${result.id.slice(-4)} · ${stu.name} · ₹${Number(result.total)}${result.usedCycle ? " (cycle)" : ""}${result.noGst ? " (no GST)" : ""}`, st.id);
   if (result.noGst) await audit("No-GST billing", `#${result.id.slice(-4)} ₹${Number(result.total)}`, st.id);
   if (result.usedCycle && Number(result.surcharge) > 0) await audit("Urgent cycle charge", `#${result.id.slice(-4)} · ${stu.name} · ₹${Number(result.surcharge)} cash (cycle order)`, st.id);
@@ -675,6 +675,7 @@ export async function collectOrder(orderId: string, code: string) {
     `Order collected #${o.id.slice(-4)}`,
     `${collectedStuName} (${college?.name ?? "—"}, ID ${collectedDisplayId}) picked up their order — ₹${Number(o.total)}, ${o.paid ? "paid" : "UNPAID"}. Handed over by ${st.name}.`,
   );
+  await pushNotif(o.studentId, `Order #${o.id.slice(-4)} collected. Thank you for using FabricFold!`, "collected");
   return { ok: true as const };
 }
 

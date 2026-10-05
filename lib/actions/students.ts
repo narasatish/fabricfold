@@ -151,23 +151,8 @@ export async function broadcastNotice(scope: string, text: string) {
     ));
   }
 
-  /* Every other notification in the app also reaches WhatsApp (pushNotif in
-     lib/notify.ts) — a broadcast only did in-app + web push, so a staff
-     notice to the whole campus silently missed the one channel students
-     actually check (owner, Sep 22: "make sure students get whatsapp
-     notifications for everything"). Fire-and-forget via after(), same as
-     pushNotif: hundreds of WhatsApp sends must not hold the response open,
-     and one student's failed send must never block another's. */
-  const deliverWhatsApp = async () => {
-    await Promise.allSettled(students.map((s) => sendWhatsApp(s.phone, msg)));
-  };
-  try {
-    const { after } = await import("next/server");
-    after(deliverWhatsApp());
-  } catch {
-    void deliverWhatsApp();
-  }
-
+  /* Broadcasts are in-app and web push only. Students get WhatsApp for order
+     placed, ready and collected only (see pushNotif in lib/notify.ts). */
   const label = scope === "all" ? "all campuses" : (await db.college.findUnique({ where: { id: scope } }))?.name || scope;
   await audit("Broadcast notice", `"${msg.slice(0, 40)}" → ${label} (${ids.length})`, st.id);
   return { ok: true as const, sent: ids.length };

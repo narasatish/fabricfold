@@ -232,7 +232,7 @@ export async function checkWhatsAppRegister(code: string) {
 
   /* Send a WhatsApp confirmation to the new student. */
   const { sendWhatsApp } = await import("../notify");
-  void sendWhatsApp(row.phone, `Welcome to FabricFold! Your ID is ${bagCode}. Show this at pickup.`).catch(() => {});
+  // No WhatsApp welcome: students get WhatsApp only for order placed, ready and collected.
 
   jar.delete(CLAIM_COOKIE);
   return { ok: true as const, status: "registered" as const, studentId: student.id };

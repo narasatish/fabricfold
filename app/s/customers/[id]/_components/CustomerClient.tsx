@@ -61,7 +61,8 @@ export default function StaffCustomerClient({ student, displayId, staffRole, pla
     try {
       const r = await updateStudentDetails(student.id, {
         name: details.name,
-        collegeId: details.collegeId || undefined,
+        // Only Admin+ may move a student to another campus; a Manager's save is name-only.
+        collegeId: staffRole >= 3 ? (details.collegeId || undefined) : undefined,
       });
       if (!r.ok) return toast(r.error || "Failed", true);
       toast(r.changed ? "Details updated" : "Nothing changed");
@@ -551,7 +552,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
           <span className="k">College</span>
           <span>
             {student.college?.name || "—"}
-            {staffRole >= 3 && (
+            {staffRole >= 2 && (
               <button
                 className="action"
                 style={{ padding: "2px 6px", marginLeft: 6 }}
@@ -1149,6 +1150,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
           <label>Name</label>
           <input className="input" value={details.name} onChange={(e) => setDetails({ ...details, name: e.target.value })} />
         </div>
+        {staffRole >= 3 && (
         <div className="field">
           <label>Campus</label>
           <select className="input" value={details.collegeId} onChange={(e) => setDetails({ ...details, collegeId: e.target.value })}>
@@ -1162,6 +1164,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
             </div>
           )}
         </div>
+        )}
         <button className="btn" onClick={doSaveDetails} disabled={detailsBusy || details.name.trim().length < 2}>
           {detailsBusy ? "Saving…" : "Save details"}
         </button>

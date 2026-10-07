@@ -124,9 +124,9 @@ describe("registration & phone changes are staff-gated (source-level regression 
     expect(fn.slice(0, 260)).toMatch(/requireStaff\(1\)/);
   });
 
-  it("updateStudentPhone requires Admin+ (role 3), not just any staff", () => {
+  it("updateStudentPhone requires Manager+ (role 2), not just any staff", () => {
     const fn = adminSrc.slice(adminSrc.indexOf("export async function updateStudentPhone"));
-    expect(fn.slice(0, 200)).toMatch(/requireStaff\(3\)/);
+    expect(fn.slice(0, 200)).toMatch(/requireStaff\(2\)/);
   });
 
   it("updateStudentPhone rejects a number already used by a different student", () => {

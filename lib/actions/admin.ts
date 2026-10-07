@@ -32,7 +32,7 @@ import { PAYMENT_KEYS, ratesProblem, expressProblem, gstProblem, paymentProblem,
    changing hands, so — same threshold as assignSubscription — it requires
    Manager+, even though a plan-less BVRIT/faculty registration stays Counter
    level. */
-export async function registerStudent(input: { name: string; phone: string; collegeId: string; kind?: "student" | "faculty"; planId?: string; method?: "cash" | "upi" }) {
+export async function registerStudent(input: { name: string; phone: string; collegeId: string; kind?: "student" | "faculty"; planId?: string; method?: "cash" | "upi"; customerId?: string }) {
   const st = await requireStaff(1);
   const name = String(input.name ?? "").trim();
   const phone = String(input.phone ?? "").replace(/\D/g, "").slice(-10);
@@ -56,6 +56,30 @@ export async function registerStudent(input: { name: string; phone: string; coll
     if (!input.planId) return { ok: false as const, error: "Pick a plan" };
     if (input.method !== "cash" && input.method !== "upi") return { ok: false as const, error: "Pick cash or UPI" };
     if (st.role < 2) return { ok: false as const, error: "Registering with a plan needs a Manager" };
+  }
+
+  /* Customer ID is typed by staff (owner, Oct 2026: auto-generation differs
+     from the printed bags for now). Format, letter and uniqueness are checked
+     before anything is written. Auto-generation returns once students use the app. */
+  const { parseBagCode } = await import("../bagcode");
+  // BVRIT IDs are still generated automatically (owner, Oct 2026): only the
+  // other campuses are typed by staff.
+  const typedCode = String(input.customerId ?? "").trim().toUpperCase();
+  const parsedCode = isBvrit ? null : parseBagCode(typedCode);
+  if (!isBvrit && !parsedCode) return { ok: false as const, error: "Enter the customer ID as a letter and a number, e.g. S1009 (B/S/G = plan tier, F = faculty)" };
+  const planRow = needsPlan ? await db.plan.findUnique({ where: { id: input.planId! } }) : null;
+  if (needsPlan && (!planRow || planRow.collegeId !== college.id)) return { ok: false as const, error: "Pick a plan for this campus" };
+  const expectedKind = isFaculty ? "faculty" : isBvrit ? "bvrit" : (planRow?.tier as string | null);
+  if (!isBvrit && (!expectedKind || parsedCode!.kind !== expectedKind)) {
+    const letterFor = isFaculty ? "F" : isBvrit ? "the BVRIT letter" : ({ bronze: "B", silver: "S", gold: "G" } as Record<string, string>)[expectedKind || ""] || "the plan letter";
+    return { ok: false as const, error: `This student's ID must start with ${letterFor}` };
+  }
+  if (!isBvrit) {
+    if (await db.bag.findFirst({ where: { code: typedCode, status: "active" } })) return { ok: false as const, error: `${typedCode} is already in use` };
+    const activeCodes = await db.bag.findMany({ where: { status: "active" }, select: { code: true } });
+    if (activeCodes.some((b) => parseBagCode(b.code)?.n === parsedCode!.n)) {
+      return { ok: false as const, error: `The number ${parsedCode!.n} is already used by another ID — numbers must be unique across letters` };
+    }
   }
 
   // permanent random 6-digit FabricFold code, unique (same scheme as self-registration)
@@ -82,8 +106,9 @@ export async function registerStudent(input: { name: string; phone: string; coll
       // bag; without this they'd be left with no customer ID until they
       // happened to trigger issueBag (owner, Sep 2026: "we have given code
       // as F ... it will be same like F1100").
+      // St Mary's: the staff-typed ID (validated above). BVRIT: generated, as before.
       const { allocateBagCode } = await import("../bagcode");
-      const code = await allocateBagCode(tx, isFaculty ? "faculty" : "bvrit");
+      const code = isBvrit ? await allocateBagCode(tx, isFaculty ? "faculty" : "bvrit") : typedCode;
       await tx.bag.create({
         data: { code, studentId: created.id, tier: null, complimentary: true, issuedBy: st.id, status: "active" },
       });
@@ -133,6 +158,11 @@ export async function registerStudent(input: { name: string; phone: string; coll
     st.id,
   );
   rosterSoon();
+  if (needsPlan && bagCode && !isBvrit) {
+    // The plan step minted its own code; put the staff-typed ID on that same bag.
+    await db.bag.updateMany({ where: { studentId: stu.id, status: "active" }, data: { code: typedCode } });
+    bagCode = typedCode;
+  }
   void notifyOwner("New student registered", `${name} (+91 ${phone}) registered at the counter (${college.name}) by ${st.name}${planName ? ` — plan "${planName}"` : ""} — ID ${bagCode || stu.id}.${planError ? ` ⚠ ${planError}` : ""}`);
   // BVRIT's own self-registration (wa-register.ts) sends this same welcome —
   // a counter registration was silently missing it, so a St Mary's student

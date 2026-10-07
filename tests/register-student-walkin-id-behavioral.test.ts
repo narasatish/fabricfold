@@ -87,7 +87,7 @@ describe("St Mary's registration requires a plan up front (owner, Sep 22)", { ti
   it("refuses with no planId at all, and creates no student row", async () => {
     await asManager();
     const before = await db.student.count();
-    const r = await adminActions.registerStudent({ name: "No Plan", phone: nextPhone(), collegeId: "sm", kind: "student" });
+    const r = await adminActions.registerStudent({ customerId: "B5001", name: "No Plan", phone: nextPhone(), collegeId: "sm", kind: "student" });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error).toMatch(/pick a plan/i);
@@ -97,7 +97,7 @@ describe("St Mary's registration requires a plan up front (owner, Sep 22)", { ti
   it("refuses with a planId but no payment method", async () => {
     await asManager();
     const before = await db.student.count();
-    const r = await adminActions.registerStudent({ name: "No Method", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smBronze });
+    const r = await adminActions.registerStudent({ customerId: "B5002", name: "No Method", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smBronze });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error).toMatch(/cash or upi/i);
@@ -107,7 +107,7 @@ describe("St Mary's registration requires a plan up front (owner, Sep 22)", { ti
   it("a Counter-level staff member (role 1) cannot register WITH a plan — selling a plan needs a Manager", async () => {
     await asCounter();
     const before = await db.student.count();
-    const r = await adminActions.registerStudent({ name: "Counter Try", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smBronze, method: "cash" });
+    const r = await adminActions.registerStudent({ customerId: "B5003", name: "Counter Try", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smBronze, method: "cash" });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error).toMatch(/manager/i);
@@ -117,7 +117,7 @@ describe("St Mary's registration requires a plan up front (owner, Sep 22)", { ti
   it("Manager + Bronze plan: registers, sells the plan, and issues a REAL Bronze code immediately — no provisional step", async () => {
     await asManager();
     const phone = nextPhone();
-    const r = await adminActions.registerStudent({ name: "Bronze Buyer", phone, collegeId: "sm", kind: "student", planId: smBronze, method: "cash" });
+    const r = await adminActions.registerStudent({ customerId: "B5004", name: "Bronze Buyer", phone, collegeId: "sm", kind: "student", planId: smBronze, method: "cash" });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.bagCode).toMatch(/^B\d+$/);
@@ -136,29 +136,23 @@ describe("St Mary's registration requires a plan up front (owner, Sep 22)", { ti
 
   it("it can be Silver or Gold too — the code matches whichever plan is actually chosen (owner: \"it can be gold or silver also\")", async () => {
     await asManager();
-    const silver = await adminActions.registerStudent({ name: "Silver Buyer", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smSilver, method: "upi" });
+    const silver = await adminActions.registerStudent({ customerId: "S5005", name: "Silver Buyer", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smSilver, method: "upi" });
     expect(silver.ok && silver.bagCode).toMatch(/^S\d+$/);
-    const gold = await adminActions.registerStudent({ name: "Gold Buyer", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smGold, method: "upi" });
+    const gold = await adminActions.registerStudent({ customerId: "G5006", name: "Gold Buyer", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smGold, method: "upi" });
     expect(gold.ok && gold.bagCode).toMatch(/^G\d+$/);
   });
 
-  it("an invalid planId degrades gracefully: the student still exists with a safety-net code, not orphaned or crashed", async () => {
+  it("an unknown planId is refused before anything is written (no half-made student)", async () => {
     await asManager();
-    const r = await adminActions.registerStudent({ name: "Bad Plan Id", phone: nextPhone(), collegeId: "sm", kind: "student", planId: "does-not-exist", method: "cash" });
-    expect(r.ok).toBe(true); // registration itself still succeeds
-    if (!r.ok) return;
-    expect(r.planError).toMatch(/could not be sold/i);
-    expect(r.bagCode).not.toBeNull();
-    expect(r.bagCode).not.toBe(r.id); // never the raw internal id, even on this failure path
-    const stu = await db.student.findUniqueOrThrow({ where: { id: r.id } });
-    expect(stu.name).toBe("Bad Plan Id");
-    const sub = await db.subscription.findUnique({ where: { studentId: r.id } });
-    expect(sub?.active).not.toBe(true); // no plan was actually sold
+    const phone = nextPhone();
+    const r = await adminActions.registerStudent({ customerId: "B5007", name: "Bad Plan Id", phone, collegeId: "sm", kind: "student", planId: "does-not-exist", method: "cash" });
+    expect(r.ok).toBe(false);
+    expect(await db.student.count({ where: { phone } })).toBe(0);
   });
 
   it("a campus-scoped Manager registering at the OTHER campus still gets a real code, not a 'different campus' failure (owner: any staff may register at either college)", async () => {
     await asBvritManager(); // scoped to BVRIT, registering a St Mary's student
-    const r = await adminActions.registerStudent({ name: "Cross Campus Buyer", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smSilver, method: "cash" });
+    const r = await adminActions.registerStudent({ customerId: "S5008", name: "Cross Campus Buyer", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smSilver, method: "cash" });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.planError).toBeUndefined();
@@ -179,7 +173,7 @@ describe("BVRIT and faculty are unaffected — never need a plan", () => {
 
   it("faculty at St Mary's (Counter-level, no plan) still gets F immediately", async () => {
     await asCounter();
-    const r = await adminActions.registerStudent({ name: "SM Faculty", phone: nextPhone(), collegeId: "sm", kind: "faculty" });
+    const r = await adminActions.registerStudent({ customerId: "F5009", name: "SM Faculty", phone: nextPhone(), collegeId: "sm", kind: "faculty" });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.bagCode).toMatch(/^F\d+$/);
@@ -216,5 +210,42 @@ describe("everything reaches the Sheet's roster (rosterSoon)", () => {
       const body = src.slice(i, src.indexOf("\nexport async function ", i + 10));
       expect(body, fn).toMatch(/rosterSoon\(\)/);
     }
+  });
+});
+
+describe("St Mary's customer ID is typed by staff and checked before anything is written", () => {
+  it("refuses a wrong letter for the chosen plan, and writes nothing", async () => {
+    await asManager();
+    const phone = nextPhone();
+    const r = await adminActions.registerStudent({ customerId: "G7001", name: "Wrong Letter", phone, collegeId: "sm", kind: "student", planId: smSilver, method: "cash" });
+    expect(r.ok).toBe(false);
+    expect(await db.student.count({ where: { phone } })).toBe(0);
+  });
+  it("refuses an ID that is already an active bag", async () => {
+    await asManager();
+    const first = await adminActions.registerStudent({ customerId: "S7002", name: "First Holder", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smSilver, method: "cash" });
+    expect(first.ok).toBe(true);
+    const again = await adminActions.registerStudent({ customerId: "S7002", name: "Second Try", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smSilver, method: "cash" });
+    expect(again.ok).toBe(false);
+  });
+  it("refuses a number already used under another letter", async () => {
+    await asManager();
+    const r = await adminActions.registerStudent({ customerId: "B7002", name: "Same Number", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smBronze, method: "cash" });
+    expect(r.ok).toBe(false);
+  });
+  it("saves exactly the typed ID on the plan student's bag", async () => {
+    await asManager();
+    const r = await adminActions.registerStudent({ customerId: "G7003", name: "Typed Gold", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smGold, method: "upi" });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.bagCode).toBe("G7003");
+    expect((await db.bag.findFirst({ where: { studentId: r.id, status: "active" } }))?.code).toBe("G7003");
+  });
+  it("BVRIT IDs are still generated, not typed", async () => {
+    await asCounter();
+    const r = await adminActions.registerStudent({ name: "BVRIT Auto", phone: nextPhone(), collegeId: bvritId, kind: "student" });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.bagCode).toMatch(/^V\d+$/);
   });
 });

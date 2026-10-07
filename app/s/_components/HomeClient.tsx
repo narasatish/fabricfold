@@ -87,7 +87,9 @@ export default function StaffHomeClient({
   const [batchMode, setBatchMode] = useState(false);
   const [batchIds, setBatchIds] = useState<Set<string>>(new Set());
   const [batchBusy, setBatchBusy] = useState(false);
-  const [reg, setReg] = useState({ name: "", phone: "", collegeId: registerColleges[0]?.id || "", kind: "student" as "student" | "faculty", planId: "", method: "cash" as "cash" | "upi" });
+  const [reg, setReg] = useState({ name: "", phone: "", customerId: "", collegeId: registerColleges[0]?.id || "", kind: "student" as "student" | "faculty", planId: "", method: "cash" as "cash" | "upi" });
+  // BVRIT IDs are generated; St Mary's (and any other campus) are typed by staff.
+  const regIsBvrit = (registerColleges.find((c) => c.id === reg.collegeId)?.name ?? "").trim().toUpperCase() === "BVRIT";
   const [regLoading, setRegLoading] = useState(false);
   // A plan is mandatory for a non-faculty registration at any college that
   // HAS plans to sell (BVRIT never does — see requireCyclesEnabled; its
@@ -166,11 +168,12 @@ export default function StaffHomeClient({
   const handleRegister = async () => {
     setRegLoading(true);
     try {
-      const r = await registerStudent(regNeedsPlan ? reg : { name: reg.name, phone: reg.phone, collegeId: reg.collegeId, kind: reg.kind });
+      const payload = { name: reg.name, phone: reg.phone, collegeId: reg.collegeId, kind: reg.kind, customerId: reg.customerId, ...(regNeedsPlan ? { planId: reg.planId, method: reg.method } : {}) };
+      const r = await registerStudent(payload);
       if (!r.ok) return toast(r.error || "Failed", true);
       toast(r.planError ? r.planError : `Student registered — ID ${r.bagCode || r.id}`, !!r.planError);
       setShowRegister(false);
-      setReg({ name: "", phone: "", collegeId: registerColleges[0]?.id || "", kind: "student", planId: "", method: "cash" });
+      setReg({ name: "", phone: "", customerId: "", collegeId: registerColleges[0]?.id || "", kind: "student", planId: "", method: "cash" });
       router.push(`/s/customers/${r.id}`);
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
@@ -560,6 +563,13 @@ export default function StaffHomeClient({
             <input className="input" type="tel" inputMode="numeric" placeholder="10-digit number" value={reg.phone}
               onChange={(e) => setReg({ ...reg, phone: e.target.value.replace(/\D/g, "").slice(-10) })} />
           </div>
+          {!regIsBvrit && (
+            <div className="field">
+              <label>Customer ID</label>
+              <input className="input" type="text" placeholder="e.g. S1009 (B/S/G plan, F faculty)" value={reg.customerId}
+                onChange={(e) => setReg({ ...reg, customerId: e.target.value.toUpperCase().replace(/\s+/g, "") })} />
+            </div>
+          )}
           <div className="field">
             <label>Campus</label>
             <select className="input" value={reg.collegeId} onChange={(e) => setReg({ ...reg, collegeId: e.target.value, planId: "" })}>

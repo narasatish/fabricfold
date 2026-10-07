@@ -140,7 +140,9 @@ describe("the screens quote what the server bills", () => {
     const ui = read("app/c/order/new/_components/OrderNewClient.tsx");
     expect(ui).toMatch(/const gst = cycleBased \? 0 :/);
     expect(ui).toMatch(/cycles: cycleBased \? cycles : undefined/);
-    expect(ui).toMatch(/per cycle · up to \{CYCLE_KG_LIMIT \* cycles\} kg total/);
+    expect(ui).toMatch(/CYCLE_KG_LIMIT \* cycles\} kg total/);
+    // Students never see a cycle price; a plan order shows the plan covers it.
+    expect(ui).not.toMatch(/per cycle · up to/);
   });
   it("staff accept sheet scales the allowance with the cycle count", () => {
     const ui = read("app/s/orders/[id]/_components/OrderClient.tsx");
@@ -222,7 +224,7 @@ describe("switching the service tab shows THAT service's menu", () => {
   });
   it("the subtotal counts cycles on a cycle order, not zero pieces", () => {
     const ui = read("app/c/order/new/_components/OrderNewClient.tsx");
-    expect(ui).toMatch(/cycleBased \? `\$\{cycles\} cycle/);
+    expect(ui).toMatch(/Cycles \(\{cycles\}\)/);
   });
 });
 
@@ -288,6 +290,6 @@ describe("urgent (same-day): flat fee on cycle colleges, 50%-per-piece on per-pi
 describe("Pre-book is alive on cycle orders", () => {
   it("the button no longer gates on pieces, which are always zero for cycles", () => {
     const ui = read("app/c/order/new/_components/OrderNewClient.tsx");
-    expect(ui).toMatch(/disabled=\{loading \|\| \(!cycleBased && pieces === 0\)\}/);
+    expect(ui).toMatch(/disabled=\{loading \|\| \(!cycleBased && pieces === 0\) \|\| \(cycleBased && !hasActiveSubscription\)\}/);
   });
 });

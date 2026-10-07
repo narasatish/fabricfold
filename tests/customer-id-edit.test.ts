@@ -13,8 +13,8 @@ const fn = bags.slice(bags.indexOf("export async function setBagCode"));
 const ui = read("app/s/customers/[id]/_components/CustomerClient.tsx");
 
 describe("who may change it", () => {
-  it("Admin or above — it is the student's identity", () => {
-    expect(fn.slice(0, 200)).toMatch(/requireStaff\(3\)/);
+  it("Manager or above — the owner allows managers to correct IDs", () => {
+    expect(fn.slice(0, 200)).toMatch(/requireStaff\(2\)/);
   });
   it("both the old and new value are audited", () => {
     expect(fn).toMatch(/audit\("Customer ID changed", `\$\{bag\.student\.name\} · \$\{before\} → \$\{code\}`/);

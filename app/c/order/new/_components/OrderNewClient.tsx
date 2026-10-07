@@ -138,7 +138,9 @@ export default function OrderNewClient({
               <div style={{ flex: 1 }}>
                 <div className="h-sm">Cycles</div>
                 <div className="muted" style={{ fontSize: "12.5px" }}>
-                  {fmt(CYCLE_RATES[service])} per cycle · up to {CYCLE_KG_LIMIT * cycles} kg total
+                  {hasActiveSubscription
+                    ? `Covered by your plan · up to ${CYCLE_KG_LIMIT * cycles} kg total`
+                    : `Needs an active plan · ask the counter · up to ${CYCLE_KG_LIMIT * cycles} kg total`}
                 </div>
               </div>
               <div className="step">
@@ -272,10 +274,17 @@ export default function OrderNewClient({
 
       {/* Bill preview */}
       <div className="card pad mt20">
-        <div className="kv">
-          <span className="k">Subtotal ({cycleBased ? `${cycles} cycle${cycles === 1 ? "" : "s"}` : `${pieces} pcs`})</span>
-          <span className="mono">{fmt(subtotal)}</span>
-        </div>
+        {cycleBased ? (
+          <div className="kv">
+            <span className="k">Cycles ({cycles})</span>
+            <span className="mono">{hasActiveSubscription ? "From your plan" : "—"}</span>
+          </div>
+        ) : (
+          <div className="kv">
+            <span className="k">Subtotal ({`${pieces} pcs`})</span>
+            <span className="mono">{fmt(subtotal)}</span>
+          </div>
+        )}
         {surcharge > 0 && (
           <div className="kv">
             <span className="k">Express surcharge</span>
@@ -290,14 +299,17 @@ export default function OrderNewClient({
         )}
         <div className="kv total">
           <span>Estimated total</span>
-          <span className="mono">{fmt(total)}</span>
+          <span className="mono">{cycleBased && hasActiveSubscription ? fmt(surcharge) : cycleBased ? "—" : fmt(total)}</span>
         </div>
       </div>
 
       {/* pieces is ALWAYS 0 on a cycle order — gating on it left Pre-book
           permanently dead for the two main services. Found by the owner on
           their own phone, which is the review no test suite replaces. */}
-      <button className="btn mt16" disabled={loading || (!cycleBased && pieces === 0)} onClick={handleSubmit}>
+      {cycleBased && !hasActiveSubscription && (
+        <div className="muted mt12" style={{ fontSize: "12.5px" }}>You need an active plan to pre-book cycles. Ask the counter to activate one.</div>
+      )}
+      <button className="btn mt16" disabled={loading || (!cycleBased && pieces === 0) || (cycleBased && !hasActiveSubscription)} onClick={handleSubmit}>
         {loading ? "Creating…" : "Pre-book order"}
       </button>
       <div className="center muted mt12" style={{ fontSize: "12px" }}>

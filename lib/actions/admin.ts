@@ -156,7 +156,7 @@ export async function registerStudent(input: { name: string; phone: string; coll
    lost/stolen phone can't be used to silently take over an account. They must
    come to the counter and an Admin makes the change here. */
 export async function updateStudentPhone(studentId: string, newPhone: string) {
-  const st = await requireStaff(3);
+  const st = await requireStaff(2); // Manager+ may correct a mobile number
   const phone = String(newPhone ?? "").replace(/\D/g, "").slice(-10);
   if (!/^[6-9]\d{9}$/.test(phone)) return { ok: false as const, error: "Enter a valid 10-digit mobile number" };
   const existing = await db.student.findUnique({ where: { phone } });
@@ -197,12 +197,15 @@ export async function updateStudentDetails(
   studentId: string,
   input: { name?: string; collegeId?: string },
 ) {
-  const st = await requireStaff(3);
+  const st = await requireStaff(2); // Manager+ may fix a name; campus moves are Admin+ (below)
   const stu = await db.student.findUnique({ where: { id: studentId }, include: { subscription: { include: { planRef: true } } } });
   if (!stu) return { ok: false as const, error: "Student not found" };
   assertSameCollege(st, stu.collegeId);
   // Moving a student INTO another campus is a cross-campus action — reserved
   // for global staff (collegeId null), not a campus-scoped Admin.
+  if (input.collegeId !== undefined && input.collegeId !== stu.collegeId && st.role < 3) {
+    return { ok: false as const, error: "Only an Admin or Owner can move a student to another campus" };
+  }
   if (st.collegeId && input.collegeId !== undefined && input.collegeId !== stu.collegeId) {
     return { ok: false as const, error: "Moving a student to another campus needs an Owner/Admin who isn't tied to one campus" };
   }
@@ -286,8 +289,9 @@ export async function savePlan(input: {
   /* cycles <= 0 means "this service isn't in the plan" (the form sends 0 for
      unused services) and is dropped; anything else must be a sane whole number. */
   const buckets = (Array.isArray(input.buckets) ? input.buckets : []).filter((b) => SERVICES.includes(b.service) && !(b.cycles <= 0));
-  if (buckets.some((b) => !Number.isInteger(b.cycles) || b.cycles > 500 || !Number.isFinite(b.kgPerCycle) || b.kgPerCycle <= 0 || b.kgPerCycle > 100)) {
-    return { ok: false as const, error: "Cycles must be a whole number (1–500) and kg per cycle 1–100" };
+  // every cycle is 5 kg (CYCLE_KG_LIMIT), whatever the plan says
+  if (buckets.some((b) => !Number.isInteger(b.cycles) || b.cycles > 500 || b.kgPerCycle !== 5)) {
+    return { ok: false as const, error: "Cycles must be a whole number (1–500) and each cycle is 5 kg" };
   }
   if (!buckets.length) return { ok: false as const, error: "Add at least one service with cycles" };
   const college = await db.college.findUnique({ where: { id: input.collegeId } });

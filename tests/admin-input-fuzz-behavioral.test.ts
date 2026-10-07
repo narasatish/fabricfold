@@ -45,7 +45,7 @@ beforeAll(async () => {
 }, 300_000);
 
 const plan = (over: Record<string, unknown> = {}) =>
-  admin.savePlan({ collegeId: "col1", name: "Silver", price: 5000, gstFree: false, tier: "silver", buckets: [{ service: "washFold", cycles: 20, kgPerCycle: 7 }], ...over } as never);
+  admin.savePlan({ collegeId: "col1", name: "Silver", price: 5000, gstFree: false, tier: "silver", buckets: [{ service: "washFold", cycles: 20, kgPerCycle: 5 }], ...over } as never);
 const slot = (over: Record<string, unknown> = {}) =>
   slots.saveSlotWindow({ collegeId: "col1", weekday: 1, startMin: 540, endMin: 660, capacity: 15, ...over } as never);
 
@@ -53,9 +53,9 @@ describe("savePlan refuses bad input, writes nothing", () => {
   const bad: [string, Record<string, unknown>][] = [
     ["Infinity price", { price: Infinity }], ["NaN price", { price: NaN }], ["negative price", { price: -1 }],
     ["absurd price", { price: 1e15 }], ["1-char name", { name: "A" }], ["500-char name", { name: "x".repeat(500) }],
-    ["Infinity cycles", { buckets: [{ service: "washFold", cycles: Infinity, kgPerCycle: 7 }] }],
-    ["fractional cycles", { buckets: [{ service: "washFold", cycles: 2.5, kgPerCycle: 7 }] }],
-    ["huge cycles", { buckets: [{ service: "washFold", cycles: 1e9, kgPerCycle: 7 }] }],
+    ["Infinity cycles", { buckets: [{ service: "washFold", cycles: Infinity, kgPerCycle: 5 }] }],
+    ["fractional cycles", { buckets: [{ service: "washFold", cycles: 2.5, kgPerCycle: 5 }] }],
+    ["huge cycles", { buckets: [{ service: "washFold", cycles: 1e9, kgPerCycle: 5 }] }],
     ["NaN kg", { buckets: [{ service: "washFold", cycles: 5, kgPerCycle: NaN }] }],
     ["negative kg", { buckets: [{ service: "washFold", cycles: 5, kgPerCycle: -3 }] }],
   ];
@@ -68,6 +68,9 @@ describe("savePlan refuses bad input, writes nothing", () => {
     });
   }
   it("still saves a normal plan", async () => { expect((await plan()).ok).toBe(true); });
+  it("refuses any kg per cycle other than 5", async () => {
+    expect((await plan({ buckets: [{ service: "washFold", cycles: 20, kgPerCycle: 7 }] })).ok).toBe(false);
+  });
 });
 
 describe("saveSlotWindow refuses bad input, writes nothing", () => {

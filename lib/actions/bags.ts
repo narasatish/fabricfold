@@ -333,7 +333,7 @@ export async function reissueBagSameCode(bagId: string, reason: "lost" | "damage
  * Admin+, because this is the student's identity, and audited both values.
  */
 export async function setBagCode(bagId: string, rawCode: string) {
-  const st = await requireStaff(3);
+  const st = await requireStaff(2);
   const bag = await db.bag.findUnique({ where: { id: bagId }, include: { student: { include: { subscription: { include: { planRef: true } } } } } });
   if (!bag) return { ok: false as const, error: "Bag not found" };
   assertSameCollege(st, bag.student.collegeId);

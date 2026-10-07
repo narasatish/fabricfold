@@ -14,8 +14,9 @@ const fn = admin.slice(admin.indexOf("export async function updateStudentDetails
 const ui = read("app/s/customers/[id]/_components/CustomerClient.tsx");
 
 describe("permission", () => {
-  it("is Admin+", () => {
-    expect(fn.slice(0, 300)).toMatch(/requireStaff\(3\)/);
+  it("is Manager+ (name), with campus moves Admin+", () => {
+    expect(fn.slice(0, 300)).toMatch(/requireStaff\(2\)/);
+    expect(fn).toMatch(/st\.role < 3/);
   });
   it("leaves the phone to its own action", () => {
     // changing the number changes who can log in; it deserves its own step

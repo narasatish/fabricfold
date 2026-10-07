@@ -629,7 +629,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
               </button>
             )}
           </div>
-          <div className="kv"><span className="k">Per cycle</span><span>up to {student.subscription.kgPerCycle} kg</span></div>
+          <div className="kv"><span className="k">Per cycle</span><span>up to {CYCLE_KG_LIMIT} kg</span></div>
           {student.subscription.expiresAt && (
             <div className="kv"><span className="k">Expires</span><span>{dateStr(student.subscription.expiresAt)}</span></div>
           )}
@@ -1103,7 +1103,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
           {assignPlan && (
             <div className="card pad" style={{ background: "var(--teal-tint)" }}>
               {assignPlan.buckets.map((b) => (
-                <div key={b.service} className="kv"><span className="k">{b.label}</span><span className="mono">{b.cycles} × {b.kgPerCycle} kg</span></div>
+                <div key={b.service} className="kv"><span className="k">{b.label}</span><span className="mono">{b.cycles} × {CYCLE_KG_LIMIT} kg</span></div>
               ))}
               <div className="kv total"><span>To collect{assignPlan.gstApplies ? " (incl. GST)" : ""}</span><span className="mono">{fmt(assignPlan.gross)}</span></div>
             </div>

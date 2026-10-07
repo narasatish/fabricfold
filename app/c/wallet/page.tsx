@@ -4,6 +4,7 @@ import { TopBar } from "@/components/chrome";
 import { fmt, dateStr } from "@/lib/format";
 import { Svg } from "@/components/icons";
 import WalletClient from "./_components/WalletClient";
+import { CYCLE_KG_LIMIT } from "@/lib/money";
 
 const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFold: "Wash & Fold", ironOnly: "Iron Only", dryClean: "Dry Clean" };
 type Bucket = { service: string; cycles: number; used?: number; kgPerCycle: number };
@@ -16,20 +17,6 @@ export default async function WalletPage() {
   const gstEnabled = (appConfig?.settings as Record<string, unknown>)?.gstEnabled !== false;
   const gstPct = Number(appConfig?.gstPct || 18);
 
-  // This college's plans (each with the exact amount to pay)
-  const plans = (await db.plan.findMany({ where: { collegeId: student.collegeId, active: true }, orderBy: { price: "asc" } })).map((p) => {
-    const gstApplies = gstEnabled && !p.gstFree;
-    const price = Number(p.price);
-    return {
-      id: p.id,
-      name: p.name,
-      price,
-      gross: price + (gstApplies ? Math.round(price * gstPct / 100) : 0),
-      gstApplies,
-      gstPct,
-      buckets: (p.buckets as unknown as Bucket[]).map((b) => ({ ...b, label: SERVICE_LABEL[b.service] || b.service })),
-    };
-  });
 
   const subBuckets = ((sub?.buckets as unknown as Bucket[]) || []).map((b) => ({ ...b, used: b.used || 0, label: SERVICE_LABEL[b.service] || b.service }));
 
@@ -67,7 +54,7 @@ export default async function WalletPage() {
                   <div style={{ height: "8px", background: "var(--line)", borderRadius: "4px", marginTop: "6px", overflow: "hidden" }}>
                     <div style={{ height: "100%", width: `${Math.round(((b.cycles - b.used) / Math.max(1, b.cycles)) * 100)}%`, background: "var(--teal)" }} />
                   </div>
-                  <div className="muted mt4" style={{ fontSize: "11.5px" }}>1 drop-off = 1 cycle · up to {b.kgPerCycle} kg</div>
+                  <div className="muted mt4" style={{ fontSize: "11.5px" }}>1 drop-off = 1 cycle · up to {CYCLE_KG_LIMIT} kg</div>
                 </div>
               ))
             ) : (
@@ -82,10 +69,8 @@ export default async function WalletPage() {
               </div>
             )}
           </div>
-        ) : plans.length ? (
-          <WalletClient plans={plans} pending={sub && !sub.active ? sub.plan : null} />
         ) : (
-          <div className="card pad center muted" style={{ fontSize: "13.5px" }}>No subscription plans at your campus yet.</div>
+          <WalletClient pending={sub && !sub.active ? sub.plan : null} />
         )}
 
         {/* Credits */}

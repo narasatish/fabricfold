@@ -9,9 +9,10 @@ import { Svg } from "@/components/icons";
 import { notFound } from "next/navigation";
 import OrderDetailClient from "./_components/OrderDetailClient";
 
-export default async function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function OrderDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string>> }) {
   const student = await requireStudent();
   const { id } = await params;
+  const { pendingDraft } = await searchParams;
 
   const order = await db.order.findUnique({
     where: { id },
@@ -64,6 +65,12 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
       <TopBar title={`Order ${order.id.slice(-4)}`} sub={rateLabel} back="/c/orders" />
 
       <div className="pad">
+        {pendingDraft === "1" && order.status === "draft" && (
+          <div className="card pad mt2" style={{ background: "var(--amber-soft)", borderColor: "#eedcb8" }}>
+            <div className="h-sm" style={{ color: "var(--amber)" }}>You already have a pending order</div>
+            <div className="muted" style={{ fontSize: "12.5px" }}>Drop this one at the counter, or delete it below, before booking another.</div>
+          </div>
+        )}
         <div className="between">
           <span className={`pill st-${order.status}`} style={{ fontSize: "13px", padding: "7px 14px" }}>
             {STATUS_LABEL[order.status] || order.status}

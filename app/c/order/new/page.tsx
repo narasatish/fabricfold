@@ -17,6 +17,12 @@ export default async function OrderNewPage({ searchParams }: { searchParams: Pro
 
   if (!appConfig || !college) redirect("/c");
 
+  // One open draft at a time (owner, Oct 2026: bulk undropped drafts were
+  // flooding the counter's queue) — send the student straight to it instead
+  // of letting them fill out a new order that the server will then refuse.
+  const openDraft = await db.order.findFirst({ where: { studentId: student.id, status: "draft" }, select: { id: true } });
+  if (openDraft) redirect(`/c/orders/${openDraft.id}?pendingDraft=1`);
+
   const rates = resolveCollegeRates(appConfig.rates as unknown as RateTable, college.rates as unknown as RateTable | null);
   const collegeHasRatesOverride = !!college.rates;
   const gstEnabled = (appConfig.settings as Record<string, unknown>)?.gstEnabled !== false;

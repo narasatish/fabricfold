@@ -84,6 +84,14 @@ function cycleItems(service: string, label: string, cycles: number) {
 
 export async function placeOrder(input: { service: string; items: { label: string; qty: number }[]; cycles?: number; express: boolean; dropSlotAt?: string }) {
   const stu = await requireStudent();
+  /* A draft is a pre-booking nobody has dropped off yet. Letting a student
+     stack up endless drafts was flooding the counter's queue with orders that
+     were never coming (owner, Oct 2026: "bulk drafts... hectic") — so one open
+     draft blocks a new one until it's dropped off (accepted) or cancelled. */
+  const openDraft = await db.order.findFirst({ where: { studentId: stu.id, status: "draft" }, select: { id: true } });
+  if (openDraft) {
+    return { ok: false as const, error: `Finish or cancel your pending order #${openDraft.id.slice(-4)} first` };
+  }
   const cfg = await getConfig(stu.collegeId);
   const rate = cfg.rates[input.service];
   if (!rate) return { ok: false as const, error: "Unknown service" };
@@ -1063,3 +1071,4 @@ export async function scanTag(orderId: string, code: string) {
   bcast(o);
   return { ok: true as const };
 }
+

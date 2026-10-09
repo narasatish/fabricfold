@@ -45,12 +45,22 @@ async function run(guardRetries: boolean) {
   const text = await dailyEmailReport();
   const to = settings.reportEmail || "owner@fabricfold.in";
   await sendMail(to, "FabricFold — daily report", text);
-  // Owners get a one-line per-campus collection total on WhatsApp too. Cron
-  // only: a manual "Email today's report" click must not re-send it.
-  if (guardRetries) await notifyOwnersWhatsApp(await dailyWhatsAppSummary());
+  // The email is out — mark the day sent BEFORE the WhatsApp step below, so a
+  // throw there (a DB hiccup building the summary, say) can never leave
+  // lastSent stale and cause the next cron retry to re-send this same email.
   await db.appConfig.update({
     where: { id: "main" },
     data: { settings: JSON.parse(JSON.stringify({ ...settings, lastSent: new Date().toISOString() })) },
   });
+  // Owners get a one-line per-campus collection total on WhatsApp too. Cron
+  // only: a manual "Email today's report" click must not re-send it. Never
+  // allowed to fail the request — the email already went out successfully.
+  if (guardRetries) {
+    try {
+      await notifyOwnersWhatsApp(await dailyWhatsAppSummary());
+    } catch (e) {
+      console.error("daily WhatsApp summary failed", e);
+    }
+  }
   return Response.json({ ok: true, to });
 }

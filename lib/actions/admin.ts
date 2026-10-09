@@ -61,7 +61,7 @@ export async function registerStudent(input: { name: string; phone: string; coll
   /* Customer ID is typed by staff (owner, Oct 2026: auto-generation differs
      from the printed bags for now). Format, letter and uniqueness are checked
      before anything is written. Auto-generation returns once students use the app. */
-  const { parseBagCode } = await import("../bagcode");
+  const { parseBagCode, allocateBagCode } = await import("../bagcode");
   // BVRIT IDs are still generated automatically (owner, Oct 2026): only the
   // other campuses are typed by staff.
   const typedCode = String(input.customerId ?? "").trim().toUpperCase();
@@ -107,7 +107,6 @@ export async function registerStudent(input: { name: string; phone: string; coll
       // happened to trigger issueBag (owner, Sep 2026: "we have given code
       // as F ... it will be same like F1100").
       // St Mary's: the staff-typed ID (validated above). BVRIT: generated, as before.
-      const { allocateBagCode } = await import("../bagcode");
       const code = isBvrit ? await allocateBagCode(tx, isFaculty ? "faculty" : "bvrit") : typedCode;
       await tx.bag.create({
         data: { code, studentId: created.id, tier: null, complimentary: true, issuedBy: st.id, status: "active" },

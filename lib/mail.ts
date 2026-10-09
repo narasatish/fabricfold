@@ -45,8 +45,6 @@ const WA_ALERT = /^(New student registered|New BVRIT registration|New complaint|
     email being unconfigured must not silently skip WhatsApp, or vice versa.
     Never throws. */
 export async function notifyOwner(subject: string, text: string) {
-  // TEMPORARY trace (2026-10-04): shows whether an event reaches the alert code.
-  await db.errorLog.create({ data: { kind: "client", message: `WhatsApp: trace: event "${subject.slice(0, 50)}" → WA ${WA_ALERT.test(subject) ? "eligible" : "not eligible"}` } }).catch(() => {});
   /* TEMPORARY diagnostic (2026-10-01) — remove once the WhatsApp alert
      investigation is closed. Every known silent-failure path inside the
      WhatsApp send chain (missing credentials, zero alert numbers, an

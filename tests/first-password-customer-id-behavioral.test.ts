@@ -135,6 +135,23 @@ describe("createPasswordWithCustomerId", () => {
   });
 });
 
+describe("hasPasscode's registration reveal is rate-limited (closes the enumeration gap found in review)", () => {
+  it("stops revealing real registration status once one IP sweeps past the per-IP cap", async () => {
+    cookieJar.clear();
+    // Enough unregistered numbers to trip the shared 20/hour per-IP limit —
+    // all mocked to the same fixed IP ("203.0.113.97") for this file.
+    let lastRegistered: boolean | undefined;
+    for (let i = 0; i < 25; i++) {
+      const r = await auth.hasPasscode(`97${String(7700000 + i).padStart(8, "0")}`);
+      lastRegistered = r.registered;
+    }
+    // Even swept with 25 UNREGISTERED numbers, the limit must never let a real
+    // account be falsely told "not registered" — so once tripped it fails
+    // safe to `registered: true`, never stays `false` for every single call.
+    expect(lastRegistered).toBe(true);
+  });
+});
+
 describe("resetStudentPassword (staff)", () => {
   it("clears the password and lockout, letting the student set a new one with their customer ID", async () => {
     cookieJar.clear();

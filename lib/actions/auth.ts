@@ -468,9 +468,26 @@ export async function changePasscode(current: string, next: string) {
     option without revealing whether the number is registered at all. */
 export async function hasPasscode(phone: string) {
   const p = phone.replace(/\D/g, "").slice(-10);
-  if (p.length !== 10) return { ok: true as const, hasPasscode: false };
+  if (p.length !== 10) return { ok: true as const, hasPasscode: false, registered: false };
+  /* `registered` tells the login screen whether to route an unknown number to
+     "not registered, visit the counter" — the same thing the OTP flow already
+     told a visitor about THEIR OWN number, so it reveals nothing new there.
+     What WOULD be new is an enumeration oracle: unlike loginWithPasscode and
+     createPasswordWithCustomerId, this endpoint needs no session and no
+     passcode guess to call, so without a limit of its own an attacker could
+     sweep every 10-digit number and build a directory of exactly who is
+     registered. Same per-IP cap as the rest of this file closes that; when it
+     trips, `registered` quietly reports true (never a false "not registered"
+     for a real account) so the caller just falls through to its old,
+     always-safe behavior instead of erroring. */
+  const ip = await requestIp();
+  let ipOk = true;
+  if (ip !== "unknown") {
+    const lim = await rateLimit(`hascode:ip:${ip}`, PASSCODE_MAX_PER_IP_HOUR, 3600);
+    ipOk = lim.allowed;
+  }
   const stu = await db.student.findUnique({ where: { phone: p }, select: { passwordHash: true } });
-  return { ok: true as const, hasPasscode: !!stu?.passwordHash };
+  return { ok: true as const, hasPasscode: !!stu?.passwordHash, registered: ipOk ? !!stu : true };
 }
 
 /** Sign in with phone + passcode. Students only — staff stay OTP-only, since a

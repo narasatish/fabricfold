@@ -129,9 +129,11 @@ describe("sign-in rules", () => {
     expect(fn("setPasscode")).toMatch(/requireStudent\(\)/);
   });
 
-  it("hasPasscode doesn't reveal whether a number is registered", () => {
+  it("hasPasscode may now reveal registration (for the login screen's own routing), but only behind the same per-IP rate limit as every other guessable check here", () => {
     const f = fn("hasPasscode");
     expect(f).toMatch(/hasPasscode: !!stu\?\.passwordHash/);
-    expect(f).not.toMatch(/not registered/i);
+    expect(f).toMatch(/rateLimit\(`hascode:ip:/);
+    // a rate-limited caller must never be told a real account "isn't registered"
+    expect(f).toMatch(/registered: ipOk \? !!stu : true/);
   });
 });

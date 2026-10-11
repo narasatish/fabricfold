@@ -95,6 +95,11 @@ export default function LoginForm() {
     setLoading(true);
     try {
       const r = await hasPasscode(phone);
+      if (!r.registered) {
+        setNotRegistered(true);
+        setStep("otp"); // reuses the existing "Not registered yet" screen below
+        return;
+      }
       setStep(r.hasPasscode ? "passcode" : "setpw");
     } catch (e) {
       toast((e as Error).message || "Failed to check account", true);

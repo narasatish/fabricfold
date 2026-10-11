@@ -14,7 +14,7 @@ import { sellCyclePack } from "@/lib/actions/subscription";
 import { CYCLE_RATES, CYCLE_KG_LIMIT, collegeUsesCycleBasedPricing, collegeExpressFee, expressItemRate } from "@/lib/money";
 import { enqueueIntake, newIdemKey } from "@/lib/offline-queue";
 import { topUpCredits } from "@/lib/actions/ops";
-import { updateStudentPhone, updateStudentDetails } from "@/lib/actions/admin";
+import { updateStudentPhone, updateStudentDetails, resetStudentPassword } from "@/lib/actions/admin";
 import { eraseStudentData } from "@/lib/actions/privacy";
 
 type Student = {
@@ -49,6 +49,7 @@ export default function StaffCustomerClient({ student, displayId, staffRole, pla
   const toast = useToast();
   const tier = loyaltyBadge(student.lifetimePieces);
   const [showPhoneEdit, setShowPhoneEdit] = useState(false);
+  const [pwResetBusy, setPwResetBusy] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [details, setDetails] = useState({
     name: student.name,
@@ -529,7 +530,7 @@ Currently ${current}. Type the code printed on the bag they are being given.
             <div className="muted mono">ID {displayId}</div>
             <div className="row gap8" style={{ alignItems: "center" }}>
               <div className="muted" style={{ fontSize: "12px" }}>+91 {student.phone}</div>
-              {staffRole >= 3 && (
+              {staffRole >= 2 && (
                 <button
                   className="action"
                   style={{ padding: "2px 6px" }}
@@ -537,6 +538,26 @@ Currently ${current}. Type the code printed on the bag they are being given.
                   onClick={() => { setNewPhone(student.phone); setShowPhoneEdit(true); }}
                 >
                   <Svg name="edit" size={13} />
+                </button>
+              )}
+              {staffRole >= 2 && (
+                <button
+                  className="action"
+                  style={{ padding: "2px 6px" }}
+                  aria-label="Reset student's password"
+                  disabled={pwResetBusy}
+                  onClick={async () => {
+                    if (!confirm(`Clear ${student.name}'s password? They'll set a new one with their phone and customer ID next time they sign in.`)) return;
+                    setPwResetBusy(true);
+                    try {
+                      const r = await resetStudentPassword(student.id);
+                      toast(r.ok ? "Password cleared" : r.error || "Failed", !r.ok);
+                    } finally {
+                      setPwResetBusy(false);
+                    }
+                  }}
+                >
+                  <Svg name="shield" size={13} />
                 </button>
               )}
             </div>

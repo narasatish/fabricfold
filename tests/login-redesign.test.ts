@@ -11,16 +11,14 @@ const read = (p: string) => fs.readFileSync(path.resolve(__dirname, "..", p), "u
 const form = read("app/login/_components/LoginForm.tsx");
 
 describe("WhatsApp is the hero, not an alternative below a phone field", () => {
-  it("the hero step shows NO phone input by default", () => {
+  it("password is the primary door (owner, Oct 2026): the phone input shows unconditionally on hero, WhatsApp is the secondary option below it", () => {
     const hero = form.slice(form.indexOf('step === "hero"'), form.indexOf('step === "whatsapp"'));
-    // the field only appears inside the showPhone toggle, never unconditionally
-    expect(hero).toMatch(/!showPhone \? \(/);
-    expect(hero).toMatch(/Have a passcode\? Sign in with your number/);
+    expect(hero).toMatch(/id="phone-input"/);
+    expect(hero).toMatch(/Continue with WhatsApp/);
   });
-  it("a number with no passcode is sent back to WhatsApp, never into a dead OTP screen", () => {
-    expect(form).toMatch(/setShowPhone\(false\);\s*\n\s*toast\("No passcode set for this number yet — tap Continue with WhatsApp", true\);/);
-    // and — the actual fix — it does NOT fall through to handleRequestOtp
-    const fn = form.slice(form.indexOf("const handleContinue"), form.indexOf("const handlePasscodeLogin"));
+  it("a number with no password goes to the customer-ID setup step, never to a dead OTP screen", () => {
+    const fn = form.slice(form.indexOf("const handleContinue"), form.indexOf("const handleSetPassword"));
+    expect(fn).toMatch(/setStep\(r\.hasPasscode \? "passcode" : "setpw"\)/);
     expect(fn).not.toMatch(/handleRequestOtp/);
   });
 });

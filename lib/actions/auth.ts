@@ -555,6 +555,84 @@ export async function loginWithPasscode(phone: string, passcode: string) {
   return { ok: true as const };
 }
 
+/* ─────────────── First-time password, verified by customer ID ───────────────
+
+   WhatsApp OTP has been unreliable (slow, or not arriving on some phones at
+   all — owner, Oct 2026), so this is a second root of trust alongside it, not
+   a replacement: a student who has never set a password proves who they are
+   with their customer ID (e.g. "S1009") instead of a code sent to their
+   phone. That ID is handed out in person at the counter when the bag is
+   issued — something only the student physically has, not something a
+   classmate who merely knows their phone number could look up — so it is a
+   real proof of identity, on the same footing as "possession of the phone"
+   is for OTP. Once a password exists, changing it again goes through
+   changePasscode (proves the CURRENT password) exactly like any other
+   password reset; this path only ever fires once, for an account that has
+   no password yet. Same per-IP rate limit and per-account lockout as
+   loginWithPasscode, reusing the identical atomic-lock transaction so a
+   parallel-guessing attack can't bypass it either. */
+export async function createPasswordWithCustomerId(phone: string, customerId: string, newPassword: string) {
+  const p = phone.replace(/\D/g, "").slice(-10);
+  if (p.length !== 10) return { ok: false as const, error: "Enter a valid 10-digit mobile number" };
+  const code = String(customerId ?? "").trim().toUpperCase();
+  if (!code) return { ok: false as const, error: "Enter your customer ID" };
+
+  const ip = await requestIp();
+  if (ip !== "unknown") {
+    const lim = await rateLimit(`setpw:ip:${ip}`, PASSCODE_MAX_PER_IP_HOUR, 3600);
+    if (!lim.allowed) {
+      return { ok: false as const, error: `Too many attempts from this device. Try again in ${Math.ceil(lim.retryAfterSec / 60)} minutes.` };
+    }
+  }
+
+  const stu = await db.student.findUnique({ where: { phone: p }, include: { bags: { where: { status: "active" } } } });
+  // Deliberately identical wording for every failure reason — distinct
+  // messages would turn this into a directory of who is registered and
+  // what their customer ID is.
+  const generic = "Mobile number or customer ID is incorrect";
+  if (!stu) return { ok: false as const, error: generic };
+  if (stu.passwordHash) return { ok: false as const, error: "This account already has a password — use Forgot password instead" };
+
+  const lockedFor = lockoutMinutesLeft(stu.pwLockedUntil);
+  if (lockedFor > 0) {
+    return { ok: false as const, error: `Too many wrong tries — locked for ${lockedFor} more minute${lockedFor === 1 ? "" : "s"}. Ask the counter for help.` };
+  }
+
+  const matches = stu.bags.some((b) => b.code === code);
+  if (!matches) {
+    // Same race-safe locked-increment as loginWithPasscode's own wrong-guess
+    // path — see its comment for why a plain read-then-write isn't enough.
+    const result = await db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Student"`)} WHERE id = ${stu.id} FOR UPDATE`;
+      const fresh = await tx.student.findUniqueOrThrow({ where: { id: stu.id } });
+      const attempts = fresh.pwFailedAttempts + 1;
+      const lock = attempts >= MAX_PW_ATTEMPTS;
+      await tx.student.update({
+        where: { id: stu.id },
+        data: { pwFailedAttempts: lock ? 0 : attempts, pwLockedUntil: lock ? new Date(Date.now() + LOCKOUT_MS) : fresh.pwLockedUntil },
+      });
+      return { lock, attempts };
+    }, { maxWait: 15_000, timeout: 15_000 });
+    if (result.lock) {
+      return { ok: false as const, error: `Too many wrong tries — locked for ${Math.round(LOCKOUT_MS / 60_000)} minutes. Ask the counter for help.` };
+    }
+    const left = MAX_PW_ATTEMPTS - result.attempts;
+    return { ok: false as const, error: `${generic} — ${left} attempt${left === 1 ? "" : "s"} left` };
+  }
+
+  const problem = passcodeProblem(newPassword);
+  if (problem) return { ok: false as const, error: problem };
+
+  const { hash, salt } = await hashPasscode(newPassword.trim());
+  await db.student.update({
+    where: { id: stu.id },
+    data: { passwordHash: hash, passwordSalt: salt, passwordSetAt: new Date(), pwFailedAttempts: 0, pwLockedUntil: null },
+  });
+  await createSession({ mode: "customer", studentId: stu.id, epoch: stu.sessionEpoch });
+  await recordSignIn("student", stu.id, stu.name, "passcode");
+  return { ok: true as const };
+}
+
 /* Revoke every session for this account, including the one on a lost phone.
    Bumping the epoch invalidates all previously issued tokens at once — a JWT
    cannot be recalled any other way. */

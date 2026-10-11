@@ -210,6 +210,25 @@ export async function updateStudentPhone(studentId: string, newPhone: string) {
   return { ok: true as const };
 }
 
+/* Clear a student's password so they can set a new one themselves with their
+   phone + customer ID (createPasswordWithCustomerId, lib/actions/auth.ts),
+   which otherwise refuses when a password already exists. Also clears any
+   lockout — the counter confirming who someone is in person is at least as
+   strong a proof as the lockout exists to wait out. Does not sign anyone out
+   of a device already logged in. */
+export async function resetStudentPassword(studentId: string) {
+  const st = await requireStaff(2); // Manager+
+  const stu = await db.student.findUnique({ where: { id: studentId } });
+  if (!stu) return { ok: false as const, error: "Student not found" };
+  assertSameCollege(st, stu.collegeId);
+  await db.student.update({
+    where: { id: studentId },
+    data: { passwordHash: null, passwordSalt: null, passwordSetAt: null, pwFailedAttempts: 0, pwLockedUntil: null },
+  });
+  await audit("Student password reset", `${stu.name} (${stu.id})`, st.id);
+  return { ok: true as const };
+}
+
 /**
  * Edit a student's details: name, campus.
  *

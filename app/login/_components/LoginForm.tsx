@@ -25,19 +25,20 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { useToast } from "@/components/chrome";
-import { requestOtp, verifyOtp, hasPasscode, loginWithPasscode } from "@/lib/actions/auth";
+import { requestOtp, verifyOtp, hasPasscode, loginWithPasscode, createPasswordWithCustomerId } from "@/lib/actions/auth";
 import { startWhatsAppLogin, checkWhatsAppLogin } from "@/lib/actions/wa-login";
 import InstallHint from "@/components/install-hint";
 
 export default function LoginForm() {
   const router = useRouter();
   const toast = useToast();
-  const [step, setStep] = useState<"hero" | "otp" | "passcode" | "whatsapp">("hero");
+  const [step, setStep] = useState<"hero" | "otp" | "passcode" | "setpw" | "whatsapp">("hero");
   const [mode, setMode] = useState<"customer" | "staff">("customer");
-  const [showPhone, setShowPhone] = useState(false); // the passcode-entry door, collapsed by default
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [passcode, setPasscodeValue] = useState("");
+  const [customerId, setCustomerId] = useState("");
+  const [newPw, setNewPw] = useState("");
   const [loading, setLoading] = useState(false);
   const [notRegistered, setNotRegistered] = useState(false);
 
@@ -81,10 +82,11 @@ export default function LoginForm() {
     }
   };
 
-  /* Students who have set a passcode go straight to it — no waiting for a
-     text, and it works where the signal doesn't. A number with NO passcode
-     is sent back to WhatsApp rather than into a guaranteed-dead OTP screen —
-     that redirect is the whole point of this redesign. */
+  /* A student with a password goes straight to entering it. One with none
+     yet goes to set one up with their customer ID (createPasswordWithCustomerId)
+     instead — not to WhatsApp, which has been unreliable (owner, Oct 2026:
+     slow or not arriving on some phones). WhatsApp stays as a fallback link
+     below, not the primary door anymore. */
   const handleContinue = async () => {
     if (!/^\d{10}$/.test(phone.replace(/\D/g, ""))) {
       toast("Enter a valid 10-digit number", true);
@@ -93,11 +95,25 @@ export default function LoginForm() {
     setLoading(true);
     try {
       const r = await hasPasscode(phone);
-      if (r.hasPasscode) { setStep("passcode"); return; }
-      setShowPhone(false);
-      toast("No passcode set for this number yet — tap Continue with WhatsApp", true);
+      setStep(r.hasPasscode ? "passcode" : "setpw");
     } catch (e) {
-      toast((e as Error).message || "Failed to check passcode", true);
+      toast((e as Error).message || "Failed to check account", true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSetPassword = async () => {
+    if (!customerId.trim()) { toast("Enter your customer ID", true); return; }
+    if (newPw.length < 4) { toast("Password must be at least 4 characters", true); return; }
+    setLoading(true);
+    try {
+      const r = await createPasswordWithCustomerId(phone, customerId, newPw);
+      if (!r.ok) { toast(r.error, true); return; }
+      toast("Password set — signed in");
+      router.push("/c");
+    } catch (e) {
+      toast((e as Error).message || "Failed to set password", true);
     } finally {
       setLoading(false);
     }
@@ -179,7 +195,7 @@ export default function LoginForm() {
                leftover space instead of pushing it flush right.
                marginLeft:auto alone does the job. */
             style={{ marginLeft: "auto", background: "none", border: "none", color: "var(--ink-2)", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: "6px 4px" }}
-            onClick={() => { setMode(mode === "staff" ? "customer" : "staff"); setShowPhone(false); }}
+            onClick={() => setMode(mode === "staff" ? "customer" : "staff")}
           >
             {mode === "staff" ? "← Customer" : "Staff sign-in"}
           </button>
@@ -209,43 +225,38 @@ export default function LoginForm() {
 
             {mode === "customer" ? (
               <>
-                {/* THE hero action — everything else is a footnote beneath it. */}
-                <button className="btn" onClick={handleWhatsApp} disabled={loading} style={{ fontSize: 17, height: 54 }}>
-                  {loading ? "Opening WhatsApp…" : "Continue with WhatsApp"}
+                {/* Password is the primary door now: it works with no WhatsApp
+                    dependency at all, for both signing in and (via "setpw")
+                    setting one up the first time. */}
+                <div className="field">
+                  <label htmlFor="phone-input">Mobile number</label>
+                  <input
+                    id="phone-input"
+                    className="input"
+                    type="tel"
+                    placeholder="10-digit number"
+                    autoFocus
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(-10))}
+                    onKeyDown={(e) => { if (e.key === "Enter" && phone.length === 10 && !loading) handleContinue(); }}
+                    inputMode="numeric"
+                  />
+                </div>
+                <button className="btn" onClick={handleContinue} disabled={loading || phone.length !== 10} style={{ fontSize: 17, height: 54 }}>
+                  {loading ? "Checking…" : "Continue"}
                 </button>
                 <div className="muted center mt8" style={{ fontSize: "12.5px" }}>
-                  No code to wait for — send one message and you&apos;re in.
+                  No password yet? You&apos;ll set one up with your customer ID.
                 </div>
 
-                {!showPhone ? (
-                  <button
-                    className="muted center mt20"
-                    style={{ display: "block", width: "100%", background: "none", border: "none", fontSize: 13, textDecoration: "underline", textUnderlineOffset: 3, cursor: "pointer" }}
-                    onClick={() => setShowPhone(true)}
-                  >
-                    Have a passcode? Sign in with your number
-                  </button>
-                ) : (
-                  <div className="mt20">
-                    <div className="field">
-                      <label htmlFor="phone-input">Mobile number</label>
-                      <input
-                        id="phone-input"
-                        className="input"
-                        type="tel"
-                        placeholder="10-digit number"
-                        autoFocus
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(-10))}
-                        onKeyDown={(e) => { if (e.key === "Enter" && phone.length === 10 && !loading) handleContinue(); }}
-                        inputMode="numeric"
-                      />
-                    </div>
-                    <button className="btn sec" onClick={handleContinue} disabled={loading || phone.length !== 10}>
-                      {loading ? "Checking…" : "Continue"}
-                    </button>
-                  </div>
-                )}
+                <div className="row center mt16" style={{ gap: 8 }}>
+                  <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
+                  <span className="muted" style={{ fontSize: 12 }}>or</span>
+                  <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
+                </div>
+                <button className="btn sec mt16" onClick={handleWhatsApp} disabled={loading}>
+                  {loading ? "Opening WhatsApp…" : "Continue with WhatsApp"}
+                </button>
 
                 <div className="muted center mt20" style={{ fontSize: "12.5px", lineHeight: 1.5 }}>
                   New here? Visit your campus counter to get registered.
@@ -334,6 +345,54 @@ export default function LoginForm() {
             >
               Forgot passcode — sign in with OTP
             </button>
+          </>
+        )}
+
+        {step === "setpw" && (
+          <>
+            <div className="h-md" style={{ marginBottom: "8px" }}>Set your password</div>
+            <div className="muted" style={{ fontSize: "13px", marginBottom: "16px" }}>
+              +91 {phone.slice(-10)}{" "}
+              <span style={{ color: "var(--teal-dark)", fontWeight: 600, cursor: "pointer" }} onClick={() => { setStep("hero"); setCustomerId(""); setNewPw(""); }}>
+                Change
+              </span>
+            </div>
+            <div className="muted" style={{ fontSize: "12.5px", marginBottom: "16px" }}>
+              Enter the customer ID printed on your bag — staff gave it to you at the counter — to prove it&apos;s you, no code needed.
+            </div>
+            <div className="field">
+              <label htmlFor="customerid-input">Customer ID</label>
+              <input
+                id="customerid-input"
+                className="input"
+                type="text"
+                placeholder="e.g. S1009"
+                autoFocus
+                value={customerId}
+                onChange={(e) => setCustomerId(e.target.value.toUpperCase().replace(/\s+/g, ""))}
+              />
+            </div>
+            <div className="field mt12">
+              <label htmlFor="newpw-input">New password</label>
+              <input
+                id="newpw-input"
+                className="input"
+                type="password"
+                placeholder="At least 4 characters"
+                value={newPw}
+                onChange={(e) => setNewPw(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !loading) handleSetPassword(); }}
+              />
+            </div>
+            <button className="btn mt12" onClick={handleSetPassword} disabled={loading || !customerId.trim() || newPw.length < 4}>
+              {loading ? "Setting up…" : "Set password and sign in"}
+            </button>
+            <div className="muted center mt12" style={{ fontSize: "12px" }}>
+              Don&apos;t have your customer ID? Visit the counter, or{" "}
+              <span style={{ color: "var(--teal-dark)", fontWeight: 600, cursor: "pointer" }} onClick={() => { setStep("hero"); handleWhatsApp(); }}>
+                try WhatsApp instead
+              </span>.
+            </div>
           </>
         )}
 

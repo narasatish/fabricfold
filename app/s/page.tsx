@@ -185,15 +185,18 @@ export default async function StaffHomePage() {
     : [];
   const cash: Record<string, { expected: number; counted: number | null; diff: number | null }> = {};
   if (canCount) {
-    for (const c of colleges) {
-      const r = await computeReport(parsePeriod({ p: "day" }), c.id);
+    // This page reloads every ~10s on the busiest staff screen — one
+    // computeReport() per campus run in parallel, not one after another.
+    const reports = await Promise.all(colleges.map((c) => computeReport(parsePeriod({ p: "day" }), c.id)));
+    colleges.forEach((c, i) => {
+      const r = reports[i];
       const row = cashRows.find((x) => x.collegeId === c.id);
       cash[c.id] = {
         expected: Math.round(Number(r.expectedDrawer)),
         counted: row ? Math.round(Number(row.countedCash)) : null,
         diff: row ? Math.round(Number(row.diff)) : null,
       };
-    }
+    });
   }
 
   return (

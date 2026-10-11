@@ -242,11 +242,11 @@ export async function dailyEmailReport() {
 export async function dailyWhatsAppSummary() {
   const f = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
   const colleges = await db.college.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } });
-  const parts: string[] = [];
-  for (const c of colleges) {
-    const t = await computeReport(parsePeriod({ p: "day" }), c.id);
-    parts.push(`${c.name} collected ${f(t.total)} (cash ${f(t.cash)}, UPI ${f(t.upi)})`);
-  }
+  const reports = await Promise.all(colleges.map((c) => computeReport(parsePeriod({ p: "day" }), c.id)));
+  const parts = colleges.map((c, i) => {
+    const t = reports[i];
+    return `${c.name} collected ${f(t.total)} (cash ${f(t.cash)}, UPI ${f(t.upi)})`;
+  });
   const date = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" });
   return `Daily collections ${date}: ${parts.join(" | ")}`;
 }

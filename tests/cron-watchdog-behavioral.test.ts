@@ -84,18 +84,17 @@ describe("watchdog alerting", () => {
     expect(sentMail.length).toBe(0);
   });
 
-  it("alerts on an unseen SERVER error and marks it seen", async () => {
+  it("DISABLED (owner, Oct 2026): counts an unseen SERVER error but sends no email and leaves it unseen for the daily digest", async () => {
     await db.errorLog.create({ data: { kind: "server", message: "TypeError: cannot read x of undefined", url: "/s/orders/123" } });
     sentMail.length = 0;
     const res = await req("Bearer test-cron-secret");
     const body = await res.json();
-    expect(body.sent).toBe(true);
+    expect(body.sent).toBe(false);
     expect(body.errors).toBe(1);
-    expect(sentMail.length).toBe(1);
-    expect(sentMail[0].subject).toMatch(/live server error/);
+    expect(sentMail.length).toBe(0);
 
     const rows = await db.errorLog.findMany({ where: { kind: "server" } });
-    expect(rows.every((r) => r.seen)).toBe(true);
+    expect(rows.every((r) => !r.seen)).toBe(true);
   });
 
   it("ignores a CLIENT error — that's browser noise, not proof the app is broken", async () => {

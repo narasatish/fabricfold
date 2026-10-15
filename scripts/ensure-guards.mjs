@@ -265,11 +265,31 @@ try {
        path in this app (payment_gateway_ref_uniq, order_idem_key_uniq, ...) has
        a real unique index as the backstop; this one didn't. Applies only when
        an order or complaint ties the payout to something concrete — a bare
-       "manual" goodwill comp with neither is legitimately repeatable. */
+       "manual" goodwill comp with neither is legitimately repeatable.
+
+       NULLS NOT DISTINCT (2026-10-15 fix): a plain UNIQUE index treats NULL as
+       never-equal-to-NULL (standard SQL), so the original version of this index
+       — (studentId, orderId, complaintId, kind), no NULLS NOT DISTINCT — never
+       actually blocked the single most common case: a compensation tied only to
+       a complaintId with orderId left NULL. Two concurrent identical submissions
+       for that case sailed straight through the "unique" index with no
+       violation, proven directly in psql (two inserts, identical key, zero
+       error) and by compensation-race-behavioral.test.ts failing once its own
+       setup correctly built the index into its isolated test schema. The old
+       index name/shape would otherwise read as "already present" forever and
+       never get repaired, so this block now also detects and replaces that
+       specific stale definition. Requires Postgres 15+ (NULLS NOT DISTINCT);
+       this project's minimum supported Postgres is already 15+ (see render.yaml /
+       Supabase, both well past that). */
     const idx = "compensation_dupe_uniq";
-    const hasIdx = await client.query(
-      `select 1 from pg_indexes where schemaname=$1 and indexname=$2`, [SCHEMA, idx]);
-    if (hasIdx.rowCount) {
+    const existing = await client.query(
+      `select indexdef from pg_indexes where schemaname=$1 and indexname=$2`, [SCHEMA, idx]);
+    const hasGoodIdx = existing.rowCount > 0 && /NULLS NOT DISTINCT/i.test(existing.rows[0].indexdef);
+    if (existing.rowCount > 0 && !hasGoodIdx) {
+      console.warn(`[guards] ${SCHEMA}.Compensation.${idx}: stale definition (missing NULLS NOT DISTINCT) — dropping to rebuild`);
+      await client.query(`DROP INDEX "${SCHEMA}"."${idx}"`);
+    }
+    if (hasGoodIdx) {
       console.log(`[guards] ${SCHEMA}.Compensation.${idx}: already present`);
     } else {
       const dupes = await client.query(
@@ -283,6 +303,7 @@ try {
       } else {
         await client.query(
           `CREATE UNIQUE INDEX "${idx}" ON "${SCHEMA}"."Compensation"("studentId", "orderId", "complaintId", kind)
+             NULLS NOT DISTINCT
              WHERE "orderId" IS NOT NULL OR "complaintId" IS NOT NULL`);
         console.log(`[guards] ${SCHEMA}.Compensation.${idx}: index ADDED`);
       }

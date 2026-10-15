@@ -12,6 +12,85 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-10-15: compensation_dupe_uniq's "unique" index never actually blocked its most common case (NULL orderId)
+
+Found while setting up a fresh local dev environment (clone + fresh Postgres DB
++ seed) and running the existing test suite as a sanity check before declaring
+"dev is ready" — not a new feature or a deliberate audit pass, just running
+`npm test` on a clean environment surfaced a real, pre-existing production bug
+that had apparently never failed CI.
+
+**The bug**: `scripts/ensure-guards.mjs` installs `compensation_dupe_uniq`, a
+partial unique index on `Compensation("studentId", "orderId", "complaintId",
+kind)` meant to be the DB-level backstop behind `submitCompensation`'s
+app-level `findFirst` duplicate check (`lib/actions/credits.ts`) — the comment
+there explicitly says the `findFirst` read-then-write can race under Read
+Committed isolation and the index is supposed to catch what it misses, same
+pattern as `payment_gateway_ref_uniq` / `order_idem_key_uniq`.
+
+Standard SQL unique-index semantics treat `NULL` as never-equal-to-`NULL` —
+two rows with the same non-null columns but both `NULL` in a third column are
+NOT considered duplicates by a plain `UNIQUE` index. `orderId` is the most
+commonly-NULL column here: a compensation tied only to a complaint (the
+ordinary "bad service" goodwill-credit case, no specific order involved) has
+`orderId = NULL`. Two concurrent identical submissions for that exact case —
+same `studentId`/`complaintId`/`kind`, both `orderId` NULL — sailed straight
+through the "unique" index with zero violation. Proved directly: two manual
+`INSERT`s with an identical key via `psql`, no error, both committed.
+
+**Why it was invisible until now**: `tests/compensation-race-behavioral.test.ts`
+exists specifically to catch this and does submit exactly the NULL-orderId
+case — but the check in `ensure-guards.mjs` that decides whether to (re)create
+the index only looked at `pg_indexes` for the *name* `compensation_dupe_uniq`,
+not its actual definition. The index existed (just NULL-permissive), so every
+run saw "already present" and skipped rebuilding it — which is also exactly
+why a fresh-clone-and-seed environment was what surfaced it: the index gets
+created once from scratch and then is presence-checked, never content-checked,
+forever after. Whatever Postgres instance originally had this index built
+(including, presumably, production) has carried the same silent gap since the
+index was introduced, with nothing in CI or runtime ever exercising a genuine
+concurrent double-submit against a NULL-orderId payout until this session's
+`npm test` run on a brand-new environment happened to do the schema push +
+guard install in the right order to make the pre-existing behavioral test
+actually test something.
+
+**Fixed** by adding `NULLS NOT DISTINCT` to the index definition (Postgres
+15+; this project's deployed Postgres is already well past that) — this makes
+two NULL `orderId`s compare equal for uniqueness purposes, same as any other
+value. Also hardened `ensure-guards.mjs` itself so this class of gap can't
+recur silently: the "does the index already exist" check now inspects
+`pg_indexes.indexdef` for `NULLS NOT DISTINCT` rather than just the index
+name, and drops + rebuilds a stale (NULL-permissive) index it finds, instead
+of treating name-match as "nothing to do" forever. The duplicate-detection
+query that runs before creating the index (`GROUP BY ... having count(*) > 1`)
+was already correct — Postgres `GROUP BY` does treat NULLs as one group — so
+no existing data is at risk of this migration refusing to apply.
+
+**Verified**: local Postgres rebuilt from scratch, full suite green
+(1189/1189, was 1188/1189 before the fix), `tsc --noEmit` clean.
+
+**Not yet done**: this fix is only applied to the local dev database so far.
+`scripts/ensure-guards.mjs` runs automatically on every `npm run build` /
+deploy, so pushing this change and deploying will apply it to production
+Postgres automatically — but that deploy has NOT happened yet (owner's
+explicit per-deploy OK required first, per this project's standing rule).
+Until deployed, production's `compensation_dupe_uniq` still has the old,
+NULL-permissive definition, and a double-tap on a complaint-only (no order)
+compensation in production is still exploitable the same way it was found
+here. Treat shipping this fix as a real-money-correctness deploy, not a
+routine one.
+
+**Lesson, generalizes**: an idempotency script that checks "does a guard with
+this NAME exist" instead of "does a guard with this CORRECT DEFINITION exist"
+can only ever install its intended protection once, on the one environment
+where it ran before the bug in its own definition was introduced or
+discovered — every environment after that (including production, if the bug
+predates it) silently inherits the broken version forever, with the script
+itself reporting "already present" as if everything were fine. Any future
+`ensure-guards.mjs` addition should diff the actual index/constraint
+definition, not just its name, the same way this fix now does for
+`compensation_dupe_uniq`.
+
 ## RESOLVED 2026-09-11 (late evening): missing busy-state guard on accept-order button
 
 Staff order acceptance flow (OrderClient.tsx, line 951) was missing the 

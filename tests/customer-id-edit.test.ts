@@ -39,12 +39,12 @@ describe("what it refuses", () => {
   it("a released bag — that code belongs to the pool now", () => {
     expect(fn).toMatch(/This code has been released/);
   });
-  it("a NUMBER another live student holds under a DIFFERENT letter (owner, Sep 22: \"1003, 1004, 1005 — everything should be unique\")", () => {
-    // The exact-code check above catches "B1003" twice; it says nothing
-    // about "B1003" landing on a number "G1003" already holds — found live
-    // after the owner reported two students both holding "1003".
-    expect(fn).toMatch(/numberClashCodes/);
-    expect(fn).toMatch(/numbers must be unique regardless of letter/);
+  it("a number under a DIFFERENT letter is allowed (reversed 2026-10-19 — uniqueness is per letter now)", () => {
+    // B1003 and G1003 may now coexist — the old cross-letter block is gone;
+    // see lib/bagcode.ts's file-header comment for why. The exact-code check
+    // above is what remains, and it's sufficient on its own.
+    expect(fn).not.toMatch(/numberClashCodes/);
+    expect(fn).not.toMatch(/numbers must be unique regardless of letter/);
   });
 });
 

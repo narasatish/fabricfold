@@ -238,10 +238,11 @@ describe("phone verification and account creation", () => {
     expect(again.ok).toBe(false);
   });
 
-  it("allocates V series customer IDs at or above 1001, from the SHARED number line", async () => {
-    // One shared FySequence row across every letter now (owner, Sep 2026:
-    // "S1001, F1002, G1003, F1004... it should be continuous"), not a
-    // separate "V" row — see lib/bagcode.ts's allocateBagCode.
+  it("allocates V series customer IDs at or above 1001, from V's own number line", async () => {
+    // Per-letter FySequence row now (reversed 2026-10-19 from one shared row
+    // across every letter — see lib/bagcode.ts's file-header comment): V has
+    // its own independent counter, fyTag "V", so it starts at 1001 on its
+    // own regardless of what any other letter has minted.
     const college = await db.college.findFirst({ where: { name: "BVRIT" } });
     if (!college) return;
 
@@ -256,11 +257,11 @@ describe("phone verification and account creation", () => {
     }
 
     const seq = await db.fySequence.findUnique({
-      where: { kind_fyTag: { kind: "bagcode", fyTag: "shared" } },
+      where: { kind_fyTag: { kind: "bagcode", fyTag: "V" } },
     });
     // If no sequence row exists yet, it will start at MINT_FROM (1000) and
     // increment to 1001 on first real allocation — otherwise it's already
-    // been advanced (by V codes or any other letter) past that baseline.
+    // been advanced past that baseline.
     expect(seq === null || seq.value >= 1000).toBe(true);
   });
 });

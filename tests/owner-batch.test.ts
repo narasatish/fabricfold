@@ -148,24 +148,16 @@ describe("the import route", () => {
   it("skips an existing mobile rather than overwriting", () => {
     expect(src).toMatch(/already registered/);
   });
-  it("bumps the SHARED allocator past the highest imported number", () => {
+  it("bumps each letter's own allocator past the highest imported number for that letter", () => {
     // otherwise "sell a bag" could mint a code the owner already printed —
-    // now one shared number line across every letter (owner, Sep 2026:
-    // "S1001, F1002, G1003... continuous"), so this tracks the single
-    // highest imported number, not one per letter.
+    // per-letter now (reversed 2026-10-19 from one shared line across every
+    // letter — see lib/bagcode.ts's file-header comment), so this tracks the
+    // highest imported number PER letter.
     expect(src).toMatch(/row\.value < maxImported/);
-    expect(src).toMatch(/fyTag: "shared"/);
+    expect(src).toMatch(/maxImportedByLetter/);
   });
   it("refuses a code already on someone's active bag", () => {
     expect(src).toMatch(/status: "active" \}, include: \{ student: true \}/);
-  });
-  it("refuses a NUMBER already used under a different letter (owner, Sep 22: \"1003, 1004, 1005 — everything should be unique\")", () => {
-    // The exact-code check above only catches "G1003" twice; it says
-    // nothing about "G1003" and "B1003" sharing a number, which is the
-    // actual invariant the shared FySequence depends on — found live
-    // after the owner reported two students both holding "1003".
-    expect(src).toMatch(/usedNumbers/);
-    expect(src).toMatch(/numbers must be unique regardless of letter/);
   });
 });
 

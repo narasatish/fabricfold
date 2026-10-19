@@ -20,7 +20,7 @@ import ExcelJS from "exceljs";
 import { db } from "@/lib/db";
 import { rosterSoon } from "@/lib/sheets-sync";
 import { requireStaff, assertSameCollege, AuthError } from "@/lib/auth";
-import { parseBagCode, type Tier } from "@/lib/bagcode";
+import { parseBagCode, BAG_LETTER, type Tier } from "@/lib/bagcode";
 
 /* usageBuckets/planGross now live in lib/plan-activation.ts (Sep 22) — moved
    out of lib/actions/subscription.ts (a "use server" file, which may only
@@ -124,26 +124,13 @@ export async function POST(req: Request) {
   const skipped: string[] = [];
   const problems: string[] = [];
   const warnings: string[] = [];
-  // One shared number line across every letter (see lib/bagcode.ts's
-  // allocateBagCode) — track the single highest imported number, not one
-  // per letter, so the post-import bump lands on the SAME sequence
-  // auto-minted codes draw from.
-  let maxImported = 0;
-
-  /* The NUMBER must be unique across every letter (owner, Sep 22: "1003,
-     1004, 1005: everything should be unique... by seeing the number we need
-     to know how many students are active") — G1003 and B1003 must never both
-     exist. The check below this one only catches the exact code repeating
-     ("G1003" twice); it says nothing about "G1003" and "B1003" sharing a
-     number, which is the actual invariant this scheme depends on. Seeded
-     from every currently-active bag so a duplicate against an EXISTING
-     student is caught too, not just duplicates within this one sheet. */
-  const activeBags = await db.bag.findMany({ where: { status: { not: "released" } }, select: { code: true } });
-  const usedNumbers = new Map<number, string>();
-  for (const b of activeBags) {
-    const p = parseBagCode(b.code);
-    if (p) usedNumbers.set(p.n, b.code);
-  }
+  // Per-LETTER number line (reversed 2026-10-19 from one shared line across
+  // every letter — see lib/bagcode.ts's file-header comment for why: a
+  // cross-letter collision blocked registrations against numbers staff
+  // couldn't even see, since rosters are campus-scoped). Track the highest
+  // imported number PER letter, so the post-import bump lands on the right
+  // per-letter sequence row.
+  const maxImportedByLetter = new Map<string, number>();
 
   for (let r = 2; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
@@ -210,11 +197,6 @@ export async function POST(req: Request) {
     if (existsPhone) { skipped.push(`row ${r}: ${phone} already registered (${existsPhone.name})`); continue; }
     const codeTaken = await db.bag.findFirst({ where: { code: codeRaw, status: "active" }, include: { student: true } });
     if (codeTaken) { problems.push(`row ${r}: "${name}" — ${codeRaw} is already ${codeTaken.student.name}'s active bag`); continue; }
-    const numberTaken = usedNumbers.get(parsed.n);
-    if (numberTaken && numberTaken !== codeRaw) {
-      problems.push(`row ${r}: "${name}" — ${codeRaw}'s number is already used by ${numberTaken} — numbers must be unique regardless of letter; fix the sheet`);
-      continue;
-    }
 
     try {
       await db.$transaction(async (tx) => {
@@ -243,23 +225,24 @@ export async function POST(req: Request) {
         });
       });
       added.push(`${name} — ${codeRaw}`);
-      maxImported = Math.max(maxImported, parsed.n);
-      usedNumbers.set(parsed.n, codeRaw); // catches a duplicate number LATER in this same sheet too
+      const letter = BAG_LETTER[parsed.kind];
+      maxImportedByLetter.set(letter, Math.max(maxImportedByLetter.get(letter) ?? 0, parsed.n));
     } catch (e) {
       problems.push(`row ${r}: "${name}" — ${(e as Error).message.split("\n")[0].slice(0, 120)}`);
     }
   }
 
-  /* Bump the SHARED allocator (see lib/bagcode.ts) past the highest number
-     imported, regardless of letter, so a future "sell a bag" can never
-     mint a code the owner has already printed — and never repeats a number
-     under a different letter either. */
-  if (maxImported > 0) {
-    const row = await db.fySequence.findUnique({ where: { kind_fyTag: { kind: "bagcode", fyTag: "shared" } } });
+  /* Bump each letter's own allocator (see lib/bagcode.ts) past the highest
+     number imported FOR THAT LETTER, so a future "sell a bag" can never mint
+     a code the owner has already printed under the same letter. Letters are
+     independent now (reversed 2026-10-19), so this no longer needs to look
+     at any other letter's highest number. */
+  for (const [letter, maxImported] of maxImportedByLetter) {
+    const row = await db.fySequence.findUnique({ where: { kind_fyTag: { kind: "bagcode", fyTag: letter } } });
     if (!row || row.value < maxImported) {
       await db.fySequence.upsert({
-        where: { kind_fyTag: { kind: "bagcode", fyTag: "shared" } },
-        create: { kind: "bagcode", fyTag: "shared", value: maxImported },
+        where: { kind_fyTag: { kind: "bagcode", fyTag: letter } },
+        create: { kind: "bagcode", fyTag: letter, value: maxImported },
         update: { value: maxImported },
       });
     }

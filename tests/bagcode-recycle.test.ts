@@ -17,9 +17,12 @@ function fakeTx(bags: { code: string; status: string }[], seq: Record<string, nu
       findMany: async ({ where, orderBy }: never | any) => {
         const letter: string = where.code.startsWith;
         let rows = bags.filter((b) => b.code.startsWith(letter));
-        rows = where.status?.not
-          ? rows.filter((b) => b.status !== where.status.not)
-          : rows.filter((b) => b.status === where.status);
+        // Three shapes this allocator queries with: an exact status (the
+        // recycled-codes search), { not: ... } (the live-codes search), or
+        // no status key at all (the per-letter existingMax floor, which
+        // wants every row for the letter regardless of status).
+        if (where.status?.not !== undefined) rows = rows.filter((b) => b.status !== where.status.not);
+        else if (where.status !== undefined) rows = rows.filter((b) => b.status === where.status);
         if (orderBy) rows = [...rows].sort((a, b) => a.code.localeCompare(b.code));
         return rows.map((b) => ({ code: b.code }));
       },
@@ -56,14 +59,15 @@ describe("allocation prefers released codes", () => {
   });
 
   it("jumps a legacy sub-1000 sequence forward instead of colliding with print stock", async () => {
-    // a campus that minted 001–037 (any letter) in the 3-digit era must not
-    // mint 038 once the owner's 1001-numbered bags exist
-    const tx = fakeTx([], { shared: 37 });
+    // a campus that minted 001–037 in the 3-digit era must not mint 038
+    // once the owner's 1001-numbered bags exist (per-letter sequence, keyed
+    // "B" for bronze, since letters no longer share one line)
+    const tx = fakeTx([], { B: 37 });
     expect(await allocateBagCode(tx, "bronze")).toBe("B1001");
   });
 
   it("reuses a released code instead of minting a new one", async () => {
-    const tx = fakeTx([{ code: "B004", status: "released" }], { shared: 9 });
+    const tx = fakeTx([{ code: "B004", status: "released" }], { B: 9 });
     expect(await allocateBagCode(tx, "bronze")).toBe("B004");
   });
 
@@ -82,7 +86,7 @@ describe("allocation prefers released codes", () => {
     const tx = fakeTx([
       { code: "B002", status: "released" },
       { code: "B002", status: "active" },
-    ], { shared: 1004 });
+    ], { B: 1004 });
     expect(await allocateBagCode(tx, "bronze")).toBe("B1005");
   });
 
@@ -90,39 +94,41 @@ describe("allocation prefers released codes", () => {
     /* The owner of a lost code keeps it — they get the same number on a new
        bag, via reissueBagSameCode, which bypasses this allocator entirely.
        What must never happen is the allocator giving that code to somebody else. */
-    const tx = fakeTx([{ code: "B1001", status: "lost" }], { shared: 1001 });
+    const tx = fakeTx([{ code: "B1001", status: "lost" }], { B: 1001 });
     expect(await allocateBagCode(tx, "bronze")).toBe("B1002");
   });
 
   it("never reuses a REPLACED code", async () => {
-    const tx = fakeTx([{ code: "B1001", status: "replaced" }], { shared: 1001 });
+    const tx = fakeTx([{ code: "B1001", status: "replaced" }], { B: 1001 });
     expect(await allocateBagCode(tx, "bronze")).toBe("B1002");
   });
 
   it("a released code is never handed out under a DIFFERENT letter", async () => {
     // a released Bronze code must not come back as a Gold one — the
     // recycled-code search is scoped to codes starting with the target
-    // letter, even though the NUMBER sequence itself is shared (below)
+    // letter, and each letter now has its own independent number line too
     const tx = fakeTx([{ code: "B003", status: "released" }]);
     expect(await allocateBagCode(tx, "gold")).toBe("G1001");
   });
 
-  it("shares ONE number line across every letter — no two bags ever carry the same number", async () => {
-    /* Owner, Sep 2026: "there cant be two 1001 like that so for example
-       S1001, F1002, G1003, F1004... it should be continuous" — matches the
-       owner's own real enrolment sheet (B1001, G1002, B1003, S1005...).
-       Each letter still means its own tier/kind, but a bronze bag and a
-       gold bag minted back to back get CONSECUTIVE numbers, not each
-       restarting from 1001. */
-    const tx = fakeTx([], { shared: 1000 });
+  it("each letter has its OWN independent number line — the same number legitimately repeats across letters", async () => {
+    /* Reversed 2026-10-19 (owner): letters used to share one number line so
+       a bare number alone identified a bag (S1001, F1002, G1003...). Found
+       live that this blocked registrations against numbers staff had no way
+       to see, since rosters are campus-scoped — S1546 refused because an
+       unrelated V1546 already existed. Now each letter mints independently:
+       two back-to-back mints under DIFFERENT letters both legitimately land
+       on 1001, and a letter's own second mint is 1002 regardless of what
+       any other letter has issued. */
+    const tx = fakeTx([], { S: 1000, G: 1000 });
     expect(await allocateBagCode(tx, "silver")).toBe("S1001");
-    expect(await allocateBagCode(tx, "faculty")).toBe("F1002");
-    expect(await allocateBagCode(tx, "gold")).toBe("G1003");
-    expect(await allocateBagCode(tx, "faculty")).toBe("F1004");
+    expect(await allocateBagCode(tx, "gold")).toBe("G1001");
+    expect(await allocateBagCode(tx, "silver")).toBe("S1002");
+    expect(await allocateBagCode(tx, "gold")).toBe("G1002");
   });
 
   it("recycles faculty codes too", async () => {
-    const tx = fakeTx([{ code: "F002", status: "released" }], { shared: 1008 });
+    const tx = fakeTx([{ code: "F002", status: "released" }], { F: 1008 });
     expect(await allocateBagCode(tx, "faculty")).toBe("F002");
   });
 

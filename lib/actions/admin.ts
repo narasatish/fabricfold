@@ -74,12 +74,13 @@ export async function registerStudent(input: { name: string; phone: string; coll
     const letterFor = isFaculty ? "F" : isBvrit ? "the BVRIT letter" : ({ bronze: "B", silver: "S", gold: "G" } as Record<string, string>)[expectedKind || ""] || "the plan letter";
     return { ok: false as const, error: `This student's ID must start with ${letterFor}` };
   }
+  // Uniqueness is per LETTER, not across letters (reversed 2026-10-19 — see
+  // lib/bagcode.ts's file-header comment): S1546 and V1546 are different
+  // students at different campuses and may coexist. The exact typed code
+  // (letter + number together) is what must be free, and that's a plain
+  // string match against any other ACTIVE bag.
   if (!isBvrit) {
     if (await db.bag.findFirst({ where: { code: typedCode, status: "active" } })) return { ok: false as const, error: `${typedCode} is already in use` };
-    const activeCodes = await db.bag.findMany({ where: { status: "active" }, select: { code: true } });
-    if (activeCodes.some((b) => parseBagCode(b.code)?.n === parsedCode!.n)) {
-      return { ok: false as const, error: `The number ${parsedCode!.n} is already used by another ID — numbers must be unique across letters` };
-    }
   }
 
   // permanent random 6-digit FabricFold code, unique (same scheme as self-registration)

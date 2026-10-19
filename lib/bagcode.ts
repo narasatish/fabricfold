@@ -20,10 +20,23 @@
      entitlement, and B on a Gold plan would be a lie.
    - one code never names two students AT ONCE — enforced in the database by a
      partial unique index over ACTIVE bags, not merely by this allocator.
-   - globally unique rather than per-campus: whoever finds a bag labelled B042
-     must be able to reach exactly one student without knowing the campus. 999
-     per kind is a deliberate "for now" ceiling — a second campus needs a campus
-     letter in the prefix, and that decision has to happen BEFORE bags print.
+   - unique WITHIN its own letter, not across letters (reversed 2026-10-19,
+     owner: the earlier "one shared number line across every letter" design —
+     S1001, F1002, G1003 consuming one global counter so a bare number alone
+     identified a bag — was itself the owner's own explicit, deliberate
+     request at the time (see allocateBagCode's history below). Reversed
+     because it has a real cost in practice: the two campuses are run as
+     separate rosters (St Mary's S/B/G, BVRIT V), and a global number pool
+     means registering a St Mary's student can be blocked by a BVRIT number
+     the staff member has no way to see (campus-scoped roster views don't
+     show the other campus's bags at all — see app/s/students/page.tsx) —
+     found live 2026-10-19 registering S1546 against an existing V1546. The
+     letter is already part of the printed code; a student only needs to be
+     found unambiguously by their FULL code (letter + number), and the full
+     code's uniqueness is still enforced in the database by the
+     bag_code_one_active_uniq partial index exactly as before. Each letter
+     now draws from its own counter (see allocateBagCode), so B/S/G/F and V
+     can and will repeat the same number without colliding.
 
    Backed by the same transactional FySequence table as invoice numbering, so
    two counters issuing bags in the same instant cannot collide. */
@@ -133,39 +146,51 @@ export async function allocateBagCode(tx: Prisma.TransactionClient, kind: BagKin
   const recycled = released.find((r) => !taken.has(r.code));
   if (recycled) return recycled.code;
 
-  /* ONE shared number line across every letter (owner, Sep 2026: "there
-     cant be two 1001 like that so for example S1001, F1002, G1003, F1004...
-     it should be continuous so that we will have unique id to be written on
-     the bag and no confusion") — matches the owner's own real enrolment
-     sheet exactly (B1001, G1002, B1003, S1005, S1006... the NUMBER never
-     repeats regardless of letter). Each letter still has its own
-     free-standing meaning (the tier/kind), but the digits come from a
-     single pool, not a separate counter per letter — two bags never carry
-     the same number even with different letters, so a number alone
-     unambiguously identifies one bag.
+  /* ONE number line PER LETTER (reversed 2026-10-19 from a single shared
+     line across every letter — see the file-header comment for why). The
+     FySequence row is now keyed by the letter itself, so B/S/G/F/V each
+     mint independently and the same number can legitimately appear under
+     more than one letter (S1546 and V1546 coexisting is correct now, not a
+     collision).
 
      Sequence starts at MINT_FROM: printed stock is numbered from 1000, and a
      freshly minted #1037 would clash with nothing in the database while
-     matching no bag anyone can hold. An existing sequence below that (from
-     the 3-digit era) jumps forward once and never looks back.
+     matching no bag anyone can hold. `value` always means "the last number
+     ISSUED" (never "the next one to issue") — every path below ends with one
+     unconditional increment before formatting the code, so MINT_FROM is a
+     baseline to land ON, then step PAST, giving 1001 as the true first code.
 
-     `value` always means "the last number ISSUED" (never "the next one to
-     issue") — every path below ends with one unconditional increment before
-     formatting the code, so MINT_FROM is a baseline to land ON, then step
-     PAST, giving 1001 as the true first code — matching the owner's own
-     printed stock, not 1000 itself. */
-  const SHARED_TAG = "shared";
-  let row = await tx.fySequence.findUnique({ where: { kind_fyTag: { kind: "bagcode", fyTag: SHARED_TAG } } });
+     Defensive floor (new 2026-10-19, needed because this is a live
+     migration off the old shared-pool scheme, not a fresh start): before
+     relying on the counter alone, also check the highest number any LIVE
+     bag of this letter already carries (from the old shared-pool era, a
+     letter's live codes can already sit above MINT_FROM, e.g. existing V
+     codes minted while V shared the old pool) and never hand out a number
+     at or below that. This makes the switch safe regardless of what the
+     old shared counter or existing rows already contain — it can only ever
+     move a letter's next number UP to stay clear of its own history, never
+     down, so BVRIT's first mint under the new scheme lands on 1001 exactly
+     when the data allows it (owner, 2026-10-19: "give numbers for bvrit
+     student from 1001"), and skips ahead automatically if it can't. */
+  // A plain SQL MAX(code) sorts lexicographically ("V999" > "V1546" as
+  // strings), which would silently pick the wrong floor whenever 3-digit and
+  // 4-digit codes mix for the same letter — so the max is computed here, in
+  // JS, off the parsed NUMBER, not the string.
+  const existingCodes = await tx.bag.findMany({ where: { code: { startsWith: letter } }, select: { code: true } });
+  const existingMaxN = existingCodes.reduce((max, b) => Math.max(max, parseBagCode(b.code)?.n ?? 0), 0);
+  const floor = Math.max(MINT_FROM, existingMaxN);
+
+  let row = await tx.fySequence.findUnique({ where: { kind_fyTag: { kind: "bagcode", fyTag: letter } } });
   if (!row) {
-    row = await tx.fySequence.create({ data: { kind: "bagcode", fyTag: SHARED_TAG, value: MINT_FROM } });
-  } else if (row.value < MINT_FROM) {
+    row = await tx.fySequence.create({ data: { kind: "bagcode", fyTag: letter, value: floor } });
+  } else if (row.value < floor) {
     row = await tx.fySequence.update({
-      where: { kind_fyTag: { kind: "bagcode", fyTag: SHARED_TAG } },
-      data: { value: MINT_FROM },
+      where: { kind_fyTag: { kind: "bagcode", fyTag: letter } },
+      data: { value: floor },
     });
   }
   row = await tx.fySequence.update({
-    where: { kind_fyTag: { kind: "bagcode", fyTag: SHARED_TAG } },
+    where: { kind_fyTag: { kind: "bagcode", fyTag: letter } },
     data: { value: { increment: 1 } },
   });
   const code = formatBagCode(kind, row.value);

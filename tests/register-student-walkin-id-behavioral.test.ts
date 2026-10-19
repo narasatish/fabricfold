@@ -228,10 +228,12 @@ describe("St Mary's customer ID is typed by staff and checked before anything is
     const again = await adminActions.registerStudent({ customerId: "S7002", name: "Second Try", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smSilver, method: "cash" });
     expect(again.ok).toBe(false);
   });
-  it("refuses a number already used under another letter", async () => {
+  it("allows the same number under a different letter (reversed 2026-10-19 — uniqueness is per letter now)", async () => {
+    // S7002 already exists from the previous test; B7002 is a different
+    // letter and must be allowed — see lib/bagcode.ts's file-header comment.
     await asManager();
     const r = await adminActions.registerStudent({ customerId: "B7002", name: "Same Number", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smBronze, method: "cash" });
-    expect(r.ok).toBe(false);
+    expect(r.ok).toBe(true);
   });
   it("saves exactly the typed ID on the plan student's bag", async () => {
     await asManager();

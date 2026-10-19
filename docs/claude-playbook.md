@@ -12,6 +12,113 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-10-19: bag-code numbers are now unique PER LETTER, not across every letter — reverses a prior deliberate design
+
+Reported live by the owner: registering a St Mary's student with customer ID
+"S1546" was refused — "The number 1546 is already used by another ID —
+numbers must be unique across letters" — even though searching the full
+student registry for S1546 showed nothing. Root cause, confirmed: a BVRIT
+student already held an active bag coded "V1546". The owner's own staff
+account is St Mary's-scoped, so the roster/search (`app/s/students/page.tsx`)
+never fetches BVRIT rows at all — the colliding bag was real but structurally
+invisible to the person trying to find it, which is exactly why "searching
+the registry shows nothing" and "the system says it's taken" both felt true
+at once.
+
+**This was not a bug in the narrow sense — it was a previously deliberate
+design, now reversed on the owner's explicit instruction.** `lib/bagcode.ts`
+had carried, since Sep 2026, "one shared number line across every letter"
+specifically because the owner asked for it then ("there cant be two 1001
+like that... it should be continuous"). That design meant a bare number alone
+(no letter) could unambiguously identify one bag campus-wide. The owner's
+2026-10-19 request reverses it: St Mary's (S/B/G) and BVRIT (V) should be
+independent namespaces — the same number may legitimately appear under both
+letters — because in practice the shared pool meant a St Mary's registration
+could be blocked by a BVRIT number staff structurally cannot see, with no way
+to diagnose it from the UI. Recording this explicitly because it is the kind
+of reversal this file's own header warns about: a future session must not
+"fix" this back toward the old shared-pool behavior by pattern-matching the
+Sep 2026 comments without reading this entry first.
+
+**Changed**:
+- `lib/bagcode.ts`'s `allocateBagCode`: the single `FySequence` row keyed
+  `{kind:"bagcode", fyTag:"shared"}` is now one row PER LETTER
+  (`fyTag: "B"|"S"|"G"|"F"|"V"`). Each letter mints independently. A
+  defensive floor (new, not in the old design) seeds/bumps a letter's counter
+  to at least the highest number any bag of that letter has EVER carried
+  (live or not, computed in JS off the parsed number — a raw SQL `MAX(code)`
+  would sort lexicographically and silently get this wrong once 3-digit and
+  4-digit codes mix for one letter) — this makes the live migration off the
+  old shared counter safe regardless of what it or existing rows contain; it
+  can only move a letter's next number up to clear its own history, never
+  down. Consequence worth stating plainly: BVRIT's first mint under the new
+  scheme lands on exactly V1001 (owner, 2026-10-19: "give numbers for bvrit
+  student from 1001") ONLY if production's live BVRIT bags don't already sit
+  above 1000 — verified locally with a seeded V1546 bag, where the next
+  auto-allocated BVRIT code correctly came back V1547, not V1001, because
+  jumping backward to 1001 would collide with (or orphan the identity logic
+  around) an already-printed, already-handed-out physical bag. **Whether
+  production's real BVRIT roster already has V-codes above 1000 is unknown
+  from this dev session — check `scripts/check-bagcodes.ts`'s output against
+  production before assuming "starts at 1001" literally happens on first
+  deploy.** If the owner wants EXISTING BVRIT students physically renumbered
+  down to start at 1001, that's a separate, much bigger decision (reprinting
+  bags already in students' hands) and was not attempted here.
+- `lib/actions/admin.ts`'s `registerStudent`: deleted the cross-letter
+  "numbers must be unique across letters" check entirely (lines formerly
+  79-82). The exact-code check immediately above it (`${typedCode} is
+  already in use`) is now the only check needed, and is sufficient on its
+  own — once letters are independent namespaces, "is this exact code
+  already live" is the entire invariant.
+- `lib/actions/bags.ts`'s `setBagCode` (editing an existing student's
+  customer ID): same deletion of the equivalent `numberClashCodes` check.
+- `app/api/import/students/route.ts` (bulk sheet import): the single
+  `usedNumbers` map (number → code, scanning every letter) is deleted; the
+  post-import `FySequence` bump is now done per letter
+  (`maxImportedByLetter`), matching the allocator's new per-letter scheme —
+  this was the trickiest of the four call sites, since it previously tracked
+  one running "highest number imported" across the whole sheet rather than
+  one per letter.
+
+**Verified**: proved the exact failure directly against a seeded local DB —
+with a V1546 bag present, the OLD cross-letter query logic (re-run standalone)
+confirmed it would have blocked S1546 exactly as the owner saw; the NEW
+exact-code-only check does not. Full suite green (1188/1188 — net one fewer
+than before because two now-contradictory old tests were replaced by one new
+one asserting the opposite, correct behavior, rather than both an old and new
+assertion existing side by side). `tsc --noEmit` clean. Five pre-existing
+tests across `tests/bagcode-recycle.test.ts`,
+`tests/register-student-walkin-id-behavioral.test.ts`,
+`tests/bvrit-registration.test.ts`, `tests/owner-batch.test.ts`, and
+`tests/customer-id-edit.test.ts` had encoded the OLD shared-pool behavior as
+their expected outcome and were updated to assert the new per-letter
+behavior instead, rather than deleted — a reversed business rule should
+still have a test pinning down the new direction, the same discipline this
+file's "CORRECTED + RESOLVED 2026-09-11" entry used for the payment-timing
+reversal.
+
+**Not done**: the registry/search gap that made the colliding V1546 bag
+invisible to the St Mary's-scoped owner account is UNCHANGED —
+`app/s/students/page.tsx` still scopes the roster query to the signed-in
+staff's own `collegeId`, and the comment there frames this as deliberate
+campus-walling, consistent with other screens. Now that numbers don't need
+to be globally unique, the original reason to ever cross-reference the other
+campus's roster from here is gone, so this is arguably no longer a gap at
+all — flagging rather than changing it, since relaxing campus-scoping on a
+roster/search view is its own decision with its own tradeoffs (a
+St Mary's-scoped staff account seeing BVRIT students' names/phones) that
+wasn't asked for.
+
+**Lesson, generalizes**: a cross-letter/cross-scope uniqueness rule is easy
+to get right in the code and easy to make undiagnosable in the UI if the two
+scopes are never shown together anywhere — the bug here wasn't really in the
+query, it was in the fact that nothing in the product could ever surface
+"this number collides with something in a campus you can't see." Any future
+uniqueness rule that spans more than one visibility scope (campus, college,
+tenant, etc.) needs either (a) a search/lookup path that can see across that
+scope for exactly this diagnostic purpose, or (b) uniqueness scoped to match
+what's actually visible, which is the direction taken here.
+
 ## RESOLVED 2026-10-15: compensation_dupe_uniq's "unique" index never actually blocked its most common case (NULL orderId)
 
 Found while setting up a fresh local dev environment (clone + fresh Postgres DB

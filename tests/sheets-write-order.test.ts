@@ -214,3 +214,62 @@ describe("Sheet writes retry when Google says slow down", () => {
     expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1);
   });
 });
+
+/* Cost/quota fix, 2026-10-20: writeSheet used to call batchUpdate (create the
+   tab) on EVERY call, unconditionally — wasted after the tab's first-ever
+   creation, since it already exists for every sync after that. With the
+   hourly aggregate sync writing ~20 tabs at up to 3 calls each, that was a
+   third of the sync's own request volume (and Google allows ~60 writes/min/
+   user) spent re-confirming tabs that were already there — a real
+   contributor to the 429s this fix exists for (see lib/sheets.ts's
+   writeSheet comment and docs/claude-playbook.md). Now: try the write
+   optimistically; only call batchUpdate if Google's specific "no such
+   sheet" error comes back, then retry once. */
+describe("writeSheet only creates the tab when the write proves it's actually missing", () => {
+  it("the common case (tab already exists) makes NO batchUpdate call at all", async () => {
+    global.fetch = mockFetch() as unknown as typeof fetch;
+    const { writeSheet } = await import("../lib/sheets");
+    const r = await writeSheet("Test", [["a"]]);
+    expect(r.ok).toBe(true);
+    expect(calls.some((c) => c.url.includes(":batchUpdate"))).toBe(false);
+    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1);
+  });
+
+  it("a genuinely missing tab: PUT fails with Google's exact wording, tab is created, PUT retried and succeeds", async () => {
+    let putAttempts = 0;
+    global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const method = init?.method || "GET";
+      calls.push({ method, url, body: typeof init?.body === "string" ? init.body : undefined });
+      if (url.includes(":batchUpdate")) return new Response("{}", { status: 200 });
+      if (method === "PUT") {
+        putAttempts++;
+        if (putAttempts === 1) return new Response('{"error":{"message":"Unable to parse range: Brand New Tab!A1:Z1"}}', { status: 400 });
+        return new Response("{}", { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    const { writeSheet } = await import("../lib/sheets");
+    const r = await writeSheet("Brand New Tab", [["a"]]);
+    expect(r.ok).toBe(true);
+    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(2);
+    expect(calls.some((c) => c.url.includes(":batchUpdate"))).toBe(true);
+    // the batchUpdate must happen AFTER the first failed PUT, not before it
+    const firstPut = calls.findIndex((c) => c.method === "PUT");
+    const batch = calls.findIndex((c) => c.url.includes(":batchUpdate"));
+    expect(batch).toBeGreaterThan(firstPut);
+  });
+
+  it("a 400 for a DIFFERENT reason (not a missing sheet) is never retried via create-tab", async () => {
+    global.fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      const method = init?.method || "GET";
+      calls.push({ method, url });
+      if (method === "PUT") return new Response('{"error":{"message":"Invalid value at \'data.values\'"}}', { status: 400 });
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    const { writeSheet } = await import("../lib/sheets");
+    const r = await writeSheet("Test", [["a"]]);
+    expect(r.ok).toBe(false);
+    expect(calls.filter((c) => c.method === "PUT")).toHaveLength(1);
+    expect(calls.some((c) => c.url.includes(":batchUpdate"))).toBe(false);
+  });
+});

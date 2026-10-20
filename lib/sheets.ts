@@ -82,8 +82,10 @@ const safeRows = (rows: (string | number)[][]) => rows.map((r) => r.map((c) => s
 /* Google allows about 60 write requests a minute per user, and the hourly sync now
    writes ~20 tabs at three calls each — so a 429 ("slow down") is a realistic
    answer, and without a retry the rest of the tabs quietly stayed stale for an
-   hour. Retries 429/503 with backoff (honouring Retry-After, capped), a few times
-   only: appends run inside a database transaction that holds a lock, so the total
+   hour. Retries 429/503 with backoff (honouring Retry-After, capped — now on
+   BOTH branches: the computed fallback used to be uncapped, so a high retry
+   count could in theory wait far longer than intended), a few times only:
+   appends run inside a database transaction that holds a lock, so the total
    wait must stay short. A real error (400, 401, 403...) is returned at once. */
 async function gfetch(url: string, init: RequestInit, retries = 3): Promise<Response> {
   const base = Number(process.env.SHEETS_RETRY_BASE_MS ?? 1000);
@@ -91,7 +93,7 @@ async function gfetch(url: string, init: RequestInit, retries = 3): Promise<Resp
     const res = await fetch(url, withTimeout(init));
     if ((res.status !== 429 && res.status !== 503) || attempt >= retries) return res;
     const retryAfter = Number(res.headers.get("retry-after"));
-    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 10_000) : base * 2 ** attempt;
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 10_000) : Math.min(base * 2 ** attempt, 10_000);
     await new Promise((r) => setTimeout(r, waitMs));
   }
 }
@@ -168,19 +170,20 @@ export async function appendSheet(
   }
 }
 
+async function createTab(id: string, tab: string, auth: Record<string, string>) {
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}:batchUpdate`, withTimeout({
+    method: "POST",
+    headers: auth,
+    body: JSON.stringify({ requests: [{ addSheet: { properties: { title: tab } } }] }),
+  })).catch(() => {});
+}
+
 /** Overwrite a tab with `rows` (row 0 = headers). Creates the tab if missing. */
 export async function writeSheet(tab: string, rows: (string | number)[][]) {
   if (!sheetsConfigured()) return { ok: false as const, error: "Google Sheets not configured" };
   const id = process.env.GOOGLE_SHEET_ID!;
   const token = await accessToken();
   const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-
-  // Create the tab if it doesn't exist yet (ignore "already exists").
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${id}:batchUpdate`, withTimeout({
-    method: "POST",
-    headers: auth,
-    body: JSON.stringify({ requests: [{ addSheet: { properties: { title: tab } } }] }),
-  })).catch(() => {});
 
   /* Write the new data FIRST, then clear only what's left over — not
      clear-then-write. This tab is the Owner's live operational view (Live,
@@ -200,10 +203,35 @@ export async function writeSheet(tab: string, rows: (string | number)[][]) {
      "Total 0" line). Explicit "" values overwrite it. */
   const padded = safeRows(rows).map((r) => { const a: (string | number)[] = r.slice(0, 26); while (a.length < 26) a.push(""); return a; });
   const dataRange = encodeURIComponent(`${tab}!A1:Z${Math.max(rows.length, 1)}`);
-  const put = await gfetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${dataRange}?valueInputOption=USER_ENTERED`,
-    { method: "PUT", headers: auth, body: JSON.stringify({ values: padded }) },
-  );
+  const putUrl = `https://sheets.googleapis.com/v4/spreadsheets/${id}/values/${dataRange}?valueInputOption=USER_ENTERED`;
+  const putBody = JSON.stringify({ values: padded });
+
+  /* No "create the tab" call up front any more (2026-10-20, cost/quota fix):
+     after the very first sync ever, every tab already exists, so that call
+     was a wasted request on ~20 of the hourly sync's ~20 tabs, every single
+     hour, forever — a third of the whole sync's ~60 requests/run for a tab
+     that's already there. Google allows ~60 write requests/minute/user, and
+     this sync alone was sitting right at that ceiling; found live via a
+     recurring 429 ("Quota exceeded for Write requests") that failed the
+     cron job outright. Optimistic PUT first; only on a genuine "no such
+     sheet" failure (400, not a quota 429/503 — gfetch already retried those)
+     is the tab created and the PUT retried once. The common case (tab
+     already exists) is now 2 requests, not 3. */
+  let put = await gfetch(putUrl, { method: "PUT", headers: auth, body: putBody });
+  if (!put.ok && put.status === 400) {
+    // Google's specific wording for "this range refers to a sheet that
+    // doesn't exist" — checked so a genuine bad-request 400 (malformed
+    // data, an invalid range) still fails immediately with no retry, same
+    // as before this change. Anything else at 400 is a real error, not a
+    // missing tab, and must not get a free extra attempt.
+    const putErr = await put.text();
+    if (/unable to parse range/i.test(putErr)) {
+      await createTab(id, tab, auth);
+      put = await gfetch(putUrl, { method: "PUT", headers: auth, body: putBody });
+    } else {
+      return { ok: false as const, error: `write failed (${put.status}): ${putErr.slice(0, 200)}` };
+    }
+  }
   if (!put.ok) return { ok: false as const, error: `write failed (${put.status}): ${(await put.text()).slice(0, 200)}` };
 
   // Trim any rows a SHRINKING dataset left behind, below the data just

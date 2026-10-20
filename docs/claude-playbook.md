@@ -12,6 +12,63 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-10-20: cron-sheets-sync's recurring Google Sheets 429 — the hourly sync was re-confirming tabs that already existed, every single run
+
+Follow-up to the cron-bill entry below, which found but deliberately didn't
+fix this. Owner asked for it directly afterward.
+
+**Root cause**: `writeSheet` (lib/sheets.ts), called once per tab by the
+hourly aggregate sync (`lib/sheets-sync.ts`), made an unconditional
+`batchUpdate` call to CREATE the tab on every single invocation — "ignore
+the error if it already exists" was the whole strategy. With ~20 tabs
+written per sync (combined + per-college Live/Daily/Revenue/Complaints/Staff,
+plus Plans/Students/Config) at 3 calls each (create + write + trim), that's
+up to 60 requests per run — and after the very first sync ever, EVERY tab
+already exists, so roughly a third of the sync's own request volume, every
+single hour, forever, was spent re-confirming something already true.
+Google allows ~60 write requests/minute/user, so this sync was running
+right at the ceiling by design, not by accident — confirmed directly:
+`curl`ing `/api/sheets/sync` with the real `CRON_SECRET` returned HTTP 503,
+`{"ok":false,"error":"Live tab write failed: write failed (429): ...
+Quota exceeded for quota metric 'Write requests'..."}`, failing on the
+very FIRST tab the sync writes.
+
+**Fixed** by making tab creation reactive instead of unconditional: `writeSheet`
+now tries the data write (PUT) optimistically first. Only if that fails with
+Google's SPECIFIC wording for a missing sheet ("Unable to parse range: ...")
+does it call `batchUpdate` to create the tab, then retry the write once. A
+400 for any OTHER reason (bad data, an invalid range) still fails immediately
+with no retry, exactly as before — checked deliberately, because the existing
+test suite already had `"does not retry a real error (a 400 fails
+immediately)"` pinned down, and a naive "retry on any 400" would have quietly
+broken that invariant (caught locally before this ever reached the real
+app — see Verified below). Common case (tab already exists, true after the
+first-ever sync) is now 2 requests instead of 3 — cuts the sync's total
+request volume by roughly a third. Also capped the previously-uncapped
+computed backoff branch in `gfetch` at 10s (the `Retry-After` branch already
+had this cap; the fallback didn't), so a future retry-count increase can't
+accidentally produce an unbounded wait.
+
+**Scope, deliberately bounded**: `appendSheet` (the PER-EVENT log — every
+order/payment/complaint/collection) has the exact same unconditional-create
+pattern and runs far more often than the hourly sync, so it's plausibly an
+even bigger total contributor to Google's quota — but it wasn't the thing
+reported as failing, and its "never throws" contract plus the
+already-present empty-tab-detection GET make the safe refactor more
+delicate. Left alone this round; if `appendSheet`-driven writes (Orders/
+Payments/Complaint log/Collections tabs) are ever reported failing the same
+way, apply the identical optimistic-write-then-create-on-miss pattern there.
+
+**Verified**: new tests in `tests/sheets-write-order.test.ts` lock down all
+three cases — tab-already-exists makes zero `batchUpdate` calls, a
+genuinely-missing tab (Google's exact error text) creates it and retries
+once successfully, and a 400 for an unrelated reason is never mistaken for
+a missing tab. Full suite 1191/1191 (3 new tests), `tsc --noEmit` clean.
+Confirmed the regression risk was real, not theoretical: the first version
+of this fix retried on ANY 400, which silently broke the pre-existing
+`"does not retry a real error"` test — caught by running the full suite
+before considering this done, not assumed safe from the diff alone.
+
 ## RESOLVED 2026-10-20: cut the Render cron bill — removed a confirmed no-op cron, widened the uptime check; found (not yet fixed) a recurring Sheets-sync 429
 
 Owner asked to reduce the monthly Render bill, specifically flagging crons

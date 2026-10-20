@@ -12,6 +12,61 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-10-20: cut the Render cron bill — removed a confirmed no-op cron, widened the uptime check; found (not yet fixed) a recurring Sheets-sync 429
+
+Owner asked to reduce the monthly Render bill, specifically flagging crons
+("i dont need all corns"). Checked every cron job's actual Render billing
+impact (via the Render API, not guessing) rather than just reading
+render.yaml's comments.
+
+**Removed `cron-watchdog` entirely.** It ran every 5 minutes — 288 billed
+runs/day, by far the highest frequency of anything in render.yaml — hitting
+`/api/cron/watchdog`, whose own code comment already says it's been a
+confirmed no-op since 2026-10-11 (the owner disabled its only effect, an
+instant per-5-minute error email, "too many notifications," and the route
+was deliberately left as a harmless GET specifically so the cron schedule
+wouldn't need touching — see that commit's message). With cost now the
+thing being optimized for, that reasoning no longer applies: removed the
+`render.yaml` entry outright. Real server errors still surface in Admin ->
+App Errors and the once-daily `cron-error-digest` email; nothing was lost.
+
+**Widened `cron-uptime-watchdog` from every 5 minutes to every 15.** This is
+the ONE alert that still fires when fabricfold.in is fully unreachable (it
+emails Resend directly, doesn't depend on the app being up at all) — genuine
+value, kept. But it was also the single most frequent REAL (non-no-op) cron
+job, so the highest-leverage remaining place to trade a little detection
+latency for cost: worst-case full-outage detection goes from 5 minutes to 15,
+still fast for a staffed counter, cuts this job's run count ~66%.
+
+**Found, NOT fixed (flagged for the owner, separate from cost-cutting)**:
+`cron-sheets-sync`'s hourly run has been failing intermittently —
+`curl -sf` exits 22 (an HTTP error status). Reproduced directly by hitting
+`/api/sheets/sync` with the real `CRON_SECRET`: **HTTP 503**, body
+`{"ok":false,"error":"Live tab write failed: write failed (429): ... Quota
+exceeded for quota metric 'Write requests' and limit 'Write requests per
+minute per user' of service 'sheets.googleapis.com' ..."}`. This is Google's
+own per-minute write-quota limit, not a FabricFold bug in the narrow sense,
+but `lib/sheets-sync.ts`'s aggregate rebuild (Live/Daily/Plans/Students
+tabs) is issuing enough writes in a short window to hit it — plausibly
+compounded by the SAME overlapping-drainers pattern the "RESOLVED 2026-09-11
+(pass 17)" entry above already documented for `flushSheetOutbox` (the
+fire-and-forget per-event flush and this hourly full-rebuild can land close
+together). A FAILED cron run still burns billed runtime for nothing, so this
+is relevant to the cost-cutting goal even though it isn't itself a cron
+frequency change — fixing it properly needs either batching the aggregate
+tabs' writes into fewer API calls, adding a retry-with-backoff specifically
+for 429s, or spacing this sync further from the outbox flush drainer. Left
+for a dedicated pass with the owner's scope sign-off rather than guessed at
+here, same reasoning the pass-17 entry already gave for not rush-fixing
+SSE wiring.
+
+**Verified**: full suite 1188/1188 after the render.yaml edits (no app code
+touched, only the cron schedule file) — `tests/sheet-sync-copy-matches-schedule.test.ts`
+(checks `cron-sheets-sync`'s own schedule against Admin copy) still passes
+since that job's schedule was untouched. Deployed; confirmed via the Render
+API that `fabricfold-scd2` now lists 9 cron jobs instead of 10, and
+`cron-uptime-watchdog`'s schedule reads `*/15 * * * *`.
+
 ## RESOLVED 2026-10-20: a St Mary's registration could end up with a PAID subscription and ZERO bags — bag issuance made atomic with the subscription
 
 Owner spotted it from a screenshot of the staff Students list: two

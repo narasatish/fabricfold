@@ -245,41 +245,37 @@ services:
           name: fabricfold
           property: hostport
 
-  # In-app watchdog (2026-09-16): every 5 minutes, not once a day like
-  # cron-error-digest above — a real server exception at 2am should reach the
-  # Owner within minutes, not wait for the 6am rollup. Marks what it reports
-  # `seen`, so the daily digest doesn't repeat it.
-  - type: cron
-    name: cron-watchdog
-    runtime: node
-    plan: starter
-    region: singapore
-    schedule: "*/5 * * * *"
-    buildCommand: "echo no build needed"
-    startCommand: 'curl -sf -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/watchdog"'
-    envVars:
-      - key: CRON_SECRET
-        sync: false
-      - key: APP_URL
-        fromService:
-          type: web
-          name: fabricfold
-          property: hostport
+  # cron-watchdog REMOVED (2026-10-20, cost cut): this hit /api/cron/watchdog
+  # every 5 minutes (288 billed runs/day) for a route that had been a
+  # confirmed no-op since 2026-10-11 — see that route's own comment: the
+  # owner disabled its only effect (an instant per-5-minute error email,
+  # "too many notifications") and the route was deliberately left as a
+  # harmless GET rather than deleted, specifically so this cron entry
+  # wouldn't need touching. Real server errors still surface in Admin ->
+  # App Errors and the daily error-digest email (cron-error-digest, above) —
+  # nothing is lost by removing the schedule itself now that cost is the
+  # thing being optimized for. If a route this cron pointed at is ever
+  # un-disabled in the future, re-add the cron entry alongside that change.
 
   # External uptime probe (2026-09-16): deliberately does NOT call into the
-  # app at all for the alert itself — every OTHER cron above depends on the
-  # app being up to do anything, including cron-watchdog just above, whose
-  # own endpoint is unreachable in exactly the scenario ("the app is fully
-  # down") that matters most. This one emails Resend directly with curl, so
-  # it still fires when fabricfold.in itself is completely unreachable.
+  # app at all for the alert itself — this is the ONLY alert that still
+  # fires when fabricfold.in itself is completely unreachable (cron-watchdog,
+  # removed above, depended on the app being up — a dead end for exactly the
+  # outage that matters most). Emails Resend directly with curl.
   # RESEND_API_KEY/MAIL_FROM/OWNER_EMAIL are the same secrets the app's own
   # lib/mail.ts uses — set once in the Render dashboard, reused here.
+  # Cadence widened 5min -> 15min (2026-10-20, owner: cut the cron bill) —
+  # this was the single most frequent real (non-no-op) cron job, so the
+  # highest-leverage place to trade a little detection latency for cost. A
+  # full-outage alert now arrives within 15 minutes worst case instead of 5;
+  # still fast enough for a staffed laundry counter, and still the fastest
+  # cron path to the owner of anything in this file.
   - type: cron
     name: cron-uptime-watchdog
     runtime: node
     plan: starter
     region: singapore
-    schedule: "*/5 * * * *"
+    schedule: "*/15 * * * *"
     buildCommand: "echo no build needed"
     startCommand: |
       sh -c '

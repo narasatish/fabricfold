@@ -1,7 +1,6 @@
 import { requireStudent } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
-import { fmt } from "@/lib/format";
 import { onlinePaymentAllowed } from "@/lib/features";
 import { notFound, redirect } from "next/navigation";
 import PayClient from "./_components/PayClient";

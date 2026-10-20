@@ -2,7 +2,7 @@
 /* Admin student tools: bulk import and campus-wide broadcast. */
 import { db } from "../db";
 import { requireStaff, assertSameCollege } from "../auth";
-import { audit, sendWhatsApp } from "../notify";
+import { audit } from "../notify";
 
 /**
  * Find students by customer ID, phone or name — on the SERVER.

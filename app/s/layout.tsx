@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSession, requireStaff, AuthError } from "@/lib/auth";
-import { Svg } from "@/components/icons";
-import { TabBar, RealtimeRefresh } from "@/components/chrome";
+import { RealtimeRefresh } from "@/components/chrome";
 import { InstallPrompt } from "@/components/pwa";
 import { OfflineBanner } from "@/components/offline";
 import StaffTabBar from "./_components/StaffTabBar";

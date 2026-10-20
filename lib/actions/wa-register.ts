@@ -230,8 +230,6 @@ export async function checkWhatsAppRegister(code: string) {
   /* Notify the owner of the new registration. */
   void notifyOwner("New BVRIT registration", `${student.name} (+91 ${row.phone}) self-registered via WhatsApp — ID ${student.id}, bag code ${bagCode}.`);
 
-  /* Send a WhatsApp confirmation to the new student. */
-  const { sendWhatsApp } = await import("../notify");
   // No WhatsApp welcome: students get WhatsApp only for order placed, ready and collected.
 
   jar.delete(CLAIM_COOKIE);

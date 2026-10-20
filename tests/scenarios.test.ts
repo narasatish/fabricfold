@@ -12,7 +12,7 @@ import { formatBagCode, parseBagCode, bagKindFor, MAX_PER_KIND } from "../lib/ba
 import { MIN_DAMAGE_PHOTOS, cleanPhotos } from "../lib/complaint-rules";
 
 /* St Mary's, as actually configured: every tier is 34 cycles, price is final. */
-const BRONZE = 4000, SILVER = 5000, GOLD = 6000, CYCLES = 34;
+const BRONZE = 4000, SILVER = 5000, GOLD = 6000;
 
 describe("scenario: subscribed student, ordinary wash on a plan cycle", () => {
   it("costs the student nothing and raises no GST", () => {

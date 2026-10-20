@@ -1,10 +1,14 @@
 /* Money & GST rules — ported EXACTLY from the prototype (see handoff README).
-   - Prices are GST-INCLUSIVE; `gst` is the tax component of total.
+   - Per-piece prices are GST-EXCLUSIVE sticker prices; `gst` is computed and
+     ADDED on top to get `total` (see computeBill below) — found stale 2026-10-20:
+     this comment used to say the opposite ("prices are GST-inclusive, gst is
+     the tax component extracted from total"), which was never how the actual
+     formula worked; SHOW_GST_UI's own comment further down already stated the
+     correct behavior, this was the one place still saying the wrong thing.
    - UPI payments auto-create a GST tax invoice; cash only via staff override;
      credit-only never invoiced.
    - Invoice/credit-note numbers are per Indian financial year (April start),
      backed by a transactional sequence (no gaps/duplicates). */
-import { db } from "./db";
 import type { Prisma } from "./generated/prisma/client";
 
 /* The 40%-of-value express model is retired (owner, Sep 2026, second pass) —

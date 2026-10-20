@@ -1,7 +1,7 @@
 /* Real XLSX exports via exceljs — full report / transactions / GST / expenses.
    Amounts are raw numbers so they sum in Excel. Staff-only. */
 import ExcelJS from "exceljs";
-import { requireStaff, requireStaffPerm } from "@/lib/auth";
+import { requireStaffPerm } from "@/lib/auth";
 import { parsePeriod, computeReport } from "@/lib/report";
 import { db } from "@/lib/db";
 

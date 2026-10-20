@@ -3,7 +3,6 @@
    Called by the daily Vercel cron and by an external 10-min scheduler
    (cron-job.org) with Bearer CRON_SECRET, or by the Owner via the Admin button.
    All the work lives in lib/sheets-sync.ts (shared with the server action). */
-import { db } from "@/lib/db";
 import { runSheetsSync } from "@/lib/sheets-sync";
 import { isCronOrStaff } from "@/lib/cron-auth";
 

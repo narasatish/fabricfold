@@ -6,7 +6,7 @@ import { Seg, Switch } from "@/components/chrome";
 import { Svg } from "@/components/icons";
 import { fmt } from "@/lib/format";
 import { placeOrder } from "@/lib/actions/orders";
-import { collegeExpressFee, expressItemRate, CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService, collegeUsesCycleBasedPricing } from "@/lib/money";
+import { collegeExpressFee, expressItemRate, CYCLE_RATES, CYCLE_KG_LIMIT, isCycleService } from "@/lib/money";
 
 type EnabledService = { key: string; flag: string; label: string };
 type Slot = { startAt: string; endAt: string; dateStr: string; timeLabel: string; left: number; full: boolean };

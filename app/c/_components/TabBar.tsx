@@ -17,7 +17,7 @@ export default function CustomerTabBar({ unread }: { unread: number }) {
     <TabBar
       active={getActive()}
       tabs={[
-        { key: "home", label: "Home", icon: "home", href: "/c" },
+        { key: "home", label: "Home", icon: "home", href: "/c", badge: unread || undefined },
         { key: "orders", label: "Orders", icon: "bag", href: "/c/orders" },
         { key: "wallet", label: "Wallet", icon: "wallet", href: "/c/wallet" },
         { key: "profile", label: "Profile", icon: "user", href: "/c/profile" },

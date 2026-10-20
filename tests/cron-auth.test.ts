@@ -4,7 +4,7 @@
    this codebase's webhook routes (Razorpay, WhatsApp) already used
    crypto.timingSafeEqual for the same kind of Bearer-token check; the cron
    routes never got the same treatment until now. */
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 import { isCronRequest } from "../lib/cron-auth";
 
 const ORIGINAL = process.env.CRON_SECRET;

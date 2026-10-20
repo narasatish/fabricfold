@@ -5,9 +5,7 @@
    and newly registered students can place orders immediately. */
 import "dotenv/config";
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { execSync } from "node:child_process";
 import path from "node:path";
-import crypto from "node:crypto";
 import { ensureTestSchema } from "./_schema";
 
 /* startWhatsAppRegister/checkWhatsAppRegister call next/headers' cookies(),
@@ -41,7 +39,6 @@ let db: typeof import("../lib/db").db;
 let startWhatsAppRegister: typeof import("../lib/actions/wa-register").startWhatsAppRegister;
 let checkWhatsAppRegister: typeof import("../lib/actions/wa-register").checkWhatsAppRegister;
 let parseBagCode: typeof import("../lib/bagcode").parseBagCode;
-let requireStudent: typeof import("../lib/auth").requireStudent;
 
 beforeAll(async () => {
   // Probe the NEWEST schema additions, not data — a data probe (e.g. "does a
@@ -63,7 +60,6 @@ beforeAll(async () => {
   startWhatsAppRegister = (await import("../lib/actions/wa-register")).startWhatsAppRegister;
   checkWhatsAppRegister = (await import("../lib/actions/wa-register")).checkWhatsAppRegister;
   parseBagCode = (await import("../lib/bagcode")).parseBagCode;
-  requireStudent = (await import("../lib/auth")).requireStudent;
 // `npx prisma db push` against remote Postgres is the slow part (see
 // money.test.ts) — the default hook timeout is far too short the first time
 // this schema needs a real push.

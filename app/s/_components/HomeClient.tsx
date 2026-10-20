@@ -42,7 +42,6 @@ type Metrics = { todayRevenue: number; pending: number; ready: number; activeSub
 type OpenComplaint = { id: string; studentId: string; studentName: string; collegeId: string; at: number };
 
 export default function StaffHomeClient({
-  staff,
   orders,
   pendingSubs,
   colleges,

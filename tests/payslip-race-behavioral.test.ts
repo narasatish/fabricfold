@@ -29,7 +29,6 @@ import "dotenv/config";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { execSync } from "node:child_process";
 import path from "node:path";
-import fs from "node:fs";
 
 const cookieJar = new Map<string, string>();
 vi.mock("next/headers", () => ({

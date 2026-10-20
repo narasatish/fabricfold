@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession, requireStudent, AuthError } from "@/lib/auth";
-import { Svg } from "@/components/icons";
-import { TabBar, RealtimeRefresh } from "@/components/chrome";
+import { RealtimeRefresh } from "@/components/chrome";
 import { InstallPrompt } from "@/components/pwa";
 import CustomerTabBar from "./_components/TabBar";
 import { db } from "@/lib/db";

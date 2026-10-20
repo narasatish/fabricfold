@@ -69,7 +69,6 @@ export default function StaffOrderClient({
   serviceRates,
   staffRole,
   upi,
-  baseGarmentRate,
   collegeHasRatesOverride,
   collegeExpressOverride,
 }: {
@@ -77,7 +76,6 @@ export default function StaffOrderClient({
   serviceRates: { label: string; items: Array<[string, number]> };
   staffRole: number;
   upi: { upiId: string; payeeName: string };
-  baseGarmentRate: number;
   collegeHasRatesOverride: boolean;
   collegeExpressOverride: Record<string, number> | null;
 }) {

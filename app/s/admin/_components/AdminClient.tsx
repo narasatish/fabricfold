@@ -6,7 +6,7 @@ import { featureOn, type FeatureKey } from "@/lib/features";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { fmt } from "@/lib/format";
-import { useToast, Sheet, Switch, Seg, CampusSwitch, useCampusSwitch } from "@/components/chrome";
+import { useToast, Sheet, Switch, CampusSwitch, useCampusSwitch } from "@/components/chrome";
 import {
   saveRates, savePlan, togglePlan, savePaymentConfig, saveSettings,
   toggleFeature, saveCollege, deleteCollege, setCollegeActive, saveStaff, setStaffActive, createPayslip,
@@ -143,11 +143,6 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
     }
   };
 
-  const setRatePrice = (svc: string, idx: number, price: number) => {
-    const next = JSON.parse(JSON.stringify(rates)) as Rates;
-    next[svc].items[idx][1] = price;
-    setRates(next);
-  };
   const setRateItem = (svc: string, i: number, name: string, price: number) => {
     setRates((r) => {
       const items = r[svc].items.map((it, j) => (j === i ? ([name, price] as [string, number]) : it));

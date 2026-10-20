@@ -3,7 +3,7 @@ import { featureOn, type FeatureKey } from "@/lib/features";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { Svg, type IconName } from "@/components/icons";
-import { fmt, timeAgo, dateStr, loyaltyBadge, STATUS_LABEL } from "@/lib/format";
+import { fmt, dateStr, loyaltyBadge, STATUS_LABEL } from "@/lib/format";
 import Link from "next/link";
 import HomeClient from "./_components/HomeClient";
 

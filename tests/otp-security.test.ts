@@ -8,7 +8,6 @@
    back what actually got stored for that number. */
 import "dotenv/config";
 import { beforeAll, beforeEach, afterEach, describe, expect, it } from "vitest";
-import { execSync } from "node:child_process";
 import { ensureTestSchema } from "./_schema";
 import path from "node:path";
 

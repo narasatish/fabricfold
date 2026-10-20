@@ -2,7 +2,7 @@
    Pass 17: found that writeSheet failures in runSheetsSync were unchecked — if tab 3
    failed, tabs 1-2 succeeded (and stayed in Sheets), but the caller was told everything
    succeeded. This test locks that fix. */
-import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
+import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { db } from "../lib/db";
 
 describe("sheets sync error handling", () => {

@@ -12,6 +12,89 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-10-20: structural audit — no ESLint ever configured, a real missing-UI bug (unread badge), and 44 dead-code findings triaged
+
+Owner: "its been since then app is never perfect i see silly mistakes and bugs
+all the time ... go and check full build whether it is perfect in the
+structure or not." This was a request to audit the BUILD'S STRUCTURE, not
+business logic — dead code, unused imports, half-wired features, config gaps.
+
+**Root-cause finding: this project has never had ESLint configured.** No
+config file anywhere, no `eslint` package in `package.json` (dependencies or
+devDependencies). For a 3-month solo build this is the most likely structural
+explanation for recurring "silly bugs" — dead imports, unused variables, and
+half-wired props compile silently with no `tsc` or lint signal, so they
+accumulate invisibly until someone goes looking. Not fixed this round (adding
+a real ESLint config is a separate decision — rule selection, and it will
+surface its own wave of findings — flagged to the owner rather than done
+silently).
+
+**Stopgap used instead: `noUnusedLocals`/`noUnusedParameters` in
+tsconfig.json.** Temporarily enabling these (now permanent) surfaced exactly
+45 unused-local/import findings across the app — a bounded list. Each one was
+individually checked against call sites and comments for "is this a real
+missing feature, or genuinely dead" before touching it — NOT a blind delete
+pass, specifically because that same blind-delete instinct is how a past
+session nearly deleted a parked feature (see the `baseGarmentRate` entry
+below).
+
+**Real bug fixed: the customer tab bar's unread-notification badge never
+rendered.** `app/c/_components/TabBar.tsx` destructured `unread` from its
+props but never used it in the JSX — `app/c/layout.tsx` was correctly
+querying and passing a live unread count every render, straight into the
+void. Fixed by wiring it into the Home tab's `badge` prop, same pattern
+`components/chrome.tsx` already uses for the staff Complaints-count badge.
+Students have presumably never seen this badge since it was built.
+
+**Two items flagged for the owner, NOT built or deleted without a decision:**
+- `app/s/orders/[id]/{page.tsx,_components/OrderClient.tsx}` carried a dead
+  `baseGarmentRate` prop. The caller's own comment revealed the original
+  intent: let staff preview the excess-weight charge before committing,
+  using the same `excessWeightCharge` function that bills it server-side.
+  That preview was never actually wired up in `OrderClient.tsx` — removed the
+  dead prop plumbing as out-of-scope new-feature work, server-side billing is
+  unaffected and correct either way.
+- `app/s/customers/[id]/_components/CustomerClient.tsx` had a fully built,
+  previously-tested `doRetireBag` handler calling `lib/actions/bags.ts`'s
+  `retireBag` — confirmed zero other call sites anywhere in the app. Distinct
+  from the already-wired "Lost — reissue" flow (`reissueBagSameCode`, which
+  retires AND reissues in one action) — `retireBag` only retires, no reissue,
+  per its own doc comment. Judged genuinely redundant with "Lost — reissue"
+  and "Student left," so removed (not built into new UI) — flagged as a
+  judgment call, not an obvious missing piece like the badge above.
+
+**Near-misses that were deliberate, not bugs (confirmed via existing
+comments before touching):** `components/pwa.tsx`'s unused `deferred` state
+(the real install-prompt trigger is a separate module-level singleton in
+`lib/pwa-install.ts`); `lib/actions/students.ts` and `lib/actions/wa-register.ts`'s
+unused `sendWhatsApp` imports (both have explicit comments: broadcasts are
+in-app/web-push only, no WhatsApp welcome message by design).
+
+**One self-inflicted regression during this pass, caught by the test suite
+before commit:** removed two `collegeExpressFee()` calls in
+`lib/actions/orders.ts` (inside `acceptOrder`/`walkInOrder`) because the
+`urgentCharge` variable they assigned to was never read — the real charge is
+`surcharge`, computed fresh a few lines later from the same inputs. But
+`tests/mobile-fixes.test.ts` explicitly guards "every flat-fee call site still
+exists — now gated to cycle colleges only," expecting exactly 5
+`collegeExpressFee(...)` call sites as a deliberate parallel-computation
+sanity check so the two paths can't silently drift apart. Restored both
+calls as `void collegeExpressFee(...)` with a comment explaining why they
+exist unused. Lesson: a test asserting a *count* of call sites, not just
+their presence, is itself documentation of an intentional redundancy —
+treat that differently from an ordinary "this looks unused" finding.
+
+**Verification:** `npx tsc --noEmit` and `-p tsconfig.verify.json` both clean.
+`npm run build` succeeded, same route table as before any edits. `npm test`:
+1204/1204 passing (after the collegeExpressFee restore above — initially 2
+failed for exactly that reason). `npm run verify`: every step passed except
+the already-known, owner-told-to-ignore wash-day gap in `database integrity`
+(unrelated to this round's changes — same 5 students it's always been).
+
+Net: 1 real bug fixed (unread badge), ~33 files of confirmed-dead-code
+cleanup, 1 structural root-cause identified (no ESLint, not fixed — needs a
+scoped follow-up), 2 items flagged for the owner's product call.
+
 ## RESOLVED 2026-10-20: deep audit round 2 — UI clip fix, an overcharge bug, a session-revocation bypass across 7 routes, and an erasure race
 
 Owner, continuing the same "I'm not confident, test more" session: asked for

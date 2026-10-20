@@ -7,7 +7,6 @@
 import "dotenv/config";
 import { beforeAll, describe, expect, it } from "vitest";
 import crypto from "node:crypto";
-import { execSync } from "node:child_process";
 import { ensureTestSchema } from "./_schema";
 import path from "node:path";
 

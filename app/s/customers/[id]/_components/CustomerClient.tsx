@@ -8,7 +8,7 @@ import { fmt, dateStr, initials, STATUS_LABEL, loyaltyBadge, upiLink } from "@/l
 import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
 import { assignSubscription, upgradeSubscription, cancelSubscription, adjustCycleUsage } from "@/lib/actions/subscription";
-import { issueBag, retireBag, releaseBagCode, setBagCode, reissueBagSameCode } from "@/lib/actions/bags";
+import { issueBag, releaseBagCode, setBagCode, reissueBagSameCode } from "@/lib/actions/bags";
 import { walkInOrder } from "@/lib/actions/orders";
 import { sellCyclePack } from "@/lib/actions/subscription";
 import { CYCLE_RATES, CYCLE_KG_LIMIT, collegeUsesCycleBasedPricing, collegeExpressFee, expressItemRate } from "@/lib/money";
@@ -192,21 +192,6 @@ export default function StaffCustomerClient({ student, displayId, staffRole, pla
       toast(e instanceof Error ? e.message : "Failed", true);
     } finally {
       setReissueBusy(false);
-    }
-  };
-
-  const [retireBusy, setRetireBusy] = useState(false);
-  const doRetireBag = async (bagId: string, status: "lost" | "replaced") => {
-    setRetireBusy(true);
-    try {
-      const r = await retireBag(bagId, status);
-      if (!r.ok) return toast(r.error || "Failed", true);
-      toast(`Bag marked ${status}`);
-      router.refresh();
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "Failed", true);
-    } finally {
-      setRetireBusy(false);
     }
   };
 

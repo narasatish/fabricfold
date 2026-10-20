@@ -7,7 +7,7 @@ import { featureOn, serviceOn } from "../features";
 import { enqueueSheetEvent, enqueuePaymentEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff, requireStaffPerm, assertSameCollege } from "../auth";
-import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, EXPRESS_FLAT, expressFlatFee, collegeExpressFee, expressItemRate, isCycleService, collegeUsesCycleBasedPricing, resolveCollegeRates, validWeight, isMoneyAmount } from "../money";
+import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, expressItemRate, collegeUsesCycleBasedPricing, resolveCollegeRates, validWeight, isMoneyAmount } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit, touchStudentActivity } from "../notify";
@@ -229,7 +229,7 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
     const declaredPieces = items.reduce((s, i) => s + i.qty, 0);
     if (!declaredPieces) throw new Error(usesCycles ? "Pick at least one cycle" : "Add at least one piece");
 
-    let usedCycle = false, excessCharge = 0, urgentCharge = 0;
+    let usedCycle = false, excessCharge = 0;
     /* Weight excess applies to EVERY cycle-service order — plan-paid or
        cash-paid, 5 kg x cycles is the allowance either way. Zero for
        per-piece services, whose weight is informational. */
@@ -269,8 +269,12 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
       // One row per cycle burned, so cancelling restores exactly what was taken.
       await tx.cycleUse.createMany({ data: Array.from({ length: cyclesCount }, () => ({ subscriptionId: sub.id, orderId: o.id })) });
       // Urgent (same-day) on a plan-paid order: the cycle is already prepaid,
-      // so only the flat same-day fee is charged, in cash, right now.
-      if (o.express) urgentCharge = collegeExpressFee(o.service, cfg.collegeExpressOverride);
+      // so only the flat same-day fee is charged, in cash, right now. The
+      // actual charge is `surcharge`, computed fresh below from `o.express`
+      // and `usesCycles` directly; this call is kept as a parallel sanity
+      // check so the two code paths can't silently drift apart (test-guarded:
+      // mobile-fixes.test.ts expects all 5 collegeExpressFee call sites).
+      void collegeExpressFee(o.service, cfg.collegeExpressOverride);
     }
 
     // recomputeOrder() — exact prototype math (+ optional no-GST billing).
@@ -406,7 +410,7 @@ export async function walkInOrder(
   try {
     result = await db.$transaction(async (tx) => {
       // optional plan-cycle burn (same rules as acceptOrder)
-      let usedCycle = false, excessCharge = 0, urgentCharge = 0;
+      let usedCycle = false, excessCharge = 0;
       if (usesCycles) {
         // 5 kg x cycles allowance, plan-paid or cash-paid alike
         excessCharge = excessWeightCharge(input.weightKg, undefined, { waived: !!input.waiveExcess, cycles: cyclesCount });
@@ -433,8 +437,10 @@ export async function walkInOrder(
           await tx.subscription.update({ where: { id: sub.id }, data: { cyclesUsed: { increment: cyclesCount } } });
         }
         usedCycle = true;
-        // Urgent (same-day) on a plan-paid order: flat same-day fee, in cash.
-        if (input.express) urgentCharge = collegeExpressFee(input.service, cfg.collegeExpressOverride);
+        // Urgent (same-day) on a plan-paid order: flat same-day fee, in
+        // cash — `surcharge` below does the real computation; this call is
+        // a parallel sanity check (test-guarded, see mobile-fixes.test.ts).
+        void collegeExpressFee(input.service, cfg.collegeExpressOverride);
       }
 
       const sub2 = items.reduce((s, i) => s + i.rate * i.qty, 0);

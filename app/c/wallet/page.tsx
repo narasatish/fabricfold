@@ -11,12 +11,7 @@ type Bucket = { service: string; cycles: number; used?: number; kgPerCycle: numb
 
 export default async function WalletPage() {
   const student = await requireStudent();
-  const appConfig = await db.appConfig.findUnique({ where: { id: "main" } });
-
   const sub = student.subscription;
-  const gstEnabled = (appConfig?.settings as Record<string, unknown>)?.gstEnabled !== false;
-  const gstPct = Number(appConfig?.gstPct || 18);
-
 
   const subBuckets = ((sub?.buckets as unknown as Bucket[]) || []).map((b) => ({ ...b, used: b.used || 0, label: SERVICE_LABEL[b.service] || b.service }));
 

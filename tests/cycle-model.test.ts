@@ -12,7 +12,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { CYCLE_RATES, isCycleService, excessWeightCharge, computeBill, CYCLE_KG_LIMIT } from "../lib/money";
+import { CYCLE_RATES, isCycleService, excessWeightCharge, computeBill } from "../lib/money";
 import { parseBagCode, formatBagCode, BAG_LETTER } from "../lib/bagcode";
 
 const read = (p: string) => fs.readFileSync(path.resolve(__dirname, "..", p), "utf8");

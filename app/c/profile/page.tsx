@@ -1,7 +1,7 @@
 import { requireStudent } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
-import { fmt, initials, loyaltyBadge } from "@/lib/format";
+import { initials, loyaltyBadge } from "@/lib/format";
 import { Svg } from "@/components/icons";
 import Link from "next/link";
 import ProfileClient from "./_components/ProfileClient";

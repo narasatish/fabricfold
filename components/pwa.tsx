@@ -46,7 +46,7 @@ const DISMISS_KEY = "ff_install_dismissed";
 const DISMISS_DAYS = 14;
 
 export function InstallPrompt() {
-  const [deferred, setDeferred] = useState<BIPEvent | null>(null);
+  const [, setDeferred] = useState<BIPEvent | null>(null);
   const [iosHint, setIosHint] = useState(false);
   const [visible, setVisible] = useState(false);
 

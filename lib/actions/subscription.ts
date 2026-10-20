@@ -16,8 +16,6 @@ import { enqueueSheetEvent, enqueuePaymentEvent, customerIdFor, flushSoon, istSt
 import { rosterSoon } from "../sheets-sync";
 import { requireCyclesEnabled, planGross, usageBuckets, activatePlan, type PlanBucket } from "../plan-activation";
 
-const rid = (n: number) => { let s = ""; for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10); return s; };
-
 /* lib/money.ts's collegeUsesCycleBasedPricing already encodes the rule: a
    college with its own item-rates override (College.rates non-null, e.g.
    BVRIT) bills every garment per piece and is NEVER cycle-based — that rule

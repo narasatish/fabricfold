@@ -3,8 +3,6 @@ import { featureOn, serviceOn, type FeatureKey } from "@/lib/features";
 import { db } from "@/lib/db";
 import { collegeUsesCycleBasedPricing, resolveCollegeRates, type RateTable } from "@/lib/money";
 import { TopBar } from "@/components/chrome";
-import { fmt, STATUS_LABEL } from "@/lib/format";
-import { Svg } from "@/components/icons";
 import OrderNewClient from "./_components/OrderNewClient";
 import { listDropSlots } from "@/lib/actions/slots";
 import { dayLabel } from "@/lib/slots";
@@ -27,7 +25,6 @@ export default async function OrderNewPage({ searchParams }: { searchParams: Pro
   const collegeHasRatesOverride = !!college.rates;
   const gstEnabled = (appConfig.settings as Record<string, unknown>)?.gstEnabled !== false;
   const gstPct = gstEnabled ? Number(appConfig.gstPct) : 0;
-  const plan = appConfig.plan as unknown as { price: number; cycles: number; kgPerCycle: number };
 
   const sp = await searchParams;
   const serviceParam = sp.service || "washIron";
@@ -55,8 +52,6 @@ export default async function OrderNewPage({ searchParams }: { searchParams: Pro
     { key: "ironOnly", flag: "svc_iron", label: "Iron Only" },
     { key: "dryClean", flag: "svc_dryclean", label: "Dry Clean" },
   ].filter((s) => featureOn(feat, s.flag as FeatureKey));
-
-  const rate = rates[serviceParam] || rates.washIron;
 
   // Bookable drop-off windows for this student's campus (empty = feature unused here).
   const slots = await listDropSlots();

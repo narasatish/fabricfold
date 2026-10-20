@@ -12,6 +12,142 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-10-20: deep audit round 2 — UI clip fix, an overcharge bug, a session-revocation bypass across 7 routes, and an erasure race
+
+Owner, continuing the same "I'm not confident, test more" session: asked for
+deep core testing AND a responsive-UI pass. Clarified first whether "use
+Bootstrap" meant literally adding Bootstrap (a real architectural change,
+conflicting with this app's own design-system-v2 rules) — owner wanted the
+narrower "something looks broken, just fix it" instead. Three more parallel
+audits launched (auth/permissions/privacy; complaints/subscription/ops/slots;
+plus a manual UI sweep across mobile/desktop viewports with a staff and a
+customer session minted directly via a signed JWT, since WhatsApp login isn't
+configured locally — `AUTH_SECRET` must be loaded from `.env`, not the
+`"dev-secret"` fallback, or the minted cookie silently fails `jwtVerify` and
+redirects to `/login` with no error shown).
+
+**UI: "Free re-service" button clipped at mobile width.** `app/s/complaints/
+_components/ComplaintsClient.tsx`'s three action buttons (Resolve/
+Compensate/Free re-service) were in a plain `.row` with no `flex-wrap` —
+overflowed past 375px, truncating to "Free re-ser". Fixed with the `wrap`
+class already used for this exact pattern in `CustomerClient.tsx`/
+`OrderClient.tsx`/`reports/page.tsx`/`profile/page.tsx` — this screen just
+missed it. Rest of the app (login, staff home, students, reports with
+charts, order detail, admin, customer home, order creation's 4 service tabs
+including the per-item picker, registration form) checked out clean across
+375px/1440px. Note for future sessions: several of these pages have a
+fade-in transition on mount that looks "completely blank, data never
+rendered" in a screenshot taken immediately after navigation — always wait
+1-2s before concluding a page is broken; three separate false alarms this
+session were just that.
+
+**`upgradeSubscription` overcharge (lib/actions/subscription.ts).** The
+cycles/buckets math was already correctly rebuilt from a fresh, row-locked
+read inside the transaction (an earlier fix) — but the PAYMENT amount
+(`difference`) was computed ONCE, before the transaction, from the
+pre-transaction `cur`/`oldGross` snapshot, and used unchanged. Two
+concurrent upgrades for the same student targeting DIFFERENT destination
+plans (two counters/Managers — NOT a same-plan double-tap, which the
+existing `fresh.planId === plan.id` re-check already caught) both read the
+same starting plan before either committed: the second call's fresh read
+correctly saw the first upgrade's new plan for the CYCLES math, but the
+stale `difference` closure still charged (secondPlan − originalPlan)
+instead of (secondPlan − firstUpgradePlan) — overcharging by exactly the
+first upgrade's own price, already paid once. Fixed by recomputing
+`oldGross`/`difference` from the same fresh, locked `planRef` read already
+used for the cycles rebuild. New test:
+`tests/upgrade-subscription-race-behavioral.test.ts` — two concurrent
+upgrades A→B and A→C must total exactly (C's price − A's price), not
+(B's price − A's price) + (C's price − A's price).
+
+**Session-revocation bypass, 7 routes (lib/cron-auth.ts).** `purge-photos`,
+`error-digest`, `collection-reminders`, `stuck-orders`, `cron-watchdog`,
+`sheets/sync`, `sheets/flush` each independently defined their own
+`authorised(req)`: `getSession()` → `db.staff.findUnique` → bare
+`role >= N`. None of them checked `st.active` or `s.epoch ===
+st.sessionEpoch` — the exact two checks `requireStaff()` exists specifically
+to re-verify on every call, because deactivating a staff member or using
+"sign out everywhere" is supposed to take effect immediately, not at the
+365-day session token's natural expiry (see `setStaffActive`'s own comment).
+A removed Admin/Owner's still-validly-SIGNED cookie could keep triggering
+any of these seven routes indefinitely — the identical bug class already
+fixed once for `/api/rt` ("the SSE stream never re-checked session
+revocation"), just never applied to this second family of routes. Fixed by
+adding `isCronOrStaff(req, minRole)` to `lib/cron-auth.ts`, which routes
+through `requireStaff()` instead of duplicating the weaker check — same
+centralizing idea this file already used once for the CRON_SECRET
+timing-safe comparison. Also fixed the same gap, narrower blast radius, in
+`app/api/export/invoice/[orderId]/route.ts`'s customer branch (compared the
+raw JWT's `studentId` against the invoice, never called `requireStudent()`)
+— a lost phone's stale session could keep loading/printing that student's
+own GST invoice forever, defeating "sign out everywhere" for this one
+endpoint. New test: `tests/cron-or-staff-behavioral.test.ts` — proves a
+deactivated staff account and a sessionEpoch-revoked session are both
+refused, where the old hand-rolled check would have accepted either.
+
+**Erasure race + PII-in-audit-log (lib/actions/privacy.ts).**
+`eraseMyData`/`eraseStudentData` checked `anonymisedAt` and "any active
+order" OUTSIDE the transaction, no lock, no re-check inside — same
+precondition-then-write shape as every other race this session found
+elsewhere. Narrowest real consequence: an order that wasn't yet "received"/
+"processing" at check-time but commits into that state microseconds later
+(acceptOrder/walkInOrder racing the check) would let erasure proceed anyway,
+anonymising the phone to `deleted-{id}` while a real order is now in
+flight — breaking SMS/pickup-OTP for exactly the order the check exists to
+protect. Fixed with the same lock-then-fresh-recheck pattern used
+throughout this session (locks the Student row, re-reads `anonymisedAt` and
+the active-order query fresh inside the transaction). Separately, also
+fixed: `eraseStudentData`'s OWN audit-log line baked the student's real
+name into the very event recording their erasure (`${stu.name} (${stu.id})
+anonymised — ${note}`) — AuditLog rows are never touched by erasure, so the
+real name was permanently preserved right next to the event meant to remove
+it, contradicting the feature's own stated purpose (this file's header
+comment: "every field that identifies a person is overwritten"). Fixed by
+dropping the name from that one line, matching `eraseMyData`'s own log line
+which never had this problem. New test:
+`tests/erasure-race-behavioral.test.ts` — two concurrent erasures of the
+same student: exactly one succeeds, `sessionEpoch` increments once, not
+twice (the double-increment is what the old unlocked code produced).
+**Not fixed, flagged for a future session**: `AuditLog.detail` bakes a
+student's real name (sometimes phone) into ~20 other call sites across
+`lib/actions/*.ts` unrelated to erasure itself (plan purchases, phone
+changes, bag issuance, etc.) — these rows are never scrubbed by erasure
+either, a genuine but much larger gap (needs a structured `studentId`
+column on `AuditLog` plus a redaction pass, not a one-line fix) that this
+round only patched at the two erasure-specific call sites.
+
+**Also checked and confirmed clean this round** (per the two delegated
+audits, condensed): complaints lifecycle (cross-student complaint, double
+free-reservice, double-resolve — all already correctly guarded, verified
+unmodified); `activateSubscription`/`adjustCycleUsage`/`cancelSubscription`/
+`sellCyclePack`/`assignSubscription` (all fresh-locked-read, no regressions);
+ops/payroll (`clockIn`/`clockOut`/`closeDay`/`topUpCredits`/`createPayslip`,
+all documented fixes present, net-pay guard confirmed server-side not just
+client-side); slot-booking capacity (overbooking, past-slot, too-far-ahead
+all correctly blocked); loyalty tier (purely cosmetic, not read by any
+pricing/eligibility logic, not gameable); every credit-granting function
+(no student-callable self-grant anywhere) — one DB-backstopped,
+lower-priority gap left open: three credit-DECREMENT call sites
+(`sellCyclePack`, `activatePlan`, `payInner`) check the balance before a
+lock, but the `ff_credits_not_negative` CHECK constraint already prevents
+an actual overdraw at the DB layer — only the error MESSAGE on the losing
+concurrent request is poor (an unhandled constraint-violation error instead
+of a friendly "not enough credit"), not a financial-safety issue. Left for
+a future pass. `lib/auth.ts` core session/role/lockout logic, `wa-login.ts`/
+`wa-register.ts`, OTP/passcode timing-safe comparisons, and the full
+campus-isolation (`assertSameCollege`) sweep across all 16 `lib/actions/
+*.ts` files: all re-verified clean, no regressions, no new gaps.
+
+**Verified**: full suite 1204/1204 (one flaky full-suite-only failure on a
+first run, reproduced as passing in isolation and on a clean full-suite
+rerun — a transient DB-connection-pool timing issue under ~118 concurrent
+test files' real Postgres transactions, not a code bug), `tsc --noEmit`
+clean. Every fix in this entry has a real behavioral test that was
+individually proven — reverted the fix, confirmed the test fails for the
+right reason, restored the fix, confirmed it passes — to actually catch the
+regression it guards, continuing the discipline established in the
+concurrency-audit entry above this one.
+
 ## RESOLVED 2026-10-20: deep concurrency audit — 6 real races/bugs found and fixed, all with behavioral tests proven to catch the regression
 
 Owner, after a long session of real bugs found live, asked for a deep core

@@ -56,7 +56,15 @@ async function main() {
       : s.student.college.name.trim().toUpperCase() === "BVRIT" ? "bvrit"
       : bagKindFor(s.planRef?.tier ?? null);
 
+    // Same advisory lock key issueBag/customerIdFor's self-heal use, and the
+    // same fresh re-check — the worklist above was computed once, up front;
+    // re-checking here guards against staff manually issuing a bag for one
+    // of these students (or this script being run twice) while this loop is
+    // still working through the rest of the list.
     const code = await db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`bag-issue|${s.student.id}`}))`;
+      const already = await tx.bag.findFirst({ where: { studentId: s.student.id, status: "active" }, select: { code: true } });
+      if (already) return already.code;
       const c = await allocateBagCode(tx, kind);
       await tx.bag.create({
         data: {

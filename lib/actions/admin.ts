@@ -91,37 +91,58 @@ export async function registerStudent(input: { name: string; phone: string; coll
   }
   let stu;
   let bagCode: string | null = null;
-  try {
-    const result = await db.$transaction(async (tx) => {
-      const created = await tx.student.create({ data: { id, phone, name, collegeId: college.id, kind } });
-      if (needsPlan) return { stu: created, code: null as string | null }; // bag comes from the plan below, not here
-      // BVRIT students self-registering via WhatsApp get a V-series bag
-      // automatically in the same transaction as account creation
-      // (wa-register.ts) — mirror that here so a BVRIT student added by
-      // staff isn't left with no customer ID / bag code (found 2026-09-11:
-      // the owner registered a test student this way and got no code).
-      //
-      // Faculty (any college) get an F-series code the same way — they buy
-      // cycle packs at the counter (sellCyclePack), not tiered plans, so
-      // there is no subscription step that would otherwise issue their
-      // bag; without this they'd be left with no customer ID until they
-      // happened to trigger issueBag (owner, Sep 2026: "we have given code
-      // as F ... it will be same like F1100").
-      // St Mary's: the staff-typed ID (validated above). BVRIT: generated, as before.
-      const code = isBvrit ? await allocateBagCode(tx, isFaculty ? "faculty" : "bvrit") : typedCode;
-      await tx.bag.create({
-        data: { code, studentId: created.id, tier: null, complimentary: true, issuedBy: st.id, status: "active" },
+  /* Retried up to 3 times on P2002 (same count/shape as issueBag's own
+     retry loop) — found 2026-10-20: allocateBagCode's recycled-code search
+     (two findMany calls, no lock — documented hazard, see bags.ts's comment
+     on issueBag) can let two concurrent BVRIT/faculty registrations pick the
+     SAME candidate code at once; the loser's tx.bag.create throws P2002. The
+     OLD catch here assumed any P2002 in this transaction could only be the
+     phone unique constraint (pre-checked moments earlier, so only reachable
+     via a genuine two-registrations-same-new-number race) and told that
+     staff member "This number is already registered" — simply false when
+     the real cause was a one-time bag-code collision a bare retry resolves,
+     exactly like issueBag already does for the identical race elsewhere. */
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = await db.$transaction(async (tx) => {
+        const created = await tx.student.create({ data: { id, phone, name, collegeId: college.id, kind } });
+        if (needsPlan) return { stu: created, code: null as string | null }; // bag comes from the plan below, not here
+        // BVRIT students self-registering via WhatsApp get a V-series bag
+        // automatically in the same transaction as account creation
+        // (wa-register.ts) — mirror that here so a BVRIT student added by
+        // staff isn't left with no customer ID / bag code (found 2026-09-11:
+        // the owner registered a test student this way and got no code).
+        //
+        // Faculty (any college) get an F-series code the same way — they buy
+        // cycle packs at the counter (sellCyclePack), not tiered plans, so
+        // there is no subscription step that would otherwise issue their
+        // bag; without this they'd be left with no customer ID until they
+        // happened to trigger issueBag (owner, Sep 2026: "we have given code
+        // as F ... it will be same like F1100").
+        // St Mary's: the staff-typed ID (validated above). BVRIT: generated, as before.
+        const code = isBvrit ? await allocateBagCode(tx, isFaculty ? "faculty" : "bvrit") : typedCode;
+        await tx.bag.create({
+          data: { code, studentId: created.id, tier: null, complimentary: true, issuedBy: st.id, status: "active" },
+        });
+        return { stu: created, code };
       });
-      return { stu: created, code };
-    });
-    stu = result.stu;
-    bagCode = result.code;
-  } catch (e) {
-    // The pre-check above ran before this create — two concurrent
-    // registrations for the same number both pass it, and the second
-    // create hits the unique constraint on `phone` and throws unhandled.
-    if ((e as { code?: string }).code === "P2002") return { ok: false as const, error: "This number is already registered" };
-    throw e;
+      stu = result.stu;
+      bagCode = result.code;
+      break;
+    } catch (e) {
+      if ((e as { code?: string }).code !== "P2002" || attempt >= 2) {
+        if ((e as { code?: string }).code !== "P2002") throw e;
+        // Exhausted retries, or this was never a retryable collision in the
+        // first place (non-BVRIT: typedCode's own exact-match is checked
+        // once, not retried) — disambiguate for real rather than assuming,
+        // since the id/phone constraint and the bag-code constraint can
+        // both legitimately produce a P2002 here.
+        if (await db.student.findUnique({ where: { phone } })) return { ok: false as const, error: "This number is already registered" };
+        return { ok: false as const, error: "Couldn't allocate a code — please try again" };
+      }
+      // else: a genuine bag-code collision on a BVRIT/faculty auto-allocated
+      // code — loop and retry with a freshly allocated one, same as issueBag.
+    }
   }
 
   let planError: string | undefined;
@@ -140,7 +161,7 @@ export async function registerStudent(input: { name: string; phone: string; coll
       input.planId!,
       input.method!,
       false,
-      isBvrit ? undefined : { code: typedCode, tier: expectedKind! },
+      isBvrit ? undefined : { code: typedCode, tier: expectedKind!, issuedBy: st.id },
     );
     if (result.ok) {
       planName = result.plan.name;

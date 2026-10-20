@@ -82,13 +82,22 @@ export async function requireCyclesEnabled(collegeId: string) {
  * `firstBag.code` is a staff-TYPED code already checked for an exact-match
  * free active bag by the caller moments earlier — the only remaining race is
  * that exact check being stale, which the DB's own partial unique index
- * (bag_code_one_active_uniq) catches as P2002 regardless. */
+ * (bag_code_one_active_uniq) catches as P2002 regardless.
+ *
+ * `firstBag.issuedBy` is the REAL acting staff id (found live 2026-10-20: an
+ * earlier version of this fix hardcoded "system" here, the same literal used
+ * for genuinely automated bags like customerIdFor's self-heal — silently
+ * losing who actually registered the student and took their money, the one
+ * path in the whole bag-issuance system that didn't attribute to a real
+ * person). Every sibling bag-creation path (issueBag, the BVRIT/faculty
+ * branch three lines away in registerStudent) writes the real `st.id`; this
+ * one must too. */
 export async function activatePlan(
   stu: { id: string; collegeId: string; credits: unknown },
   planId: string,
   method: "cash" | "upi",
   applyCredits: boolean,
-  firstBag?: { code: string; tier: string },
+  firstBag?: { code: string; tier: string; issuedBy: string },
 ) {
   const plan = await db.plan.findUnique({ where: { id: planId } });
   if (!plan || !plan.active) return { ok: false as const, error: "Pick a plan" };
@@ -131,7 +140,7 @@ export async function activatePlan(
       // their own transaction's writes) and has nothing left to heal.
       if (firstBag) {
         await tx.bag.create({
-          data: { code: firstBag.code, studentId: stu.id, tier: firstBag.tier, complimentary: true, issuedBy: "system", status: "active" },
+          data: { code: firstBag.code, studentId: stu.id, tier: firstBag.tier, complimentary: true, issuedBy: firstBag.issuedBy, status: "active" },
         });
       }
       if (creditApplied > 0) {

@@ -111,4 +111,59 @@ describe("refundOrder can't be over-refunded by two concurrent calls (real, not 
     const final = await db.order.findUniqueOrThrow({ where: { id: "RRACE02" } });
     expect(Number(final.refundAmount)).toBe(300);
   });
+
+  /* Found 2026-10-20 in a deep audit: the refund AMOUNT cap (above) was
+     already correctly protected by the Order row lock, but restoreCycleFor's
+     own precondition check (`if (!ord.usedCycle...)`) was handed the STALE
+     pre-transaction order snapshot, not the locked fresh read — so two
+     concurrent refunds with restoreCycle=true, each well under the rupee
+     cap, could BOTH see usedCycle=true and both decrement the subscription,
+     double-crediting one real cycle burn. This is deliberately a scenario
+     where the rupee cap does NOT reject either call (small amounts), so a
+     test that only checks refundAmount/payment-row-count (like the ones
+     above) would not have caught this at all — only checking cyclesUsed
+     does. */
+  it("can't double-restore a subscription cycle when two small concurrent refunds both ask to restore it", async () => {
+    // cyclesUsed starts at 2, as if a SECOND, untouched order elsewhere also
+    // burned a cycle — deliberately NOT 1, so a double-restore shows up as a
+    // wrong final count (1, i.e. only this order's cycle restored) vs. the
+    // buggy outcome (0, i.e. restored twice) rather than both landing on 0
+    // via the decrement's own negative-clamp, which would mask the bug.
+    const sub = await db.subscription.create({
+      data: {
+        studentId: "111111", active: true, plan: "Bronze", cyclesTotal: 10, cyclesUsed: 2, kgPerCycle: 7,
+        buckets: [{ service: "washFold", cycles: 10, used: 2, kgPerCycle: 7 }],
+        startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000),
+      },
+    });
+    await db.order.create({
+      data: {
+        id: "RRACE03", studentId: "111111", collegeId: "col1", service: "washFold",
+        items: [{ label: "Cycle", rate: 200, qty: 1 }], cyclesCount: 1,
+        subtotal: 200, gst: 0, gstPctSnapshot: 18, total: 200,
+        paid: true, paymentMethod: "cash", usedCycle: true,
+      },
+    });
+    await db.cycleUse.create({ data: { subscriptionId: sub.id, orderId: "RRACE03" } });
+
+    // ₹50 + ₹50 = ₹100, well under the ₹200 order total — the amount cap
+    // alone would let both through. Only the usedCycle fix stops the second
+    // one from also restoring a cycle.
+    const [r1, r2] = await Promise.all([
+      orders.refundOrder("RRACE03", 50, "cash", "partial A", true),
+      orders.refundOrder("RRACE03", 50, "cash", "partial B", true),
+    ]);
+    expect([r1, r2].filter((r) => r.ok).length).toBe(2); // both refunds themselves are valid and independent
+
+    const subAfter = await db.subscription.findUniqueOrThrow({ where: { id: sub.id } });
+    // Restored exactly once: 2 -> 1, not 2 -> 0 (which is what two restores
+    // of this order's single cycle would wrongly produce).
+    expect(subAfter.cyclesUsed).toBe(1);
+    const buckets = subAfter.buckets as unknown as { service: string; used: number }[];
+    expect(buckets.find((b) => b.service === "washFold")!.used).toBe(1);
+    const cycleUses = await db.cycleUse.findMany({ where: { orderId: "RRACE03" } });
+    expect(cycleUses.length).toBe(0); // deleted once, not double-deleted/erroring
+    const orderAfter = await db.order.findUniqueOrThrow({ where: { id: "RRACE03" } });
+    expect(orderAfter.usedCycle).toBe(false);
+  });
 });

@@ -52,6 +52,14 @@ beforeAll(async () => {
     cwd: path.resolve(__dirname, ".."), stdio: "ignore",
     env: { ...process.env, DATABASE_URL: TEST_URL },
   });
+  // Installs bag_code_one_active_uniq (and the rest of ensure-guards.mjs)
+  // into this isolated schema — without this, the one test below that
+  // exercises activatePlan's P2002-inside-the-transaction rollback path has
+  // no real unique constraint to collide against at all.
+  execSync("node scripts/ensure-guards.mjs", {
+    cwd: path.resolve(__dirname, ".."), stdio: "ignore",
+    env: { ...process.env, DATABASE_URL: TEST_URL, DIRECT_URL: TEST_URL, FF_GUARD_SCHEMA: SCHEMA },
+  });
 
   db = (await import("../lib/db")).db;
   adminActions = await import("../lib/actions/admin");
@@ -249,5 +257,54 @@ describe("St Mary's customer ID is typed by staff and checked before anything is
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.bagCode).toMatch(/^V\d+$/);
+  });
+});
+
+/* The actual point of the 2026-10-20 fix, tested directly — not just that
+   registerStudent's own pre-check refuses a known-taken code (the test
+   above), but that if the bag create STILL fails INSIDE activatePlan's
+   transaction (the pre-check's own exact-match query being stale is the
+   only way this happens in production — see plan-activation.ts's comment),
+   the subscription and payment are never left behind. Calls activatePlan
+   directly, bypassing registerStudent's pre-check entirely, so this
+   actually exercises the P2002-inside-the-transaction path rather than the
+   simpler before-the-transaction one. Flagged by a deep audit as the single
+   most important missing regression test for this fix — without it, a
+   future refactor that re-ordered firstBag's creation or swallowed its
+   error would pass every other test in the suite while silently
+   reintroducing the exact "paid subscription, zero bag" bug this fix
+   exists to prevent. */
+describe("activatePlan's firstBag: a bag-creation failure rolls back the WHOLE sale, not just the bag", () => {
+  it("a code collision discovered only inside the transaction leaves no subscription and no payment behind", async () => {
+    const { activatePlan } = await import("../lib/plan-activation");
+    await asManager();
+    const takenCode = "G9501";
+    const holder = await db.student.create({ data: { id: "9501001", phone: nextPhone(), name: "Holds G9501", collegeId: "sm" } });
+    await db.bag.create({ data: { code: takenCode, studentId: holder.id, tier: "gold", complimentary: true, issuedBy: "test", status: "active" } });
+
+    const victim = await db.student.create({ data: { id: "9501002", phone: nextPhone(), name: "Collides", collegeId: "sm" } });
+    const result = await activatePlan(
+      { id: victim.id, collegeId: "sm", credits: 0 },
+      smGold, "cash", false,
+      { code: takenCode, tier: "gold", issuedBy: "test" },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/was just taken by someone else/);
+
+    // The real point: nothing partial was left behind for the victim.
+    expect(await db.subscription.findUnique({ where: { studentId: victim.id } })).toBeNull();
+    expect(await db.payment.count({ where: { studentId: victim.id } })).toBe(0);
+    expect(await db.bag.count({ where: { studentId: victim.id } })).toBe(0);
+  });
+
+  it("issuedBy on the minted bag is the REAL acting staff id, not the literal 'system'", async () => {
+    await asManager();
+    const r = await adminActions.registerStudent({ customerId: "G7005", name: "Attributed", phone: nextPhone(), collegeId: "sm", kind: "student", planId: smGold, method: "cash" });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const bag = await db.bag.findFirst({ where: { studentId: r.id, status: "active" } });
+    expect(bag?.issuedBy).not.toBe("system");
+    expect(bag?.issuedBy).toMatch(/^mgr/); // asManager()'s staff id, not a literal
   });
 });

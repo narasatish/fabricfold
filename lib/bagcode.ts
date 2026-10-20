@@ -40,7 +40,8 @@
 
    Backed by the same transactional FySequence table as invoice numbering, so
    two counters issuing bags in the same instant cannot collide. */
-import type { Prisma } from "./generated/prisma/client";
+import { Prisma } from "./generated/prisma/client";
+import { dbSchemaPrefix } from "./db";
 
 export const TIERS = ["bronze", "silver", "gold"] as const;
 export type Tier = (typeof TIERS)[number];
@@ -180,19 +181,24 @@ export async function allocateBagCode(tx: Prisma.TransactionClient, kind: BagKin
   const existingMaxN = existingCodes.reduce((max, b) => Math.max(max, parseBagCode(b.code)?.n ?? 0), 0);
   const floor = Math.max(MINT_FROM, existingMaxN);
 
-  let row = await tx.fySequence.findUnique({ where: { kind_fyTag: { kind: "bagcode", fyTag: letter } } });
-  if (!row) {
-    row = await tx.fySequence.create({ data: { kind: "bagcode", fyTag: letter, value: floor } });
-  } else if (row.value < floor) {
-    row = await tx.fySequence.update({
-      where: { kind_fyTag: { kind: "bagcode", fyTag: letter } },
-      data: { value: floor },
-    });
-  }
-  row = await tx.fySequence.update({
-    where: { kind_fyTag: { kind: "bagcode", fyTag: letter } },
-    data: { value: { increment: 1 } },
-  });
+  /* A plain findUnique-then-create(-else-update) is a classic find-then-act
+     race: two concurrent FIRST-EVER mints for the SAME letter both see no
+     row, both attempt to create one, and the loser gets an unhandled P2002.
+     Normally a narrow, once-ever window — but today's rewrite to per-letter
+     rows (from one single shared row) means all five letters are freshly
+     cold at once, right at this deploy, not "once in the app's lifetime" —
+     found 2026-10-20 in a deep audit. Replaced with a single atomic
+     `INSERT ... ON CONFLICT DO UPDATE`, which Postgres serializes at the row
+     level regardless of concurrent callers — no separate read-then-write
+     steps left to race. GREATEST(...) on the conflict branch is what the two
+     old separate update calls (bump-to-floor, then increment) used to do in
+     two steps; done here in the one atomic statement instead. */
+  const table = Prisma.raw(`${dbSchemaPrefix}"FySequence"`);
+  const [row] = await tx.$queryRaw<{ value: number }[]>`
+    INSERT INTO ${table} (kind, "fyTag", value)
+    VALUES ('bagcode', ${letter}, ${floor + 1})
+    ON CONFLICT (kind, "fyTag") DO UPDATE SET value = GREATEST("FySequence".value, ${floor}) + 1
+    RETURNING value`;
   const code = formatBagCode(kind, row.value);
   if (!code) {
     throw new Error(
@@ -276,11 +282,46 @@ export async function customerIdFor(
     kind = bagKindFor(sub?.active ? sub.planRef?.tier : null);
   }
 
-  return db.$transaction(async (tx: Prisma.TransactionClient) => {
-    const code = await allocateBagCode(tx, kind!);
-    await tx.bag.create({
+  /* Two real bugs fixed here 2026-10-20, found by a deep audit:
+     (1) RACE — no lock, no re-check inside a transaction. Two concurrent
+     calls for the same never-bagged student (realistic: two Sheet-event call
+     sites racing for the same new student, e.g. complaints.ts and orders.ts
+     both resolving a Customer ID around the same moment) both pass the
+     everHadABag check above, both allocate a DIFFERENT code, and both
+     successfully create a Bag — nothing catches it, since bag_code_one_active_
+     uniq only protects one CODE from being reused, not "one active bag per
+     student". Result: a student silently ends up holding two simultaneously
+     active customer IDs. Fixed with the SAME advisory lock key issueBag uses
+     ("bag-issue|${studentId}") — the two code paths now serialize against
+     EACH OTHER too, not just against themselves.
+     (2) CRASH — `db` here is sometimes actually a `Prisma.TransactionClient`
+     (every caller inside lib/sheet-events.ts's customerIdFor wrapper passes
+     `tx`, not the top-level client), and a TransactionClient has no
+     `$transaction` method (Prisma doesn't support nesting transactions) — so
+     a self-heal triggered from inside an already-open transaction (e.g. a
+     student with zero bags reaching this via acceptOrder/collectOrder/
+     payInner/sellCyclePack's own customerIdFor(tx,...) call) used to throw
+     "tx.$transaction is not a function", aborting the WHOLE enclosing
+     transaction with a confusing internal error instead of just minting a
+     bag. Fixed by detecting which kind of client was handed in: open a new
+     transaction only when given the top-level client; when already inside
+     one (`db` lacks `$transaction`), do the lock + write directly against
+     it — advisory locks are scoped to the current transaction regardless of
+     which one that is. */
+  const mint = async (client: Prisma.TransactionClient) => {
+    await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`bag-issue|${student.id}`}))`;
+    // Re-check fresh, now that nothing else can be concurrently minting for
+    // this student — someone else (this function or issueBag, racing on the
+    // same lock key) may have created one while this call waited.
+    const nowHasOne = await client.bag.findFirst({ where: { studentId: student.id, status: "active" }, select: { code: true } });
+    if (nowHasOne) return nowHasOne.code;
+    const code = await allocateBagCode(client, kind!);
+    await client.bag.create({
       data: { code, studentId: student.id, tier: isTier(kind) ? kind : null, complimentary: true, issuedBy: "system", status: "active" },
     });
     return code;
-  });
+  };
+  return typeof (db as { $transaction?: unknown }).$transaction === "function"
+    ? (db as typeof import("./db").db).$transaction((tx) => mint(tx))
+    : mint(db as unknown as Prisma.TransactionClient);
 }

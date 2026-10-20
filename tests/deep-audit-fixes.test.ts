@@ -134,7 +134,11 @@ describe("registration/staff-add races on a duplicate phone return a friendly er
   it("registerStudent catches the unique-constraint violation", () => {
     const src = read("lib/actions/admin.ts");
     const fn = src.slice(src.indexOf("export async function registerStudent"), src.indexOf("export async function updateStudentPhone"));
-    expect(fn).toMatch(/if \(\(e as \{ code\?: string \}\)\.code === "P2002"\) return \{ ok: false as const, error: "This number is already registered" \}/);
+    // Retried up to 3 times on P2002 since 2026-10-20 (a bag-code collision
+    // is retryable, unlike a genuine duplicate phone) — the actual duplicate-
+    // phone message is only reached once retries are exhausted or a non-BVRIT
+    // code path hits it, disambiguated by a real re-check rather than assumed.
+    expect(fn).toMatch(/if \(await db\.student\.findUnique\(\{ where: \{ phone \} \}\)\) return \{ ok: false as const, error: "This number is already registered" \}/);
   });
   it("saveStaff catches it too, on the create path", () => {
     const src = read("lib/actions/admin.ts");
@@ -286,7 +290,13 @@ describe("three more concurrency/state bugs found by a deep hand-traced re-audit
     const fn = orders.slice(orders.indexOf("export async function refundOrder"), orders.indexOf("export async function redoOrder"));
     expect(fn).toMatch(/const table = Prisma\.raw\(`\$\{dbSchemaPrefix\}"Order"`\);/);
     expect(fn).toMatch(/SELECT id FROM \$\{table\} WHERE id = \$\{o\.id\} FOR UPDATE/);
-    expect(fn).toMatch(/const fresh = await tx\.order\.findUniqueOrThrow\(\{ where: \{ id: o\.id \}, select: \{ refundAmount: true, total: true \} \}\)/);
+    // Select widened 2026-10-20 to also fetch usedCycle/service/cyclesCount —
+    // restoreCycleFor used to be handed the STALE pre-transaction `o`, whose
+    // usedCycle flag two concurrent restoreCycle=true refunds could both see
+    // as true, double-crediting a subscription cycle. See `fresh` passed to
+    // restoreCycleFor below, not `o`.
+    expect(fn).toMatch(/const fresh = await tx\.order\.findUniqueOrThrow\(\{ where: \{ id: o\.id \}, select: \{ id: true, refundAmount: true, total: true, usedCycle: true, service: true, cyclesCount: true \} \}\)/);
+    expect(fn).toMatch(/restoreCycleFor\(tx, fresh, o\.student\.subscription\)/);
     expect(fn).toMatch(/if \(amount > stillRefundable\) \{/);
   });
 

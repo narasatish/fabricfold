@@ -133,6 +133,18 @@ export async function placeOrder(input: { service: string; items: { label: strin
   let o;
   try {
     o = await db.$transaction(async (tx) => {
+      /* The "one open draft" check above runs OUTSIDE this transaction, with
+         no re-check inside it and no DB constraint backing it (no unique
+         index on (studentId) WHERE status='draft') — found 2026-10-20 in a
+         deep audit: two concurrent placeOrder calls from the same student
+         (a double-tap, a retried request after a dropped response) both pass
+         the stale check and both create a draft, defeating the rule this
+         whole check exists for ("bulk drafts... hectic", owner, Oct 2026).
+         Locked and re-checked fresh, same pattern as every other
+         precondition-then-write in this file. */
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`draft|${stu.id}`}))`;
+      const stillOpen = await tx.order.findFirst({ where: { studentId: stu.id, status: "draft" }, select: { id: true } });
+      if (stillOpen) throw new Error(`Finish or cancel your pending order #${stillOpen.id.slice(-4)} first`);
       let dropSlotAt: Date | null = null, dropSlotEndAt: Date | null = null;
       if (input.dropSlotAt) {
         dropSlotEndAt = await assertSlotBookable(tx, stu.collegeId, input.dropSlotAt);
@@ -178,6 +190,21 @@ export async function acceptOrder(orderId: string, input: { weightKg: number | n
   let result;
   try {
     result = await db.$transaction(async (tx) => {
+    /* Locked BEFORE the status check, not after — a plain read-then-write
+       here let two near-simultaneous accepts (a double-tap, a client retry,
+       two counters opening the same pre-booked order) both read
+       status === "draft" before either committed, and both proceed: both
+       burn a subscription cycle below (real prepaid value, ~₹147-200 per
+       the same reasoning restoreCycleFor's own comment gives), both double
+       the Sheet row, both double lifetimePieces math downstream. Every
+       OTHER status transition in this file (collectOrder, advanceStatus,
+       cancelOrder) already got this exact fix — acceptOrder was missed.
+       Same lock-then-fresh-read shape already used for the Subscription row
+       a few lines below, applied here to the Order row itself: the second
+       concurrent caller blocks on this SELECT until the first's whole
+       transaction (cycle burn included) commits, then sees status
+       "received" and throws before touching anything. */
+    await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Order"`)} WHERE id = ${orderId} FOR UPDATE`;
     const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { student: { include: { subscription: { include: { planRef: true } } } } } });
     if (o.status !== "draft") throw new Error("Order already received");
 
@@ -819,7 +846,16 @@ export async function refundOrder(orderId: string, amount: number, via: "upi" | 
          other money-moving transition in this file. */
       const table = Prisma.raw(`${dbSchemaPrefix}"Order"`);
       await tx.$executeRaw`SELECT id FROM ${table} WHERE id = ${o.id} FOR UPDATE`;
-      const fresh = await tx.order.findUniqueOrThrow({ where: { id: o.id }, select: { refundAmount: true, total: true } });
+      // Also selects usedCycle/service/cyclesCount — restoreCycleFor's own
+      // precondition check (`if (!ord.usedCycle...)`) used to be handed the
+      // STALE pre-transaction `o` below, not this locked, fresh read. Two
+      // near-simultaneous refund calls with restoreCycle=true on the same
+      // order both captured their own `o` with usedCycle still true (neither
+      // transaction had committed yet), so both proceeded to decrement the
+      // subscription — a real double-credit of prepaid cycle value — even
+      // though the refund AMOUNT cap right below was already correctly
+      // protected by this same lock. Found 2026-10-20 in a deep audit.
+      const fresh = await tx.order.findUniqueOrThrow({ where: { id: o.id }, select: { id: true, refundAmount: true, total: true, usedCycle: true, service: true, cyclesCount: true } });
       const stillRefundable = Number(fresh.total) - Number(fresh.refundAmount || 0);
       if (amount > stillRefundable) {
         throw new Error(stillRefundable > 0 ? `Only ₹${stillRefundable} left to refund on this order` : "This order has already been fully refunded");
@@ -836,7 +872,7 @@ export async function refundOrder(orderId: string, amount: number, via: "upi" | 
       // on a later call. Compute the new total explicitly off the fresh read.
       const newRefundAmount = Number(fresh.refundAmount || 0) + amount;
       await tx.order.update({ where: { id: o.id }, data: { refunded: true, refundAmount: newRefundAmount } });
-      if (restoreCycle) await restoreCycleFor(tx, o, o.student.subscription);
+      if (restoreCycle) await restoreCycleFor(tx, fresh, o.student.subscription);
       await touchStudentActivity(tx, o.studentId);
     }, { timeout: 15_000 }); // may call restoreCycleFor which locks the subscription row
   } catch (e) {

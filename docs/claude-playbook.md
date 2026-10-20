@@ -12,6 +12,161 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-10-20: deep concurrency audit — 6 real races/bugs found and fixed, all with behavioral tests proven to catch the regression
+
+Owner, after a long session of real bugs found live, asked for a deep core
+audit ("I am not confident... take your time"). Ran three parallel deep
+audits (registration/bag-code residuals, money correctness, concurrency
+across every `db.$transaction` call site) rather than a surface pass. Full
+money-correctness sweep (GST, refunds, credit notes, FySequence numbering,
+express surcharge, Decimal precision) came back clean except two
+documentation-only staleness issues (money.ts's file-header comment says
+GST is extracted from an inclusive price; the actual, correct, in-use
+formula adds it on top — the code is right, that one comment is wrong).
+Six real bugs found and fixed below. Every one of them is now locked down
+by a behavioral test that was PROVEN to catch the exact regression (reverted
+the fix, confirmed the test fails, restored the fix, confirmed it passes
+again) — not just written and assumed correct.
+
+**1. `acceptOrder` had no atomic status guard — the most serious finding.**
+Every sibling status transition in `lib/actions/orders.ts` (collectOrder,
+advanceStatus, cancelOrder) was already fixed for this exact class of bug;
+acceptOrder was missed. It read `o.status`, checked `!== "draft"`, then did
+a plain unconditional `tx.order.update` — no lock, no `updateMany` scoped to
+the starting status. Two near-simultaneous accepts of the same draft order
+(a double-tap, a client retry, two counters opening the same pre-booked
+order — explicitly "a real, plausible scenario" per this file's own
+existing comments on a related race) could both pass the check and both
+burn a subscription cycle for ONE physical wash — real prepaid value,
+silently double-debited. Fixed by locking the Order row (`SELECT ... FOR
+UPDATE`) before the status check, same pattern already used for the
+Subscription row a few lines below in the same function. New test:
+`tests/accept-order-race-behavioral.test.ts`.
+
+**2. `refundOrder`'s cycle-restore used the STALE pre-transaction order
+snapshot.** The refund AMOUNT cap was already correctly protected (locked,
+fresh-read) — but `restoreCycleFor`'s precondition check (`if
+(!ord.usedCycle...)`) was handed the OUTER `o`, fetched before the
+transaction even started, not the freshly-locked `fresh` read done for the
+amount cap. Two concurrent refunds with `restoreCycle=true` on the same
+order — even well under the rupee cap, so the amount check alone wouldn't
+catch it — could both see `usedCycle=true` and both decrement the
+subscription, double-crediting a cycle that was only burned once. Fixed by
+widening the fresh read's `select` (added `id`, `usedCycle`, `service`,
+`cyclesCount`) and passing `fresh` to `restoreCycleFor` instead of `o`.
+**The first version of this test was accidentally vacuous** — a scenario
+where cyclesUsed went 1→0 either way, since the decrement's own
+negative-floor clamp masked the bug by coincidence. Caught by mutation-
+testing the test itself (ran it with the bug still present — it passed when
+it should have failed), redesigned with `cyclesUsed` starting at 2 (as if
+another order's cycle was also burned) so a double-restore produces a wrong
+0 instead of the correct 1. New/extended test:
+`tests/refund-race-behavioral.test.ts`.
+
+**3. `activatePlan`'s new `firstBag` bag hardcoded `issuedBy: "system"`,
+losing the real staff member.** Every sibling bag-creation path (issueBag,
+the BVRIT/faculty branch in registerStudent three lines away) correctly
+attributes to the real authenticated staff id; this one path — now the MOST
+COMMON registration path, every plan-based St Mary's signup — silently
+wrote the literal string used elsewhere only for genuinely automated bags.
+No UI currently displays `Bag.issuedBy`, so no visible symptom yet, but it
+was a real, silently-wrong value from the moment it would have deployed —
+corrupting the first "which staff member issued this" query anyone ever
+runs. Fixed by threading the real `st.id` through `firstBag.issuedBy`.
+New test (in `tests/register-student-walkin-id-behavioral.test.ts`):
+asserts the minted bag's `issuedBy` matches the session's real staff id,
+not the literal "system".
+
+**4. `registerStudent`'s BVRIT/faculty bag-collision mislabeled as "phone
+already registered".** `allocateBagCode`'s recycled-code search (two
+`findMany` calls, no lock — a known, documented hazard `issueBag` already
+defends against with a 3-attempt retry loop) can let two concurrent BVRIT/
+faculty registrations pick the same candidate code; the loser's
+`tx.bag.create` throws P2002. The catch here assumed the ONLY possible
+P2002 in this transaction was the pre-checked `phone` unique constraint and
+told that staff member a flatly false thing — "This number is already
+registered" — when the real, one-time, retryable cause was a bag-code
+collision. Fixed with the same retry pattern `issueBag` already uses (up to
+3 attempts on P2002), and the final-failure message is now disambiguated by
+an actual re-check (`db.student.findUnique({where:{phone}})`) instead of
+assumed.
+
+**5. `customerIdFor`'s self-heal could mint TWO simultaneously active bags
+for one student, and could crash an unrelated enclosing transaction.** Two
+distinct bugs in one function (`lib/bagcode.ts`): (a) no lock, no in-
+transaction re-check — two concurrent calls for the same never-bagged
+student (realistic: two Sheet-event call sites racing for the same new
+student) both pass the "no bag yet" check, both allocate a DIFFERENT code,
+both succeed — nothing catches it, since the DB's uniqueness guarantee only
+protects one CODE from reuse, not "one active bag per student". (b) `db`
+here is sometimes actually a `Prisma.TransactionClient` (every caller
+inside `lib/sheet-events.ts`'s wrapper passes `tx`, not the top-level
+client) — and a TransactionClient has no `$transaction` method (Prisma
+doesn't support nesting), so a self-heal triggered from inside an
+already-open transaction (e.g. a zero-bag student reached via acceptOrder/
+collectOrder/payInner/sellCyclePack's own `customerIdFor(tx,...)` call)
+used to throw `"tx.$transaction is not a function"`, aborting the WHOLE
+enclosing transaction with a confusing internal error. Fixed both at once:
+reuses `issueBag`'s exact advisory-lock key (`bag-issue|${studentId}`) so
+the two code paths now serialize against EACH OTHER too, with a fresh
+in-lock re-check; and detects whether the given client already has
+`$transaction` (top-level) or not (already inside one) before deciding
+whether to open a new transaction or just use the lock directly against
+what's given.
+
+**6. `placeOrder`'s "one open draft" rule had no transactional re-check.**
+Checked via a plain `db.order.findFirst` outside the transaction, never
+re-checked inside it, no DB constraint backing it. Two concurrent
+`placeOrder` calls from the same student (double-tap, retried request)
+could both pass and both create a draft, defeating the rule the owner
+explicitly asked for ("bulk drafts... hectic"). Lower severity than the
+others (duplicate drafts, not duplicate money/cycles) but the identical
+check-outside/no-recheck-inside shape. Fixed with the same advisory-lock-
+then-fresh-recheck pattern as everywhere else in this file.
+
+**Also fixed, found by the SAME audit pass**: `allocateBagCode`'s
+FySequence row creation (`lib/bagcode.ts`) was a plain
+findUnique-then-create — a classic find-then-act race for a letter's FIRST-
+EVER mint. Narrow under the OLD single-shared-row scheme (could only ever
+race once, in the app's whole lifetime) but today's per-letter rewrite made
+all FIVE letters freshly cold at once, right at this deploy. Replaced with
+a single atomic `INSERT ... ON CONFLICT DO UPDATE SET value =
+GREATEST(current, floor) + 1` — Postgres serializes this at the row level
+regardless of concurrent callers, no separate read-then-write steps left to
+race. New test: `tests/bagcode-cold-start-race-behavioral.test.ts` (5
+concurrent first-ever BVRIT mints, all succeed, all distinct, sequence ends
+at exactly 1005 — proven to crash with the old pattern via mutation
+testing). `tests/bagcode-recycle.test.ts`'s fast mock-based suite was
+updated to simulate the new atomic-upsert semantics (verified the exact
+argument positions against a real tagged-template call rather than
+guessing) instead of the old 3-method FySequence mock.
+
+**repair-missing-bags.ts** (the one-off script from this session's earlier
+fix) had the identical "read precondition once, write without rechecking"
+shape — if run twice, or while a student on its worklist gets a bag issued
+by staff mid-run, it could double-mint. Low real-world severity (manual,
+dry-run-by-default, one-off admin tool) but fixed with the same lock +
+fresh re-check for consistency.
+
+**Deliberately NOT fixed, flagged for a future session**: two schema/
+comment staleness issues (`prisma/schema.prisma`'s comment on `Bag.code`'s
+partial index says `WHERE status <> 'released'`; the actual SQL installed
+by `ensure-guards.mjs` is `WHERE status = 'active'` — these differ for
+lost/replaced bags, not a bug, just a misleading comment); `acceptOrder`/
+`walkInOrder`'s `urgentCharge` local variable is computed but never read
+(dead code, not a double-charge — the real charge comes from the separately
+computed `surcharge` a few lines later) — a cleanup, not a fix.
+
+**Verified**: full suite 1196/1196, `tsc --noEmit` clean, `npm run verify`
+(typecheck + tests + build + backup coverage + ledger guards + full QA
+pipeline + launch readiness) all green except the already-known,
+deliberately-unaddressed wash-day gap. Every one of the 6 fixes above has a
+real behavioral test against a real Postgres database (not a source-regex
+check), and every one of those tests was individually proven — by
+temporarily reverting its fix, confirming the test fails for the right
+reason, then restoring the fix — to actually catch the regression it claims
+to guard, not just to exist.
+
 ## RESOLVED 2026-10-20: cron-sheets-sync's recurring Google Sheets 429 — the hourly sync was re-confirming tabs that already existed, every single run
 
 Follow-up to the cron-bill entry below, which found but deliberately didn't

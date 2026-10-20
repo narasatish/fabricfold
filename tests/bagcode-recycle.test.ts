@@ -27,26 +27,20 @@ function fakeTx(bags: { code: string; status: string }[], seq: Record<string, nu
         return rows.map((b) => ({ code: b.code }));
       },
     },
-    fySequence: {
-      /* Mirrors the real allocator's contract: `value` always means "the
-         last number ISSUED". A fresh letter is created at MINT_FROM (1000);
-         a legacy sub-1000 sequence jumps up to MINT_FROM; either way, the
-         allocator then does ONE unconditional increment before formatting —
-         so the first real code is 1001, never 1000 itself. */
-      findUnique: async ({ where }: any) => {
-        const k = where.kind_fyTag.fyTag;
-        return seq[k] === undefined ? null : { value: seq[k] };
-      },
-      create: async ({ data }: any) => {
-        const k = data.fyTag;
-        seq[k] = data.value;
-        return { value: seq[k] };
-      },
-      update: async ({ where, data }: any) => {
-        const k = where.kind_fyTag.fyTag;
-        seq[k] = data.value?.increment !== undefined ? seq[k] + data.value.increment : data.value;
-        return { value: seq[k] };
-      },
+    /* allocateBagCode's FySequence step is a single atomic
+       `INSERT ... ON CONFLICT DO UPDATE` raw query now (2026-10-20, closing
+       a find-then-create race — see lib/bagcode.ts's comment), not separate
+       findUnique/create/update calls. Mirrors its exact semantics: `value`
+       always means "the last number ISSUED"; a fresh letter starts at
+       floor+1 (so MINT_FROM=1000 gives a first real code of 1001, never
+       1000 itself); an existing row bumps to GREATEST(current, floor) + 1.
+       Argument positions (table, letter, floor+1, floor) are exactly what
+       lib/bagcode.ts's template literal produces — verified directly against
+       a real tagged-template call, not guessed. */
+    $queryRaw: async (_strings: TemplateStringsArray, _table: unknown, letter: string, floorPlus1: number, floor: number) => {
+      const cur = seq[letter];
+      seq[letter] = cur === undefined ? floorPlus1 : Math.max(cur, floor) + 1;
+      return [{ value: seq[letter] }];
     },
   } as never;
 }

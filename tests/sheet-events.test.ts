@@ -165,11 +165,13 @@ describe("privacy", () => {
 describe("reliability sweep", () => {
   const route = read("app/api/sheets/flush/route.ts");
 
-  it("is cron-authenticated and Admin+ in the app", () => {
+  it("is cron-authenticated and Admin+ in the app, via the session-revocation-aware shared helper", () => {
     // See privacy-ratelimit.test.ts's identical note: moved to the shared
-    // timing-safe isCronRequest() helper on 2026-09-05.
-    expect(route).toMatch(/isCronRequest\(req\)/);
-    expect(route).toMatch(/st\.role >= 3/);
+    // timing-safe isCronRequest() helper on 2026-09-05, then to
+    // isCronOrStaff() (routes through requireStaff(), which re-checks
+    // active/sessionEpoch — the hand-rolled check this replaced didn't) on
+    // 2026-10-20.
+    expect(route).toMatch(/isCronOrStaff\(req, 3\)/);
   });
 
   it("reports rows that gave up instead of hiding them", () => {

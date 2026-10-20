@@ -126,13 +126,18 @@ describe("error alerting", () => {
     expect(markAt).toBeGreaterThan(mailAt);
   });
 
-  it("is Owner-only or cron-authenticated", () => {
+  it("is Owner-only or cron-authenticated, via the session-revocation-aware shared helper", () => {
     // CRON_SECRET comparison moved into the shared, timing-safe
     // isCronRequest() helper (lib/cron-auth.ts) on 2026-09-05 — every cron
     // route used to duplicate a plain-string comparison, unlike this
     // codebase's webhook routes which already used crypto.timingSafeEqual
-    // for the same kind of secret check.
-    expect(src).toMatch(/isCronRequest\(req\)/);
-    expect(src).toMatch(/st\.role >= 4/);
+    // for the same kind of secret check. The staff-session fallback itself
+    // moved from a hand-rolled `db.staff.findUnique` + bare `role >= N`
+    // check into isCronOrStaff() (same file) on 2026-10-20 — the hand-rolled
+    // version never checked `active`/`sessionEpoch`, so a deactivated staff
+    // member's still-validly-signed cookie could keep hitting this route
+    // after removal, defeating "sign out everywhere"'s immediate-revocation
+    // guarantee. isCronOrStaff() routes through requireStaff(), which does.
+    expect(src).toMatch(/isCronOrStaff\(req, 4\)/);
   });
 });

@@ -9,9 +9,8 @@
    can't re-send the same nudge every run while a bag sits there for a
    fortnight. Runs daily, or Owner-triggered. */
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/auth";
 import { pushNotif } from "@/lib/notify";
-import { isCronRequest } from "@/lib/cron-auth";
+import { isCronOrStaff } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -20,11 +19,7 @@ export const maxDuration = 60;
 const REMINDER_HOURS = [24, 48];
 
 async function authorised(req: Request) {
-  if (isCronRequest(req)) return true;
-  const s = await getSession().catch(() => null);
-  if (!s || s.mode !== "staff") return false;
-  const st = await db.staff.findUnique({ where: { id: s.staffId } });
-  return !!st && st.role >= 4; // Owner only
+  return isCronOrStaff(req, 4); // Owner only
 }
 
 export async function GET(req: Request) {

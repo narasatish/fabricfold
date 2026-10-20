@@ -193,7 +193,7 @@ export default function StaffComplaintsClient({ complaints, staffRole }: { compl
                   />
                   <button className="btn sm" style={{ width: "auto", height: 44 }} onClick={() => send(c)} disabled={sendBusy[c.id]}>{sendBusy[c.id] ? "Sending…" : "Send"}</button>
                 </div>
-                <div className="row gap8 mt12">
+                <div className="row wrap gap8 mt12">
                   <button className="btn xs" onClick={() => setResolveFor(c)}><Svg name="check" size={14} /> Resolve</button>
                   <button className="btn xs sec" onClick={() => setCompFor(c)}><Svg name="gift" size={14} /> Compensate</button>
                   {c.orderId && (

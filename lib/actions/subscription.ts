@@ -244,15 +244,28 @@ export async function upgradeSubscription(studentId: string, planId: string, met
   if (plan.collegeId !== stu.collegeId) return { ok: false as const, error: "That plan belongs to a different campus" };
   if (cur.planId === plan.id) return { ok: false as const, error: "They're already on that plan" };
 
-  const oldGross = cur.planRef ? await planGross(cur.planRef) : 0;
-  const newGross = await planGross(plan);
-  const difference = newGross - oldGross;
-  if (difference <= 0) {
+  // Pre-transaction estimate only — used for nothing but the early
+  // "isn't more expensive" bounce below. The money actually CHARGED is
+  // always recomputed from the fresh, locked read inside the transaction
+  // (see `difference` there) — found 2026-10-20 in a deep audit: this used
+  // to be the ONLY computation, closed over and written to the Payment row
+  // unchanged. Two concurrent upgrades for the same student targeting
+  // DIFFERENT destination plans (two counters/Managers, not a same-plan
+  // double-tap — that case was already caught by the planId re-check below)
+  // both read this same stale `cur` (their common starting plan) before
+  // either transaction committed: the second call's fresh read correctly
+  // sees the FIRST upgrade's new plan already applied, but the stale
+  // `difference` closure still charged (secondPlan − originalPlan) instead
+  // of (secondPlan − firstUpgradePlan) — overcharging by exactly the first
+  // upgrade's own price, which had already been paid once.
+  const preOldGross = cur.planRef ? await planGross(cur.planRef) : 0;
+  const preNewGross = await planGross(plan);
+  if (preNewGross - preOldGross <= 0) {
     return { ok: false as const, error: "That plan isn't more expensive — handle a downgrade at the counter" };
   }
 
   type Used = { service: string; cycles: number; used: number; kgPerCycle: number };
-  let cyclesTotal = 0, cyclesUsed = 0, kgPerCycle = Number(cur.kgPerCycle);
+  let cyclesTotal = 0, cyclesUsed = 0, kgPerCycle = Number(cur.kgPerCycle), difference = 0;
 
   await db.$transaction(async (tx) => {
     /* Locked, then re-read fresh — not the `cur` fetched before this
@@ -262,7 +275,7 @@ export async function upgradeSubscription(studentId: string, planId: string, met
        by this update's stale usedByService snapshot, understating what the
        student has actually used. */
     await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Subscription"`)} WHERE "studentId" = ${studentId} FOR UPDATE`;
-    const fresh = await tx.subscription.findUniqueOrThrow({ where: { studentId } });
+    const fresh = await tx.subscription.findUniqueOrThrow({ where: { studentId }, include: { planRef: true } });
 
     /* Re-check: the pre-check above ran outside the transaction at line 310.
        Two concurrent upgrades could both pass it, both enter the transaction
@@ -271,6 +284,17 @@ export async function upgradeSubscription(studentId: string, planId: string, met
        duplicate charge. Re-check that the plan hasn't changed before writing. */
     if (fresh.planId === plan.id) {
       throw new Error("They're already on that plan");
+    }
+
+    // The money, recomputed from THIS locked read — fresh.planRef is
+    // whatever plan the student is actually, currently on (possibly already
+    // changed by a concurrent upgrade that got the lock first), not the
+    // `cur` snapshot from before this transaction started.
+    const freshOldGross = fresh.planRef ? await planGross(fresh.planRef) : 0;
+    const freshNewGross = await planGross(plan);
+    difference = freshNewGross - freshOldGross;
+    if (difference <= 0) {
+      throw new Error("That plan isn't more expensive — handle a downgrade at the counter");
     }
 
     // Rebuild buckets on the new plan, carrying the old usage across.

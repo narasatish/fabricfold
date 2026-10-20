@@ -1,7 +1,7 @@
 /* Printable GST tax invoice (HTML → user prints to PDF). Accessible to the
    order's student, or staff at the order's own campus. */
 import { db } from "@/lib/db";
-import { getSession, requireStaff, assertSameCollege, AuthError } from "@/lib/auth";
+import { getSession, requireStaff, requireStudent, assertSameCollege, AuthError } from "@/lib/auth";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ orderId: string }> }) {
   const { orderId } = await ctx.params;
@@ -10,7 +10,21 @@ export async function GET(_req: Request, ctx: { params: Promise<{ orderId: strin
 
   const inv = await db.invoice.findUnique({ where: { orderId }, include: { order: { include: { student: true } }, creditNotes: true } });
   if (!inv) return new Response("no invoice for this order", { status: 404 });
-  if (s.mode === "customer" && s.studentId !== inv.studentId) return new Response("forbidden", { status: 403 });
+  if (s.mode === "customer") {
+    // requireStudent(), not the raw JWT's studentId — found 2026-10-20 in a
+    // deep audit: this used to only compare the token's claimed studentId
+    // against the invoice, never re-checking sessionEpoch against the DB. A
+    // lost phone's stale-but-validly-signed session (365-day lifetime) could
+    // keep loading this student's own invoices forever, even after "sign out
+    // everywhere" — the whole point of that button is an immediate kill
+    // switch, same guarantee requireStaff already gets on every staff route.
+    try {
+      const stu = await requireStudent();
+      if (stu.id !== inv.studentId) return new Response("forbidden", { status: 403 });
+    } catch (e) {
+      return new Response(e instanceof AuthError ? e.message : "forbidden", { status: 403 });
+    }
+  }
   if (s.mode === "staff") {
     try {
       const st = await requireStaff(1);

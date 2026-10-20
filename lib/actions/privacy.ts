@@ -16,7 +16,8 @@
    honest reading of "delete my data" for a business that must keep books, and
    the student is told exactly that rather than being promised a deletion that
    cannot happen. */
-import { db } from "../db";
+import { db, dbSchemaPrefix } from "../db";
+import { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff, assertSameCollege, clearSession } from "../auth";
 import { audit } from "../notify";
 import { rosterSoon } from "../sheets-sync";
@@ -94,17 +95,36 @@ export async function eraseMyData(confirmation: string) {
     return { ok: false as const, error: "You have an order in progress. Please wait for it to complete before erasing your account." };
   }
 
-  await db.$transaction(async (tx) => {
-    // Notifications are pure PII with no accounting value — actually delete them.
-    await tx.notification.deleteMany({ where: { studentId: stu.id } });
-    // Complaint text can name people; blank it but keep the thread structure.
-    const threads = await tx.complaint.findMany({ where: { studentId: stu.id }, select: { id: true } });
-    await tx.complaintMessage.updateMany({
-      where: { complaintId: { in: threads.map((t) => t.id) } },
-      data: { text: "[removed at the student's request]" },
+  try {
+    await db.$transaction(async (tx) => {
+      /* Both checks above ran outside this transaction — found 2026-10-20 in
+         a deep audit: an order that wasn't yet "received"/"processing" at
+         the moment of the activeOrder check, but transitions into that
+         state microseconds later (acceptOrder/walkInOrder committing in the
+         gap), would let erasure proceed anyway — anonymising the phone to
+         "deleted-{id}" while a real order is now in flight, breaking SMS
+         and the pickup-OTP flow for exactly the order this check exists to
+         protect. Locked and re-checked fresh, same pattern as every other
+         precondition-then-write in this codebase. */
+      await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Student"`)} WHERE id = ${stu.id} FOR UPDATE`;
+      const freshStu = await tx.student.findUniqueOrThrow({ where: { id: stu.id } });
+      if (freshStu.anonymisedAt) throw new Error("This account has already been erased");
+      const freshActive = await tx.order.findFirst({ where: { studentId: stu.id, status: { in: ["received", "processing"] } } });
+      if (freshActive) throw new Error("You have an order in progress. Please wait for it to complete before erasing your account.");
+
+      // Notifications are pure PII with no accounting value — actually delete them.
+      await tx.notification.deleteMany({ where: { studentId: stu.id } });
+      // Complaint text can name people; blank it but keep the thread structure.
+      const threads = await tx.complaint.findMany({ where: { studentId: stu.id }, select: { id: true } });
+      await tx.complaintMessage.updateMany({
+        where: { complaintId: { in: threads.map((t) => t.id) } },
+        data: { text: "[removed at the student's request]" },
+      });
+      await tx.student.update({ where: { id: stu.id }, data: anonymisedFields(stu.id) });
     });
-    await tx.student.update({ where: { id: stu.id }, data: anonymisedFields(stu.id) });
-  });
+  } catch (e) {
+    return { ok: false as const, error: (e as Error).message };
+  }
 
   await audit("Data erased (student request)", `student ${stu.id} anonymised`, "self-service");
   // Found live 2026-09-16: registerStudent (ADD) already calls this for an
@@ -138,17 +158,35 @@ export async function eraseStudentData(studentId: string, reason: string) {
     return { ok: false as const, error: "This student has an order in progress. Wait for it to complete before erasing." };
   }
 
-  await db.$transaction(async (tx) => {
-    await tx.notification.deleteMany({ where: { studentId: stu.id } });
-    const threads = await tx.complaint.findMany({ where: { studentId: stu.id }, select: { id: true } });
-    await tx.complaintMessage.updateMany({
-      where: { complaintId: { in: threads.map((t) => t.id) } },
-      data: { text: "[removed at the student's request]" },
-    });
-    await tx.student.update({ where: { id: stu.id }, data: anonymisedFields(stu.id) });
-  });
+  try {
+    await db.$transaction(async (tx) => {
+      // Locked + re-checked fresh — same race and same fix as eraseMyData's
+      // identical pair of checks, found in the same 2026-10-20 audit pass.
+      await tx.$executeRaw`SELECT id FROM ${Prisma.raw(`${dbSchemaPrefix}"Student"`)} WHERE id = ${stu.id} FOR UPDATE`;
+      const freshStu = await tx.student.findUniqueOrThrow({ where: { id: stu.id } });
+      if (freshStu.anonymisedAt) throw new Error("That account has already been erased");
+      const freshActive = await tx.order.findFirst({ where: { studentId: stu.id, status: { in: ["received", "processing"] } } });
+      if (freshActive) throw new Error("This student has an order in progress. Wait for it to complete before erasing.");
 
-  await audit("Data erased (staff)", `${stu.name} (${stu.id}) anonymised — ${note}`, st.id);
+      await tx.notification.deleteMany({ where: { studentId: stu.id } });
+      const threads = await tx.complaint.findMany({ where: { studentId: stu.id }, select: { id: true } });
+      await tx.complaintMessage.updateMany({
+        where: { complaintId: { in: threads.map((t) => t.id) } },
+        data: { text: "[removed at the student's request]" },
+      });
+      await tx.student.update({ where: { id: stu.id }, data: anonymisedFields(stu.id) });
+    });
+  } catch (e) {
+    return { ok: false as const, error: (e as Error).message };
+  }
+
+  // No name here (matches eraseMyData's own log line, two lines up from
+  // this function in spirit) — found 2026-10-20 in a deep audit: AuditLog
+  // rows are never touched by erasure, so baking the real name into the
+  // very event that's supposed to remove it permanently defeated the
+  // erasure this line is recording. The id alone is enough to find the row
+  // if ever needed; it carries none of the identifying weight a name does.
+  await audit("Data erased (staff)", `student ${stu.id} anonymised — ${note}`, st.id);
   rosterSoon();
   return { ok: true as const };
 }

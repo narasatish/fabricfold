@@ -10,9 +10,8 @@
 
    Runs on the daily Vercel cron, or Owner-triggered. */
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/auth";
 import { Prisma } from "@/lib/generated/prisma/client";
-import { isCronRequest } from "@/lib/cron-auth";
+import { isCronOrStaff } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -20,11 +19,7 @@ export const maxDuration = 60;
 const PHOTO_RETENTION_DAYS = Number(process.env.PHOTO_RETENTION_DAYS || 30);
 
 async function authorised(req: Request) {
-  if (isCronRequest(req)) return true;
-  const s = await getSession().catch(() => null);
-  if (!s || s.mode !== "staff") return false;
-  const st = await db.staff.findUnique({ where: { id: s.staffId } });
-  return !!st && st.role >= 4; // Owner only
+  return isCronOrStaff(req, 4); // Owner only
 }
 
 /** Delete one object from Supabase storage. Missing is treated as success —

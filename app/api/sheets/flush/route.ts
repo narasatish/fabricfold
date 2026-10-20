@@ -23,19 +23,14 @@
    Idempotent — rows are marked sent only once Google has accepted them, so a
    double invocation cannot duplicate or lose anything. */
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/auth";
 import { flushSheetOutbox, pruneSheetOutbox, MAX_ATTEMPTS } from "@/lib/sheet-events";
-import { isCronRequest } from "@/lib/cron-auth";
+import { isCronOrStaff } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 async function authorised(req: Request) {
-  if (isCronRequest(req)) return true;
-  const s = await getSession().catch(() => null);
-  if (!s || s.mode !== "staff") return false;
-  const st = await db.staff.findUnique({ where: { id: s.staffId } });
-  return !!st && st.role >= 3; // Admin+ may force a flush from the app
+  return isCronOrStaff(req, 3); // Admin+ may force a flush from the app
 }
 
 export async function GET(req: Request) {

@@ -69,7 +69,9 @@ describe("subscription writes are locked against concurrent top-ups/assigns/upgr
   it("upgradeSubscription locks the row and rebuilds buckets from a fresh read, not `cur` fetched before the transaction", () => {
     const body = subs.slice(subs.indexOf("export async function upgradeSubscription"), subs.indexOf("export async function cancelSubscription"));
     expect(body).toMatch(/await tx\.\$executeRaw`SELECT id FROM \$\{Prisma\.raw\(`\$\{dbSchemaPrefix\}"Subscription"`\)\} WHERE "studentId" = \$\{studentId\} FOR UPDATE`/);
-    expect(body).toMatch(/const fresh = await tx\.subscription\.findUniqueOrThrow\(\{ where: \{ studentId \} \}\)/);
+    // Now also includes planRef — needed to recompute the money (see
+    // tests/upgrade-subscription-race-behavioral.test.ts), not just buckets.
+    expect(body).toMatch(/const fresh = await tx\.subscription\.findUniqueOrThrow\(\{ where: \{ studentId \}, include: \{ planRef: true \} \}\)/);
     // the bucket rebuild must read from `fresh`, not the outer `cur`
     expect(body).toMatch(/const oldBuckets = \(fresh\.buckets as unknown as Used\[\] \| null\) \|\| \[\]/);
   });

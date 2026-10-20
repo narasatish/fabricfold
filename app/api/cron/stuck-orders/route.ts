@@ -3,9 +3,8 @@
    sits unnoticed. Owner-triggered, or run by the cron with CRON_SECRET.
    Email only (the owner's WhatsApp list is limited to the core events). */
 import { db } from "@/lib/db";
-import { getSession } from "@/lib/auth";
 import { notifyOwner } from "@/lib/mail";
-import { isCronRequest } from "@/lib/cron-auth";
+import { isCronOrStaff } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -13,11 +12,7 @@ export const maxDuration = 60;
 const STUCK_HOURS = 6;
 
 async function authorised(req: Request) {
-  if (isCronRequest(req)) return true;
-  const s = await getSession().catch(() => null);
-  if (!s || s.mode !== "staff") return false;
-  const st = await db.staff.findUnique({ where: { id: s.staffId } });
-  return !!st && st.role >= 3; // Admin or Owner
+  return isCronOrStaff(req, 3); // Admin or Owner
 }
 
 export async function GET(req: Request) {

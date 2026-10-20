@@ -195,7 +195,11 @@ describe("changing plan mid-term", () => {
   const sub = fs.readFileSync(path.resolve(__dirname, "../lib/actions/subscription.ts"), "utf8");
 
   it("charges only the difference in price", () => {
-    expect(sub).toMatch(/const difference = newGross - oldGross/);
+    // Recomputed from the fresh, locked read inside the transaction since
+    // 2026-10-20 (closing an overcharge race — see
+    // tests/upgrade-subscription-race-behavioral.test.ts), not the
+    // pre-transaction estimate.
+    expect(sub).toMatch(/difference = freshNewGross - freshOldGross/);
   });
 
   it("refuses a downgrade rather than automating a refund", () => {

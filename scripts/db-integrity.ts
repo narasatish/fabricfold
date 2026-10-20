@@ -42,6 +42,20 @@ async function main() {
   bad("no student holds two active bags", [...perStudentActive.values()].filter((n) => n > 1).length);
 
   const subs = await db.subscription.findMany();
+  // Found live 2026-10-20: two St Mary's students had an ACTIVE, paid
+  // Subscription but zero Bag rows at all — registerStudent's bag-issuance
+  // step used to be a separate, best-effort call after the subscription had
+  // already committed, and its failure was swallowed into a toast nobody
+  // acted on. Fixed (activatePlan's `firstBag` now mints atomically with the
+  // subscription — see lib/plan-activation.ts), but this check stays as the
+  // belt-and-braces the investigation recommended: it should always read 0
+  // going forward, and a nonzero reading here means that guarantee broke
+  // again, for this or some other code path. Repair with
+  // scripts/repair-missing-bags.ts, never by hand.
+  const everHadBagStudentIds = new Set(bags.map((b) => b.studentId));
+  const orphanedSubs = subs.filter((s) => s.active && !everHadBagStudentIds.has(s.studentId));
+  bad("every active subscriber has at least one bag", orphanedSubs.length,
+    orphanedSubs.slice(0, 5).map((s) => s.studentId).join(" "));
   let mismatched = 0, negative = 0, over = 0;
   for (const s of subs) {
     const buckets = (s.buckets as unknown as Bucket[] | null) || null;

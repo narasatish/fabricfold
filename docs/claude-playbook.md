@@ -12,6 +12,109 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-10-20: a St Mary's registration could end up with a PAID subscription and ZERO bags — bag issuance made atomic with the subscription
+
+Owner spotted it from a screenshot of the staff Students list: two
+recently-added St Mary's students ("Samriddhi pandey", "K raghavendra")
+showed their raw 6-digit internal id as their "Customer ID" instead of a
+proper lettered code (e.g. G1547), sitting right next to other recent
+students with correct codes. Both were under the "Subscribers" filter — they
+had paid, active Subscriptions, just no Bag row at all.
+
+**Root cause**: `registerStudent` (lib/actions/admin.ts) used to do this in
+two separate, non-atomic steps for any St Mary's non-faculty registration
+("needsPlan"): (1) create the Student with explicitly NO bag ("bag comes
+from the plan below"), then (2) call `activatePlan` (lib/plan-activation.ts)
+in its OWN transaction to create the Subscription + Payment, then (3) call
+`syncBagToPlan` → `issueBag` AFTER that had already committed, to mint the
+bag. Step 3 wraps everything in a try/catch that deliberately swallows every
+error — the code's own comment framed this as correct: "a subscription that
+has been paid for must not roll back because a code could not be allocated".
+If step 3 failed for ANY reason (most plausibly a code-collision retry
+exhausted, or a transient error, especially plausible during a BULK
+admission-week registration burst), the Subscription stayed committed
+forever, with nothing more than an audit-log string and a toast — no
+enforcement that anyone would ever see or act on it.
+
+**The fix reverses that risk tradeoff for this specific, common case.**
+`activatePlan` now accepts an optional `firstBag: { code, tier }` param
+(lib/plan-activation.ts). When given — which `registerStudent` now always
+does for a non-BVRIT `needsPlan` registration — the Bag is created INSIDE
+the SAME transaction as the Subscription and Payment, placed deliberately
+BEFORE the payment-event enqueue calls (see the next paragraph for why
+ordering matters). If the bag create fails (realistically: the staff-typed
+code was taken by someone else in the race between admin.ts's pre-check and
+this call — caught as P2002), the WHOLE transaction rolls back: no
+Subscription, no Payment, no Bag, nothing to repair, and the caller gets a
+clean "pick another code and try again" instead of a half-done student. A
+"subscription with literally no bag" is a worse, silently-broken state than
+"the sale didn't go through and can simply be retried" — the old reasoning
+had this backwards for a brand-new registration specifically (a case with no
+swap/retire-old-bag complexity, unlike an EXISTING student changing plans
+later via `assignSubscription`, which still uses the old
+activatePlan-then-syncBagToPlan-after pattern unchanged — deliberately out
+of scope here, see "Not done" below).
+
+**A real duplicate-bag regression was caught and fixed WHILE building this
+fix**, worth recording since it's a subtle lesson on its own:
+`enqueuePaymentEvent` (lib/sheet-events.ts) resolves a Sheet row's Customer
+ID via `customerIdFor` (lib/bagcode.ts), which SELF-HEALS by minting its own
+bag the instant it sees an active subscription with zero existing bags —
+exactly the safety net this whole bug report was about. Creating the new
+`firstBag` AFTER the payment-event calls (the first attempt) meant that
+self-heal path won the race: it saw the subscription (just upserted) with
+no bag yet, and minted an unwanted extra auto-numbered bag, THEN the
+explicit `firstBag` create added a second bag with the typed code — caught
+immediately by `tests/register-student-walkin-id-behavioral.test.ts`
+asserting `bags).toHaveLength(1)`. Fixed by moving the `firstBag` create to
+run FIRST, right after the subscription upsert and before any payment event
+— reads see their own transaction's writes, so `customerIdFor`'s self-heal
+check finds the real bag already there and has nothing left to heal.
+**Lesson**: any transaction that creates a Subscription and calls
+`enqueuePaymentEvent`/`customerIdFor` is implicitly racing bag creation
+against the self-heal fallback — bag creation must happen BEFORE those
+calls, not just "inside the same transaction," or the self-heal path quietly
+wins and produces a duplicate instead of a missing bag.
+
+**Repair for the two (and any other) already-broken production students**:
+`scripts/repair-missing-bags.ts` (new) finds every active Subscription with
+zero Bag rows, mints the correct tier-lettered code via the same
+`allocateBagCode` the rest of the app uses, creates the Bag, audits it, and
+notifies the student — dry-run by default, `--apply` to write. Verified
+against a locally-seeded broken student: dry run reported it correctly,
+`--apply` minted a real tier-matched code, a second dry run then reported
+zero affected students, and `scripts/db-integrity.ts`'s new check (below)
+went green.
+
+**Belt-and-braces**: `scripts/db-integrity.ts` gained a permanent check —
+"every active subscriber has at least one bag" — specifically because this
+whole bug class is invisible to referential-integrity checks (no FK is
+violated; a Subscription with no Bag is a perfectly valid row shape) and was
+only found because the owner happened to eyeball a screenshot. This should
+read zero forever now; a nonzero reading means the atomicity guarantee broke
+again, here or in some new code path, and should be investigated before
+reaching for the repair script again.
+
+**Not done**: `assignSubscription` (an EXISTING student picking/changing a
+plan later, lib/actions/subscription.ts) still uses the old
+`activatePlan`-then-`syncBagToPlan`-afterward pattern, unchanged — it was
+investigated and confirmed to share the same structural gap, but fixing it
+properly needs the more complex retire-old-bag/upgrade-swap logic
+`syncBagToPlan` already handles, which doesn't fit this transaction's simple
+"mint one complimentary first bag" shape without a larger refactor. Flagging
+per this file's own rule (fixing something that rhymes with an entry here
+should say so out loud) — a future session fixing a "subscription with no
+bag" report for an EXISTING student (not a fresh registration) should know
+this is the same root cause, deliberately left unfixed in `assignSubscription`
+this round, not a new bug.
+
+**Verified**: full suite 1188/1188, `tsc --noEmit` clean. Directly proved
+the atomicity guarantee with a throwaway script: two `activatePlan` calls
+with the SAME typed bag code — the first succeeds, the second fails cleanly
+with zero Subscription/Payment/Bag rows left behind for that student (no
+partial state to clean up). Directly proved the repair script against a
+seeded broken record.
+
 ## RESOLVED 2026-10-19: bag-code numbers are now unique PER LETTER, not across every letter — reverses a prior deliberate design
 
 Reported live by the owner: registering a St Mary's student with customer ID

@@ -128,26 +128,29 @@ export async function registerStudent(input: { name: string; phone: string; coll
   let planName: string | undefined;
   if (needsPlan) {
     const { activatePlan } = await import("../plan-activation");
-    const { syncBagToPlan } = await import("./bags");
-    const result = await activatePlan({ id: stu.id, collegeId: college.id, credits: 0 }, input.planId!, input.method!, false);
+    // The bag is minted INSIDE activatePlan's own transaction now (2026-10-20
+    // fix — see plan-activation.ts's comment on the `firstBag` param): this
+    // student was just created with zero bags, so there's no swap/retire-old
+    // complexity, only "mint the one complimentary first bag" — and doing it
+    // atomically with the subscription closes the exact gap that used to let
+    // a student end up with a PAID subscription and no bag at all when the
+    // separate, best-effort follow-up step failed silently.
+    const result = await activatePlan(
+      { id: stu.id, collegeId: college.id, credits: 0 },
+      input.planId!,
+      input.method!,
+      false,
+      isBvrit ? undefined : { code: typedCode, tier: expectedKind! },
+    );
     if (result.ok) {
       planName = result.plan.name;
+      bagCode = result.bagCode ?? bagCode;
       flushSoon();
-      // registerStudent is deliberately cross-campus (see the college.ts
-      // block above) — skip syncBagToPlan's own campus check here, or a
-      // Manager registering at the OTHER campus would lose their code after
-      // already being charged for the plan (found 2026-09-22 review).
-      const bag = await syncBagToPlan(stu.id, { skipCollegeCheck: true });
-      bagCode = bag.ok ? bag.code ?? null : null;
-      if (!bag.ok) planError = `Plan sold, but the code failed to issue: ${bag.error} — issue one manually`;
     } else {
-      // The account is already created (the phone number is claimed) — a failed
-      // plan sale must not silently leave the student with no code at all
-      // (the exact bug this whole feature exists to prevent). Give them the
-      // same safety-net Bronze code syncBagToPlan would mint for "no active
-      // plan", and tell staff plainly so they can retry from the profile.
-      const bag = await syncBagToPlan(stu.id, { skipCollegeCheck: true });
-      bagCode = bag.ok ? bag.code ?? null : null;
+      // Nothing was written for this plan attempt — the subscription, payment
+      // AND bag (if any) all rolled back together, atomically, so there is no
+      // half-done state to patch up. The student account itself still exists
+      // (phone already claimed) with no bag yet; staff retry from the profile.
       planError = `Registered, but the plan could not be sold: ${result.error} — assign a plan from the student's profile`;
     }
   }
@@ -158,11 +161,6 @@ export async function registerStudent(input: { name: string; phone: string; coll
     st.id,
   );
   rosterSoon();
-  if (needsPlan && bagCode && !isBvrit) {
-    // The plan step minted its own code; put the staff-typed ID on that same bag.
-    await db.bag.updateMany({ where: { studentId: stu.id, status: "active" }, data: { code: typedCode } });
-    bagCode = typedCode;
-  }
   void notifyOwner("New student registered", `${name} (+91 ${phone}) registered at the counter (${college.name}) by ${st.name}${planName ? ` — plan "${planName}"` : ""} — ID ${bagCode || stu.id}.${planError ? ` ⚠ ${planError}` : ""}`);
   // BVRIT's own self-registration (wa-register.ts) sends this same welcome —
   // a counter registration was silently missing it, so a St Mary's student

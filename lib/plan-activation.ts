@@ -59,12 +59,36 @@ export async function requireCyclesEnabled(collegeId: string) {
  * follow-up step (a code, a push notification) failed — same reasoning
  * assignSubscription's own comment already gave for calling syncBagToPlan
  * outside its transaction.
- */
+ *
+ * EXCEPTION, added 2026-10-20: `firstBag`. For a brand-new registration
+ * (registerStudent's needsPlan branch), the student is GUARANTEED to have
+ * zero existing bags — there is no swap/retire-old-bag complexity to handle,
+ * only "mint their one complimentary first bag". Found live: that case used
+ * to be handled by a SEPARATE best-effort call (syncBagToPlan, called AFTER
+ * this transaction already committed), whose errors were swallowed into a
+ * string nobody was forced to act on — two real students ended up with an
+ * active, PAID Subscription and zero Bag rows, showing their raw internal id
+ * as a "customer ID" forever (customerIdFor()'s fallback). The old reasoning
+ * ("a paid subscription must never roll back because bag issuance failed")
+ * was backwards for this specific case: a subscription with literally no
+ * bag is a WORSE, silently-broken state than a subscription that never got
+ * created in the first place and can simply be sold again. So when `firstBag`
+ * is given, the bag is created INSIDE this same transaction — if it fails
+ * (most likely: the exact code was taken by someone else in the race between
+ * admin.ts's pre-check and this call), the WHOLE sale rolls back, including
+ * the subscription and payment, and the caller gets back a clean, honest
+ * "try again" instead of a half-done student. There's no code-ALLOCATION
+ * collision to retry here (unlike issueBag's auto-allocated codes) because
+ * `firstBag.code` is a staff-TYPED code already checked for an exact-match
+ * free active bag by the caller moments earlier — the only remaining race is
+ * that exact check being stale, which the DB's own partial unique index
+ * (bag_code_one_active_uniq) catches as P2002 regardless. */
 export async function activatePlan(
   stu: { id: string; collegeId: string; credits: unknown },
   planId: string,
   method: "cash" | "upi",
   applyCredits: boolean,
+  firstBag?: { code: string; tier: string },
 ) {
   const plan = await db.plan.findUnique({ where: { id: planId } });
   if (!plan || !plan.active) return { ok: false as const, error: "Pick a plan" };
@@ -95,6 +119,21 @@ export async function activatePlan(
         // plan that had been cancelled earlier the same day).
         update: { active: true, plan: plan.name, planId: plan.id, buckets, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesTotal, cyclesUsed: 0, kgPerCycle: buckets[0]?.kgPerCycle ?? 7, cancelledAt: null, cancelledReason: null, cancelledBy: null },
       });
+      // Minted BEFORE any payment event below, deliberately: enqueuePaymentEvent
+      // resolves a Customer ID for the Sheet row via customerIdFor (lib/bagcode.ts),
+      // which SELF-HEALS by minting its own bag the moment it sees an active
+      // subscription (just upserted above) with zero existing bags — found live
+      // 2026-10-20, as a duplicate-bag regression introduced while fixing the
+      // ORIGINAL "subscription with no bag" bug: creating this bag AFTER the
+      // payment events meant the self-heal path won the race and minted an
+      // extra, unwanted auto-numbered bag before this one ran. Creating it
+      // first means customerIdFor sees the real bag already here (reads see
+      // their own transaction's writes) and has nothing left to heal.
+      if (firstBag) {
+        await tx.bag.create({
+          data: { code: firstBag.code, studentId: stu.id, tier: firstBag.tier, complimentary: true, issuedBy: "system", status: "active" },
+        });
+      }
       if (creditApplied > 0) {
         await tx.student.update({ where: { id: stu.id }, data: { credits: { decrement: creditApplied } } });
         await tx.payment.create({ data: { method: "credit", amount: creditApplied, collegeId: stu.collegeId, studentId: stu.id, note: `Subscription: ${plan.name} (credit applied)` } });
@@ -106,8 +145,11 @@ export async function activatePlan(
       }
     }, { timeout: 15_000 });
   } catch (e) {
+    if (firstBag && (e as { code?: string }).code === "P2002") {
+      return { ok: false as const, error: `${firstBag.code} was just taken by someone else — pick another code and try again` };
+    }
     return { ok: false as const, error: (e as Error).message };
   }
   const paidNote = creditApplied > 0 ? (cash > 0 ? `₹${cash} ${method.toUpperCase()} + ₹${creditApplied} credit` : `₹${creditApplied} credit`) : `₹${gross} (${method.toUpperCase()})`;
-  return { ok: true as const, plan, gross, cash, creditApplied, paidNote };
+  return { ok: true as const, plan, gross, cash, creditApplied, paidNote, bagCode: firstBag?.code ?? null };
 }

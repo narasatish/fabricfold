@@ -1,7 +1,7 @@
 import { requireStudent } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
-import { timeAgo } from "@/lib/format";
+import { TimeAgo } from "@/components/time-ago";
 import { Svg } from "@/components/icons";
 
 export default async function NotificationsPage() {
@@ -43,7 +43,7 @@ export default async function NotificationsPage() {
                     {n.text}
                   </div>
                   <div className="muted mt4" style={{ fontSize: "12px" }}>
-                    {timeAgo(n.at)}
+                    <TimeAgo at={n.at} />
                   </div>
                 </div>
               </div>

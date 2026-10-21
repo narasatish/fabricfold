@@ -5,7 +5,8 @@ import { staffCan } from "@/lib/perms";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { parsePeriod, computeReport } from "@/lib/report";
-import { fmt, timeAgo } from "@/lib/format";
+import { fmt } from "@/lib/format";
+import { TimeAgo } from "@/components/time-ago";
 import { Svg } from "@/components/icons";
 import ReportsControls, { ExpenseButton, EmailReportButton, CloseDayButton } from "./_components/ReportsClient";
 
@@ -213,7 +214,7 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
                 <a key={inv.id} href={`/api/export/invoice/${inv.orderId}`} target="_blank" className="kv" style={{ display: "flex" }}>
                   <span className="k">
                     <span className="mono" style={{ color: "var(--teal-dark)", fontWeight: 600 }}>{inv.number}</span>
-                    <span className="muted" style={{ fontSize: 12 }}> · #{inv.orderId.slice(-4)} · {inv.method.toUpperCase()} · {timeAgo(inv.at.getTime())}</span>
+                    <span className="muted" style={{ fontSize: 12 }}> · #{inv.orderId.slice(-4)} · {inv.method.toUpperCase()} · <TimeAgo at={inv.at} /></span>
                   </span>
                   <span className="mono">{fmt(N(inv.total))}</span>
                 </a>
@@ -302,7 +303,7 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
                 <div style={{ fontSize: 14, fontWeight: 550 }}>
                   {p.method}{p.orderId ? " · #" + p.orderId.slice(-4) : ""}{p.gatewayRef ? " · " + p.gatewayRef : ""}
                 </div>
-                <div className="muted" style={{ fontSize: 12 }}>{p.note || ""} {timeAgo(p.at)}</div>
+                <div className="muted" style={{ fontSize: 12 }}>{p.note || ""} <TimeAgo at={p.at} /></div>
               </div>
               <span className="mono" style={{ fontWeight: 650, color: N(p.amount) < 0 ? "var(--red)" : "var(--ink)" }}>
                 {N(p.amount) < 0 ? "−" : ""}{fmt(Math.abs(N(p.amount)))}

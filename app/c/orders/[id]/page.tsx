@@ -1,7 +1,8 @@
 import { requireStudent } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
-import { fmt, timeAgo, dateStr, STATUS_LABEL } from "@/lib/format";
+import { fmt, dateStr, STATUS_LABEL } from "@/lib/format";
+import { TimeAgo } from "@/components/time-ago";
 import { orderDueAt, gstLineVisible } from "@/lib/money";
 import { dayLabel, hhmm, istDateStr, istMinutes } from "@/lib/slots";
 import Link from "next/link";
@@ -207,7 +208,7 @@ export default async function OrderDetailPage({ params, searchParams }: { params
                   </div>
                   {event && (
                     <div className="muted" style={{ fontSize: "12px" }}>
-                      {dateStr(event.at)} · {timeAgo(event.at)}
+                      {dateStr(event.at)} · <TimeAgo at={event.at} />
                     </div>
                   )}
                 </div>

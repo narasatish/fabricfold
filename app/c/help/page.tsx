@@ -1,7 +1,8 @@
 import { requireStudent } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
-import { timeAgo, dateStr } from "@/lib/format";
+import { dateStr } from "@/lib/format";
+import { TimeAgo } from "@/components/time-ago";
 import { Svg } from "@/components/icons";
 import HelpClient from "./_components/HelpClient";
 import { SUPPORT_WA_LINK, SUPPORT_PHONE_DISPLAY } from "@/lib/contact";
@@ -69,7 +70,7 @@ export default async function HelpPage() {
                     {c.status === "open" ? "Open" : "Resolved"}
                   </span>
                   <span className="muted" style={{ fontSize: "12px" }}>
-                    {timeAgo(c.at)}
+                    <TimeAgo at={c.at} />
                   </span>
                 </div>
                 <div className="mt8" style={{ fontSize: "14px" }}>

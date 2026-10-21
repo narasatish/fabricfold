@@ -2910,3 +2910,54 @@ whether anyone has an old homescreen icon pointed there.
 `npm test`: 1217/1217 passing (no new tests — pure display-logic fix, no
 new money-affecting code path to regression-test; `tsc --noEmit` clean,
 `npm run build` succeeds with the same route table).
+
+## RESOLVED 2026-10-21: live staff-side testing found /s/reports crashing blank — a hydration-safety guard that only checked half the codebase
+
+Owner asked to find another way into a staff session after WhatsApp login
+couldn't be automated (popup blocked). Captured the deep-link URL
+`startWhatsAppLogin` would have opened (intercepted `window.open` before
+clicking "Continue with WhatsApp") and had the owner send that exact
+WhatsApp message from the real Owner phone — the page's own poll picked it
+up and signed in, no code to relay. Then ran a real staff session through
+the full order lifecycle live on production: created a walk-in order for
+the BVRIT test customer (V1019), Start processing → Mark ready (with the
+recount-confirmation step) → Record cash payment → Collect via Order ID —
+every status transition, the piece-recount prompt, and the lifetime-pieces
+counter (7 → 9) all worked correctly. Order #1204, ₹20, left as a completed
+test transaction rather than refunded/cancelled (not worth another real
+action over ₹20).
+
+**Real bug found: `/s/reports` rendered completely blank.** Console showed
+React error #418 (hydration mismatch) — the same class of bug this
+codebase already has a named fix for (`components/time-ago.tsx`, from a
+Sep 21 QA pass: a server-rendered "just now" disagreeing with the client's
+recomputed "1m ago" a moment later makes React discard the whole
+mismatched subtree). `app/s/reports/page.tsx` was calling the raw
+`timeAgo()` utility directly in its JSX instead of the `<TimeAgo/>`
+component built to prevent exactly this. Grepped for the same mistake
+everywhere else and found three more Server Components doing it:
+`app/c/orders/[id]/page.tsx`, `app/c/notifications/page.tsx`,
+`app/c/help/page.tsx`. Fixed all four to use `<TimeAgo/>`.
+
+**The more important finding: the existing regression test for this exact
+bug class never covered any of these four files.**
+`tests/time-ago-hydration.test.ts`'s "uses <TimeAgo/> instead" check only
+scanned files with an explicit `"use client"` directive at the top — a
+plain Server Component (no directive at all) calling `timeAgo()` straight
+into server-rendered JSX has the identical failure mode but was invisible
+to that regex. Widened the test with a second describe block that checks
+the inverse (files WITHOUT `"use client"`), so a server component can't
+reintroduce this. Mutation-tested: reverted the `/s/reports` fix alone,
+confirmed the new test fails and names exactly that file, restored it,
+confirmed it passes again.
+
+Lesson for future "is this covered" checks: a guard test's own scope
+(which files it walks, which pattern it matches) is itself something that
+can quietly stop covering the thing it was written for — this one was
+written for client components specifically because that was the Sep 21
+bug, and nobody widened it when the same mistake showed up again in a
+Server Component two months later.
+
+`npm test`: 1218/1218 passing (one test file extended, not added — the
+existing `time-ago-hydration.test.ts`). `tsc --noEmit` clean, `npm run
+build` succeeds with the same route table.

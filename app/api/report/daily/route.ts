@@ -5,13 +5,16 @@
 import { db } from "@/lib/db";
 import { dailyEmailReport, dailyWhatsAppSummary } from "@/lib/report";
 import { notifyOwnersWhatsApp } from "@/lib/notify";
-import { requireStaff } from "@/lib/auth";
+import { requireStaffPerm } from "@/lib/auth";
 import { sendMail } from "@/lib/mail";
 import { isCronRequest } from "@/lib/cron-auth";
 
 export async function POST() {
   try {
-    await requireStaff(2);
+    // Gated on the "reports" tool, not a bare role floor — a Manager whose
+    // reports access the owner revoked must be refused here too, not just
+    // bounced from the Reports page UI (which already checks staffCan).
+    await requireStaffPerm("reports");
   } catch {
     return new Response("unauthorized", { status: 401 });
   }

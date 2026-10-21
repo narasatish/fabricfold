@@ -42,6 +42,20 @@ export async function GET(req: Request) {
       const due = REMINDER_HOURS[o.collectionRemindersSent];
       if (due === undefined || hours < due) continue;
 
+      // Claim the increment BEFORE sending, not after: updateMany with the
+      // counter's last-known value in the WHERE clause only succeeds for
+      // whichever run gets there first — an overlapping concurrent run (a
+      // slow run + a retry, the same scenario weekly-digest/daily-report
+      // guard against with a timestamp) reads the same stale counter, loses
+      // the claim, and must not also send. Same "claim via updateMany count"
+      // pattern already used for waVerify/complaint.redoOrderId elsewhere in
+      // this codebase.
+      const claimed = await db.order.updateMany({
+        where: { id: o.id, collectionRemindersSent: o.collectionRemindersSent },
+        data: { collectionRemindersSent: { increment: 1 } },
+      });
+      if (claimed.count === 0) continue; // another run already claimed this nudge
+
       const days = Math.floor(hours / 24);
       await pushNotif(
         o.studentId,
@@ -50,10 +64,6 @@ export async function GET(req: Request) {
           : `Your order #${o.id.slice(-4)} is ready and waiting — please collect it from the counter.`,
         "ready",
       );
-      await db.order.update({
-        where: { id: o.id },
-        data: { collectionRemindersSent: { increment: 1 } },
-      });
       sent++;
     }
   } catch (e) {

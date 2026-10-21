@@ -1,5 +1,90 @@
 # FabricFold playbook
 
+## RESOLVED 2026-10-21: rate-limiting/CSRF/perms/session-revocation sweep — one real gap found, `POST /api/report/daily` ignored the "reports" tool revocation
+
+Scoped re-sweep of the four areas the owner wanted re-verified, continuing
+today's permission-matrix work (`refundOrder`/`redoOrder`/
+`grantFreeReservice` → `requireStaffPerm("refunds")`, documented above).
+
+**Real bug found: `POST /api/report/daily` ("Email today's report" button
+on the Reports screen) checked `requireStaff(2)` — a bare role floor — not
+the "reports" tool.** `app/s/reports/page.tsx` itself correctly gates the
+whole Reports screen on `staffCan(me, "reports")` before rendering, and its
+sibling `app/api/export/xlsx/route.ts` correctly calls
+`requireStaffPerm("reports")` on the API side too — the standard this
+codebase holds every other staff-gated action to ("client-side hiding was
+never a wall"). `report/daily`'s route never got that second check: a
+Manager (role 2, which clears `requireStaff(2)` on its own) whose "reports"
+tool the owner explicitly revoked was correctly bounced from the Reports
+page UI, but could still `POST` directly to `/api/report/daily`, trigger
+the real owner-report email send, and read back the configured report
+destination address in the JSON response — exactly the "money reports &
+exports" category (lib/perms.ts: "Revenue, GST, drawer figures, Excel
+downloads") the "reports" tool exists to gate, bypassed by skipping the
+page and hitting the route directly. Fixed by swapping `requireStaff(2)`
+for `requireStaffPerm("reports")` in `app/api/report/daily/route.ts`'s
+`POST` handler (the cron `GET` handler is unaffected — it's already gated
+on the separate `CRON_SECRET` Bearer check via `isCronRequest`). New test:
+`tests/report-daily-perm-behavioral.test.ts` — a Manager with `reports:
+false` gets a 401 from the route directly, a Manager with the default
+(granted) "reports" access gets 200, and a Counter member (role 1, below
+the tool's own floor) gets 401. Confirmed it failed pre-fix (200 instead of
+401) and passed post-fix; mutation-tested (reverted to `requireStaff(2)`,
+confirmed the revoked-Manager case failed again, restored the fix).
+
+**Everything else in this round's scope checked out, no changes needed:**
+- **Rate limiting** (`lib/rate-limit.ts` + every unauthenticated action in
+  `lib/actions/auth.ts`, `wa-login.ts`, `wa-register.ts`): `requestOtp`,
+  `startWhatsAppLogin`, `startWhatsAppRegister`, `hasPasscode`,
+  `loginWithPasscode`, `createPasswordWithCustomerId` all cap by IP (and
+  `requestOtp` also by phone number); `verifyOtp`/`checkWhatsAppLogin`/
+  `checkWhatsAppRegister` rely on a self-limiting per-code attempt counter
+  (5 wrong tries burns the code) rather than a separate IP cap, which is
+  the same defense `requestOtp`'s own rate limit exists to back up, not a
+  gap. `loginWithPasscode`'s per-account lockout is already locked
+  row-then-fresh-recheck (a prior fix, re-verified intact) so parallel
+  guesses can't bypass the 5-attempt cap by racing it.
+- **CSRF / cookie-only mutation via cross-site GET**: every `app/api/*`
+  route whose `GET` handler could mutate state is gated by either
+  `isCronRequest`/`authorised` (the `CRON_SECRET` Bearer check, immune to a
+  browser navigation carrying cookies) or `requireStaff`/`requireStudent`
+  session checks on a read-only download (receipt, invoice, statement,
+  xlsx, college-statement) — none of those perform a write from a plain
+  `GET`, so the session cookie's `sameSite: "lax"` (which already exempts
+  only top-level, "safe"-method navigations) can't be abused into a
+  state-changing cross-site request. No API route takes a state-mutating
+  action on `GET`.
+- **Staff permission matrix**: besides the `report/daily` fix above, swept
+  every `PermKey` (`reports`, `refunds`, `dayclose`) against every server
+  action and route that touches that category. `refunds` already fully
+  covered (`refundOrder`, `redoOrder`, `grantFreeReservice`,
+  `submitCompensation`, per the audit documented above). `dayclose` has
+  exactly one action (`closeDay`), already gated. `app/api/export/
+  college-statement/route.ts` and `lib/actions/cash.ts`'s
+  `recordCashCount` use a bare `requireStaff(3)` role floor rather than a
+  `PermKey`, but that is an intentional, already-documented design choice
+  (both live inside the Admin-only `/s/admin` section the owner scoped by
+  role, same bucket as `saveRates`/`savePaymentConfig`/`saveStaff`, not the
+  three explicitly-revocable money tools) — left alone. `requireStaff`/
+  `requireStaffPerm` both re-read the Staff row from the database on every
+  call (no caching from the session token), confirmed by `tests/
+  route-guards.test.ts`'s existing assertion and re-verified by reading
+  `lib/auth.ts` directly — a permission the owner revokes takes effect on
+  the very next request, not at the token's 365-day natural expiry.
+- **Session revocation**: `requireStudent`/`requireStaff` are the only two
+  checkpoints in the codebase that mint a trusted session, and every newer
+  route added in today's other audits routes through one of them —
+  `confirmGatewayPayment`/`createGatewayOrder` (`lib/actions/payments.ts`)
+  via `requireStudent()`, `broadcastNotice` (`lib/actions/students.ts`) via
+  `requireStaff(2)` — so the `sessionEpoch`/`active` re-check already
+  covers them; no new bypass found alongside the 7-route fix documented
+  above (`lib/cron-auth.ts`, 2026-10-20).
+
+`npm test`: 1224/1224 (1223 + the 1 new test), with the pre-existing
+`tests/upgrade-subscription-race-behavioral.test.ts` flake reproduced once
+under full parallel load and confirmed passing in isolation, same as every
+prior round. `npx tsc --noEmit` clean.
+
 Read this before SEO, production-debugging, or deploy work. It exists so lessons
 learned don't have to be re-derived from scratch in a future session.
 
@@ -11,6 +96,214 @@ why the fix works. The owner's explicit instruction: mistakes found once must
 never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
+
+## RESOLVED 2026-10-21: collection-reminders cron could double-send the same "please collect it" nudge on an overlapping concurrent run
+
+Scoped audit of render.yaml's full cron list (cron-report-daily, cron-backup,
+cron-sheets-sync, cron-sheets-flush, cron-purge-photos,
+cron-collection-reminders, cron-error-digest, cron-weekly-digest,
+cron-uptime-watchdog) for idempotency under overlapping runs, auth strength
+(`isCronRequest`/`isCronOrStaff`), and honest partial-failure reporting — not
+re-covering the cron-sheets-sync 429 fix or the cron-watchdog removal, both
+already closed out in earlier 2026-10-20 entries.
+
+**Real bug found:** `app/api/cron/collection-reminders/route.ts` reads an
+order's `collectionRemindersSent` counter, decides whether the 24h/48h nudge
+is due, calls `pushNotif`, and only THEN increments the counter — three
+separate steps with nothing holding the row between them. The field's own
+comment says it exists specifically so this cron "can't re-send the same
+nudge every run while a bag sits there" — but that only protects against
+successive runs, not two runs overlapping in time (a slow run plus a retry,
+the same class of overlap `cron-report-daily` and `weekly-digest` already
+guard against with a timestamp check, just via a different mechanism). Two
+runs racing on the same order both read `collectionRemindersSent` before
+either had written its increment, both independently decided the nudge was
+due, and both called `pushNotif` — the counter still ends up correct
+(incremented twice), so nothing downstream would ever notice, but the
+student gets the same "please collect it" notification twice for one event.
+
+**Fix:** claim the increment BEFORE sending, not after — the same
+"claim via `updateMany` count" pattern already used in this codebase for
+`waVerify` (lib/actions/wa-login.ts) and `complaint.redoOrderId`
+(lib/actions/complaints.ts). `db.order.updateMany({ where: { id,
+collectionRemindersSent: <value just read> }, data: { increment: 1 } })` —
+only the run that still sees the stale value gets `count === 1` and proceeds
+to send; a losing concurrent run sees `count === 0` and skips. Safe because
+`pushNotif` already swallows and ErrorLog-records its own failures
+internally (lib/notify.ts) rather than throwing, so claiming first never
+risks losing a send to an uncaught push error.
+
+Behavioral test: `tests/collection-reminders-race-behavioral.test.ts` (real
+Postgres, isolated `ff_collection_reminders_race` schema) mocks `pushNotif`
+with a deliberate delay (modeling a real push round trip) and fires the
+route's `GET` handler twice concurrently against one order whose ready-event
+is 25h old; asserts exactly one `pushNotif` call and a final counter of 1.
+Confirmed it fails (2 calls) without the fix, passes with it; mutation-tested
+(stashed the fix, confirmed the test fails again with the exact same
+assertion, restored it).
+
+Everything else checked in this pass was already sound, no changes made:
+- **Auth:** every cron route in render.yaml uses `isCronRequest` or
+  `isCronOrStaff` (both backed by the timing-safe `CRON_SECRET` check) — none
+  use a weaker check.
+- **cron-sheets-sync / cron-sheets-flush:** `runSheetsSync` and
+  `flushSheetOutbox` already report partial failure honestly (prior pass,
+  `tests/sheets-error-handling.test.ts`); `/api/sheets/flush` is
+  append-only/idempotent by construction (rows marked sent only once Google
+  accepts them).
+- **cron-purge-photos:** per-row try/photo-delete with its own
+  deleted/failed counters, disputed complaints/orders excluded from deletion
+  regardless of age — re-running it is a no-op for anything already purged
+  (keys already cleared to `DbNull`).
+- **cron-error-digest:** queries `ErrorLog` by `seen: false` only — no date
+  range, so a scoping/date-window bug that could silently report "0 errors"
+  while rows exist isn't present. Cross-checked that `lib/push.ts` and
+  `lib/notify.ts`'s own failure logging (fixed earlier the same day) writes
+  rows with `kind: "client"` and no `seen: true`, so those failures do surface
+  in this digest. Marks rows seen only AFTER the mail send succeeds, so a
+  send failure correctly means the next run re-reports them rather than
+  losing them.
+- **cron-weekly-digest / cron-report-daily:** both already have a
+  `lastSent`-timestamp guard against a retried trigger double-emailing the
+  owner within the same window (both call out collection-reminders'
+  `collectionRemindersSent` guard in their own comments as the precedent —
+  ironic given the gap just fixed above, but the two mechanisms protect
+  against different things: a timestamp guard stops re-firing on a *later*
+  retry of the whole job, not two *simultaneous* runs each individually
+  deciding per-row whether to act, which is exactly why
+  collection-reminders needed the per-row claim instead).
+- **"5+ days" bags-waiting figures** (staff dashboard `HomeClient.tsx`,
+  weekly-digest): both use a rolling `Date.now() - readyAt > 5 * 86_400_000`
+  window, not a calendar-day boundary — consistent with each other and not
+  actually claiming day-boundary semantics anywhere, so this is not the same
+  bug class as the UTC-vs-IST calendar-day bugs documented elsewhere in this
+  file (those are about a *calendar day* label, e.g. month/FY rollover;
+  "has this been sitting for more than N hours" is correctly hour-based).
+- **cron-backup / cron-report-daily:** backups are additive/timestamped
+  (never overwritten) and the daily report's `lastSent` guard is scoped to
+  the cron path only, so the manual "Email today's report" button is never
+  silently swallowed.
+
+`npm test`: 1224/1224 passing after this round (one new test added:
+`tests/collection-reminders-race-behavioral.test.ts`). The only failure seen
+under full parallel load was the already-documented flaky
+`tests/upgrade-subscription-race-behavioral.test.ts`, confirmed passing when
+run alone. `tsc --noEmit` clean.
+
+## RESOLVED 2026-10-21: XLSX/invoice/email-report money paths re-confirmed sound; the real bug was in a backup *safety-net script itself*, broken by an earlier refactor it was never updated for
+
+Scope: this pass covered the areas explicitly NOT yet audited — XLSX exports
+(`app/api/export/xlsx/route.ts`), invoice/credit-note PDF generation
+(`app/api/export/invoice/[orderId]/route.ts`, `lib/money.ts`'s
+`createInvoice`/`createCreditNote`/`nextInvoiceNo`/`nextCreditNoteNo`),
+backup/restore (`scripts/take-snapshot.ts`, `scripts/restore-backup.ts`,
+`scripts/verify-backup.ts`, `scripts/check-backup-coverage.ts`,
+`app/api/backup/route.ts`), and the daily email report
+(`app/s/reports/_components/ReportsClient.tsx`'s `EmailReportButton` →
+`app/api/report/daily/route.ts` → `lib/report.ts`'s `dailyEmailReport`/
+`dailyWhatsAppSummary`).
+
+**Confirmed clean, no changes needed:**
+- **XLSX export** (`app/api/export/xlsx/route.ts`): every sheet (Summary,
+  Transactions, GST Invoices, Credit Notes, Expenses) is built straight from
+  `computeReport()`'s own return value — no parallel calculation that could
+  drift from the on-screen Reports numbers. College scoping is correctly
+  locked down: a campus-scoped staff account's `me.collegeId` always wins
+  over `?c=` (the query param is only even consulted when `me.collegeId` is
+  falsy, i.e. an owner-level account), and an owner-supplied `?c=` is
+  validated against `db.college.findUnique` before use — an unknown/garbage
+  id is rejected with 400 rather than silently falling through to the
+  combined (`scopeId` undefined) all-colleges view. No way found to edit the
+  URL into cross-college leakage.
+- **GST invoice numbering & payment-method rule**
+  (`lib/money.ts:nextInvoiceNo`/`nextCreditNoteNo`/`createInvoice`): the
+  per-FY sequence uses a single `fySequence.upsert` (Postgres
+  `INSERT ... ON CONFLICT DO UPDATE SET value = value + 1 RETURNING value`
+  under the hood) called *inside* the same transaction (`tx: Tx` parameter)
+  that creates the Order/Payment/Invoice rows in `lib/actions/orders.ts` —
+  the correct atomic-counter pattern (same shape as the advisory-lock-backed
+  bag-code allocator, just via row-level lock instead of an advisory lock,
+  which is sufficient here since the whole increment-and-read happens in one
+  UPDATE statement with no read-then-write gap for a second transaction to
+  land in between). No second, less-safe numbering path found — `nextSeq`
+  is the only place either table's `number` column is ever produced.
+  `shouldInvoice`/`shouldInvoiceOrder` correctly gate on method (`upi` → tax
+  invoice always; `cash` → only with `staffInvoiceOverride`; credit-only →
+  never; a `noGst` order → never regardless of method), matching CLAUDE.md's
+  "sacred" rule, and `app/api/export/invoice/[orderId]/route.ts` only
+  renders an `Invoice` row that already exists — it never invents one for an
+  order that wasn't eligible.
+- **Daily email report** (`lib/report.ts:dailyEmailReport`,
+  `dailyWhatsAppSummary`): both call `computeReport()` directly (day/week/
+  month, combined and per-college) with no divergent math — the same
+  function the Reports screen and the XLSX export use. `dailyWhatsAppSummary`
+  even has its own comment stating this is deliberate ("so the two can
+  never disagree"). `app/api/report/daily/route.ts`'s cron-retry guard
+  (skip a resend within 15 minutes) is correctly scoped to the cron path
+  only (`guardRetries`) — the manual "Email today's report" button always
+  sends, as it should for a deliberate click.
+- **Restore correctness** (`scripts/restore-backup.ts`): refuses to target
+  `public` without `--force-public`, refuses to write into a non-empty
+  target schema, loads tables in FK-dependency order (parents first) with
+  any model not in the explicit `ORDER` list appended afterward — checked
+  that every such "appended" model (`sheetOutbox`, `dayCashCount`,
+  `rateLimit`, `waVerify`) has no FK relationship to anything restored
+  before it, so load order never actually matters for them. `FySequence`
+  rows restore as plain data rows (no separate Postgres `SEQUENCE` object
+  backs this counter — it's `lib/money.ts`'s own table), so a restore
+  reproduces the exact gap-free counter state with no extra resync step
+  needed, and bag codes restore as plain rows too with their partial unique
+  index (`UNIQUE(code) WHERE status='active'`) re-enforced by `prisma db
+  push` against the fresh target schema before any row loads — a restore
+  that produced two "active" rows with the same code would fail loudly at
+  `createMany`, not silently succeed.
+
+**Real bug found and fixed: `scripts/check-backup-coverage.ts` — the backup
+safety-net script — crashed on every run, because it was never updated when
+`app/api/backup/route.ts` was refactored.** The route's own file header
+documents a "v2" rewrite: it used to hand-maintain `const TABLES = [...] as
+const`, then switched to deriving the table list dynamically from every
+Prisma client delegate that has a `findMany`, minus a small `SKIP` set
+(`"otp"`) — exactly so a newly-added model is backed up automatically rather
+than needing someone to remember to add it to a list (the file's own comment
+names the actual incident this prevented: Plan, Bag, DayClose, Attendance
+and SlotWindow all silently missing from the old hand list).
+`check-backup-coverage.ts` was written to audit the *old* shape: it regexed
+route.ts's source text for `const TABLES = [([\s\S]*?)] as const`, which no
+longer exists anywhere in that file. `(route.match(...) || [])[1]` is
+therefore always `undefined`, and the very next line unconditionally calls
+`.matchAll()` on it — a `TypeError: Cannot read properties of undefined
+(reading 'matchAll')` on literally every invocation, forever. The exact tool
+that exists to make sure "every model is backed up" stays true had been
+silently broken since the v2 refactor — running it reported nothing, it just
+crashed, which is a worse failure mode than reporting stale-but-wrong
+coverage, since a crash at least doesn't masquerade as a clean pass if nobody
+is watching stderr. (`scripts/verify-backup.ts`, a sibling script with the
+same purpose, had already been correctly updated to the dynamic-derivation
+pattern — confirming the route's actual runtime behavior is fine; only the
+`check-backup-coverage.ts` checker itself had rotted.)
+
+Fixed by rewriting the checker to match what the route actually does now:
+parse the `SKIP` set out of route.ts's source (so a future change to it is
+still visible here) and load the real Prisma client to confirm every schema
+model either is in `SKIP` or resolves to a delegate with a working
+`findMany` — the identical test `backupTables()`'s own filter applies at
+runtime, rather than comparing two independently-maintained lists.
+
+New test: `tests/check-backup-coverage-script.test.ts` — runs the script as
+a real child process (`npx tsx scripts/check-backup-coverage.ts`, the same
+way a human or CI invokes it) and asserts it exits 0 and prints "every model
+is covered" rather than throwing. Confirmed it failed (TypeError, exit 1)
+against the broken version, passed after the fix. Mutation-tested: reverted
+`check-backup-coverage.ts` to the pre-fix content, confirmed the test failed
+with the same TypeError output, restored the fix, confirmed green again.
+
+`npm test`: 1223/1224 passing. The one failure is the already-documented
+pre-existing flaky test, `tests/upgrade-subscription-race-behavioral.test.ts`
+("never overcharges by double-counting the first upgrade's own price") —
+re-ran it alone 3 times this pass and it flipped pass/fail/pass, confirming
+it's flaky independent of any change made here, not a regression. `npx tsc
+--noEmit` clean.
 
 ## RESOLVED 2026-10-21: a THIRD hydration-mismatch bug class (missing timeZone) found in the scope the Reports/Sentry hydration pair didn't cover; PWA, slot-capacity and bag-code flows re-audited and confirmed clean
 

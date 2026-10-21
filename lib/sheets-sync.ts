@@ -434,7 +434,7 @@ export async function runRosterSync() {
 export function rosterSoon() {
   const run = async () => { try { await runRosterSync(); } catch (e) { console.error("roster sync failed", e); } };
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     const { after } = require("next/server");
     after(run());
   } catch {

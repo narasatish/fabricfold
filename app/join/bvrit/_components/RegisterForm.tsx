@@ -37,6 +37,7 @@ export default function RegisterForm({ collegeId, collegeName }: RegisterFormPro
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [waCode, setWaCode] = useState<string | null>(null);
+  const [showSignInOffer, setShowSignInOffer] = useState(false);
   // Set once registration reports "already registered" — the retry after
   // that point is a SIGN-IN attempt, not another registration attempt, and
   // the poll below needs to know which result shape to expect back.
@@ -73,8 +74,6 @@ export default function RegisterForm({ collegeId, collegeName }: RegisterFormPro
     }, 2000);
     return stop;
   }, [waCode, signingIn, router, toast]);
-
-  const [showSignInOffer, setShowSignInOffer] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

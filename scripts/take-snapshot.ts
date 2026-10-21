@@ -9,13 +9,13 @@ const SKIP = new Set(["otp"]);
 async function main() {
   const keys = Object.keys(db as object)
     .filter((k) => !k.startsWith("$") && !k.startsWith("_"))
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     .filter((k) => typeof (db as any)[k]?.findMany === "function")
     .filter((k) => !SKIP.has(k))
     .sort();
 
   const out: Record<string, unknown[]> = {};
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   for (const k of keys) out[k] = await (db as any)[k].findMany();
 
   const snap = {

@@ -31,7 +31,7 @@ const SKIP = new Set([
 function backupTables(): string[] {
   return Object.keys(db as object)
     .filter((k) => !k.startsWith("$") && !k.startsWith("_"))
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     .filter((k) => typeof (db as any)[k]?.findMany === "function")
     .filter((k) => !SKIP.has(k))
     .sort();
@@ -40,7 +40,7 @@ function backupTables(): string[] {
 async function snapshot() {
   const out: Record<string, unknown[]> = {};
   for (const key of backupTables()) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     out[key] = await (db as any)[key].findMany();
   }
   return {

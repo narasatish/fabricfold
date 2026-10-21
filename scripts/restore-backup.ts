@@ -101,7 +101,7 @@ async function main() {
     const rows = data[t];
     if (!rows?.length) continue;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const delegate = (rdb as any)[t];
       if (!delegate?.createMany) { failures.push(`${t}: no such model in the current schema`); continue; }
       // NO skipDuplicates: a duplicate while restoring into a fresh schema
@@ -124,7 +124,7 @@ async function main() {
     const expected = data[t]?.length ?? 0;
     if (!expected) continue;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const actual = await (rdb as any)[t].count();
       if (actual !== expected) failures.push(`${t}: read back ${actual}, expected ${expected}`);
     } catch (e) {

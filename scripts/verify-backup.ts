@@ -16,7 +16,7 @@ async function main() {
 
   const keys = Object.keys(db as object)
     .filter((k) => !k.startsWith("$") && !k.startsWith("_"))
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     .filter((k) => typeof (db as any)[k]?.findMany === "function")
     .filter((k) => !SKIP.has(k))
     .sort();
@@ -39,7 +39,7 @@ async function main() {
   let rows = 0, failed: string[] = [];
   for (const k of keys) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       rows += await (db as any)[k].count();
     } catch (e) { failed.push(`${k}: ${(e as Error).message.slice(0, 40)}`); }
   }

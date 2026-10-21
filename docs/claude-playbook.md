@@ -2961,3 +2961,47 @@ Server Component two months later.
 `npm test`: 1218/1218 passing (one test file extended, not added — the
 existing `time-ago-hydration.test.ts`). `tsc --noEmit` clean, `npm run
 build` succeeds with the same route table.
+
+## RESOLVED 2026-10-21: a second, site-wide hydration error — Sentry Replay's text-masking racing React's own hydration check
+
+After the `/s/reports` fix above, the same React error #418 kept appearing
+in the console on EVERY page checked — including `/terms`, fully static,
+zero app data, no auth. That ruled out anything data- or timeAgo-related;
+the previous fix was real and confirmed (Reports now renders full data),
+but this was a second, unrelated bug hiding behind the first.
+
+Root cause: Sentry's Session Replay integration (`maskAllText: true` —
+replaces visible text with asterisks client-side so no student PII leaves
+the device in a replay) was registered inside the same `Sentry.init()`
+call that Next's `instrumentation-client.ts` convention deliberately runs
+as early as possible, specifically so Sentry can catch errors from the
+very first tick. That earliness is exactly what let Replay's own
+MutationObserver start rewriting text nodes WHILE React was still mid-way
+through comparing the server-rendered HTML to the client's first render —
+React sees text it didn't produce, concludes the tree doesn't match, and
+discards + rebuilds it (the same `rQ`/hydration frames as the reports bug,
+different root cause).
+
+Fixed by splitting the two concerns `instrumentation-client.ts` was
+collapsing into one: error capture needs to start immediately (unchanged —
+`Sentry.init()` still runs synchronously), but Replay's DOM-touching setup
+doesn't, and was only ever grouped with it for convenience. Replay is now
+added via `Sentry.addIntegration()` inside a `setTimeout(..., 0)`, which
+runs after React's hydration commit instead of racing it.
+
+Confidence: high but not 100% proven root-cause, since Sentry's own SDK
+internals are minified in production and the error itself only reports a
+minified React code with no component name. Traced it this far via direct
+elimination: the error (a) is `role` and data independent (reproduces on
+a fully static page), (b) requires JS/hydration (never happens on pure
+server HTML), (c) Sentry's replay integration is a well-documented source
+of exactly this interaction in the wider Next.js/Sentry community, and
+(d) `window.__SENTRY__` confirmed present on the affected pages. Recommend
+the owner watch Sentry's own error stream for a few days after this
+deploys — if `#418` events stop appearing, that confirms the diagnosis; if
+they continue, there's a second source still to find.
+
+`npm test`: 1218/1218 (no new test — this is a client-side script timing
+fix with no server-testable behavior; verified via `tsc --noEmit` clean and
+`npm run build` succeeding, plus live reproduction before/after in the
+browser).

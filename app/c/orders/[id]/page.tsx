@@ -61,7 +61,7 @@ export default async function OrderDetailPage({ params, searchParams }: { params
   const dueAt = orderDueAt({ receivedAt: order.receivedAt, express: order.express });
   const etaLabel =
     dueAt && ["received", "processing"].includes(order.status)
-      ? dueAt.toLocaleString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+      ? dueAt.toLocaleString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })
       : null;
 
   // Timeline: placed, received, processing, ready, collected

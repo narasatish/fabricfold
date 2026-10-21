@@ -58,7 +58,7 @@ const FEATURES: [FeatureKey, string][] = [
 ];
 
 export default function StaffAdminClient({ config, colleges, staff, payslips, plans, attendance, month, errors, slotWindows, currentRole }: Props) {
-  const hhmm = (t: number) => new Date(t).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  const hhmm = (t: number) => new Date(t).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
   const unseenErrors = errors.filter((e) => !e.seen).length;
   const [syncingSheet, setSyncingSheet] = useState(false);
   const router = useRouter();
@@ -238,7 +238,7 @@ export default function StaffAdminClient({ config, colleges, staff, payslips, pl
                 {/* minWidth/overflowWrap: error text can be one long unbroken token (paths, URLs) and must not run off a phone screen */}
                 <span className="k" style={{ fontSize: 12.5, minWidth: 0, overflowWrap: "anywhere" }}>
                   <span style={{ fontWeight: 600, color: e.seen ? "var(--muted)" : "var(--red)" }}>{e.message}</span>
-                  <span className="muted" style={{ display: "block", fontSize: 11 }}>{e.kind} · {e.url?.replace(/^https?:\/\/[^/]+/, "") || "?"} · {new Date(e.at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                  <span className="muted" style={{ display: "block", fontSize: 11 }}>{e.kind} · {e.url?.replace(/^https?:\/\/[^/]+/, "") || "?"} · {new Date(e.at).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })}</span>
                 </span>
               </div>
             ))}

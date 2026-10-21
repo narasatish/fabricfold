@@ -12,6 +12,117 @@ never be quietly repeated later. If you're fixing something that rhymes with
 an entry already here, say so out loud and check whether the new instance
 shares the same root cause.
 
+## RESOLVED 2026-10-21: a THIRD hydration-mismatch bug class (missing timeZone) found in the scope the Reports/Sentry hydration pair didn't cover; PWA, slot-capacity and bag-code flows re-audited and confirmed clean
+
+Continuation of the same day's audit series, scoped specifically to areas
+NOT yet covered: PWA/service worker, slot-booking capacity, bag-code admin
+flows, and a full `app/`+`components/` sweep for the hydration-mismatch bug
+class the two entries right below this one (`/s/reports` timeAgo, Sentry
+Replay) had just found twice in one day — explicitly flagged as "a third
+occurrence is plausible."
+
+**Real bug found: three `new Date(...).toLocaleTimeString/toLocaleString(...)`
+calls missing `timeZone`, rendered directly in `"use client"` components.**
+`app/s/admin/_components/AdminClient.tsx`'s `hhmm()` helper (staff
+attendance "in HH:MM" / "out HH:MM"), the same file's App-Errors panel
+timestamp, and `app/s/_components/HomeClient.tsx`'s "On shift since HH:MM"
+all called `toLocaleTimeString`/`toLocaleString` with format options but no
+`timeZone`. Unlike the timeAgo bug (a RACY mismatch that only shows up if
+the clock ticks over a boundary between server and client render), this one
+is deterministic and permanent: Next.js SSRs every "use client" component
+once on the server to build the initial HTML (in whatever timezone the host
+process uses — UTC on Render), then React re-executes that SAME render
+function in the browser during hydration, in the visitor's actual local
+timezone. Any real staff member whose browser isn't explicitly set to UTC
+sees a server-rendered time string that disagrees with the client's
+immediately-recomputed one on every single load — not an edge case, every
+load, every non-UTC browser — React discards the mismatched subtree, same
+`#418` failure as the other two entries. The codebase already had the
+correct pattern right next to two of these: `ComplaintsClient.tsx`'s "Reply
+by" line already passed `timeZone: "Asia/Kolkata"`; these three just never
+got it. Fixed by adding `timeZone: "Asia/Kolkata"` to all three. Also fixed,
+same missing option, in a Server Component where it's a real wrong-timezone
+display bug rather than a hydration race (Server Components don't
+re-execute client-side, so no mismatch, but the ETA shown was still
+computed in the wrong zone): `app/c/orders/[id]/page.tsx`'s customer-facing
+ETA label (`etaLabel`).
+
+New test: `tests/date-format-hydration.test.ts` — walks every `.tsx` file
+under `app/`+`components/` and flags any `Date(...).toLocale(Date|Time)?
+String(...)` call whose argument list doesn't contain `timeZone` (a
+balanced-paren scan per call, not a per-line regex, so a wrapped call is
+still caught; deliberately does NOT flag plain number formatting like
+`n.toLocaleString("en-IN")`, which has no timezone to get wrong). Confirmed
+it failed naming exactly the three `.tsx` offenders before the fix (not
+`page.tsx`'s Server Component one — that file's call was fixed in the same
+pass but isn't a hydration bug, so leaving it out of scope for this test's
+specific claim is correct), then passed after. Mutation-tested: reverted
+the `AdminClient.tsx` `hhmm()` fix alone, confirmed the test failed naming
+that exact file, restored it, confirmed green again.
+
+**Re-audited and confirmed clean, no changes needed:**
+- **PWA / service worker** (`public/sw.js`): already network-first for
+  navigations with a cache fallback, so a stale cached shell can't serve
+  old JS against a newer deployed API — every request tries the network
+  first and only falls back to cache on an actual fetch failure (offline),
+  which is the opposite of the `/app`-stale-shell bug class fixed earlier
+  today. Cache versioning (`ff-vNN`) correctly purges all other cache names
+  on `activate`. `/api/` is correctly never cached. The `/s` vs `/c` vs `/`
+  shell fallback for an offline navigate is scoped correctly per path.
+- **Offline banner** (`components/offline.tsx`): listens to both `online`
+  and `offline` window events (not just the initial `navigator.onLine`
+  read), cleans up both listeners on unmount — correctly tracks
+  transitions, not just initial state.
+- **Push subscription** (`components/pwa.tsx`, `app/api/push/subscribe/
+  route.ts`, `lib/push.ts`): subscribe path validates the endpoint
+  (`isPushEndpoint`) and key lengths server-side before upserting, keyed on
+  `endpoint` so a resubscribe on the same device correctly updates rather
+  than duplicates; `sendPushTo` already auto-deletes a subscription on a
+  404/410 send failure (dead endpoint) and logs every OTHER failure kind to
+  `ErrorLog` (a fix already made for this exact file, re-verified intact).
+  **One gap flagged, not fixed**: there is no unsubscribe call anywhere —
+  `logout()`/`signOutEverywhere()` (`lib/actions/auth.ts`) clear the session
+  but never delete or unsubscribe that device's `PushSubscription` row, so a
+  shared device (e.g. a counter tablet) keeps receiving the previous staff
+  member's push notifications until a different user's login happens to
+  resubscribe over the same browser endpoint (the upsert is keyed on
+  `endpoint`, so it does eventually self-correct on the next login on that
+  device — not a data leak to a different person's account, just a staff
+  member who signed out still getting notified on a device they walked away
+  from). Fixing this properly needs a new unsubscribe route plus a client
+  call wired into both logout flows (`app/s/_components/SignOut.tsx`,
+  `app/c/profile/_components/ProfileClient.tsx`) — a real feature addition,
+  not a one-line fix, so left for a dedicated follow-up rather than built
+  into this audit pass.
+- **Slot-booking capacity** (`lib/slot-capacity.ts`): already uses a
+  Postgres advisory lock keyed on `(collegeId, startAtISO)` inside the same
+  transaction that creates the order, with the capacity count read AFTER
+  the lock — the exact race this function's own file-header comment
+  documents fixing on 2026-09-05, and `tests/slot-capacity-race-behavioral.
+  test.ts` already proves two concurrent last-slot bookings can't both
+  succeed. Only one call site (`lib/actions/orders.ts`'s `placeOrder`), no
+  bypass path found. Per-college/per-day scoping (`buildSlots`/`SlotWindow`)
+  confirmed correct — a window's `collegeId` is part of both the lock key
+  and the capacity query.
+- **Bag-code admin flows** (`lib/actions/bags.ts`): `setBagCode`'s ("Change
+  ID") pre-check for an already-in-use code (`status: { not: "released" }`)
+  is strictly BROADER than the actual DB guarantee (the partial unique index
+  is `UNIQUE(code) WHERE status = 'active'`, per `scripts/ensure-guards.
+  mjs`), so it can only over-reject, never under-reject — a race between two
+  concurrent renames onto the same code still correctly throws `P2002` and
+  gets a friendly message. `issueBag`/`reissueBagSameCode` both lock
+  (advisory lock / row re-check inside the transaction) before allocating or
+  reusing a code, already covered by existing behavioral tests.
+  `retireBag`/`reissueBagSameCode` racing an "active order on that bag" is
+  not a real risk because `Order` has no foreign key or any reference to
+  `Bag` at all (orders are tied to `studentId`, never to a specific bag
+  row) — there is nothing for a bag-status change to race against.
+
+`npm test`: 1219/1219 passing (one new test file,
+`date-format-hydration.test.ts`). `npx tsc --noEmit` clean. `npm run build`
+not re-run this pass (no route/type changes, only literal object-key
+additions and one new test file).
+
 ## RESOLVED 2026-10-20: structural audit — no ESLint ever configured, a real missing-UI bug (unread badge), and 44 dead-code findings triaged
 
 Owner: "its been since then app is never perfect i see silly mistakes and bugs

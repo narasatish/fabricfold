@@ -286,7 +286,7 @@ export default function StaffHomeClient({
       <div className="chip-toggle" style={{ marginBottom: 12 }}>
         <div>
           <div className="h-sm">
-            {attendance.clockedOut ? "Shift complete for today" : attendance.clockedIn ? `On shift since ${attendance.since ? new Date(attendance.since).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : ""}` : "Not clocked in"}
+            {attendance.clockedOut ? "Shift complete for today" : attendance.clockedIn ? `On shift since ${attendance.since ? new Date(attendance.since).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) : ""}` : "Not clocked in"}
           </div>
           <div className="muted" style={{ fontSize: "12px" }}>Attendance is recorded for payroll</div>
         </div>

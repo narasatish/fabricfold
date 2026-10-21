@@ -42,6 +42,20 @@ export default async function OrderDetailPage({ params, searchParams }: { params
   // Detect cycle-based orders by checking if any item label contains "cycle"
   const isCycleOrder = items.some((i) => i.label.includes("cycle"));
 
+  /* Found 2026-10-21: the pre-book form (OrderNewClient) quotes a cycle order
+     as "Estimated total ₹0 / From your plan" — placeOrder itself has no idea
+     yet whether staff will actually burn a cycle at drop-off (that's decided
+     in acceptOrder, see collectOrder's usedCycle logic), so the DRAFT row it
+     creates stores the full cash-equivalent total (e.g. ₹200) the same as a
+     walk-in with no plan would owe. A student who pre-books then opens their
+     own order immediately sees that ₹200 "Total" — flatly contradicting what
+     the form just told them seconds earlier. Once staff actually accept the
+     order this resolves itself (order.total is recomputed for real), so this
+     is cosmetic, not a billing bug — but it's exactly the kind of
+     self-contradicting screen that makes an app feel unreliable. Mirrors the
+     same "From your plan" treatment only while still a draft. */
+  const draftCycleCovered = order.status === "draft" && isCycleOrder && !!student.subscription?.active;
+
   // Customer-facing ETA while the order is in progress.
   const dueAt = orderDueAt({ receivedAt: order.receivedAt, express: order.express });
   const etaLabel =
@@ -210,12 +224,12 @@ export default async function OrderDetailPage({ params, searchParams }: { params
               <span className="k">
                 {it.label} <span className="muted">×{it.qty}</span>
               </span>
-              <span className="mono">{fmt(Number(it.rate) * it.qty)}</span>
+              <span className="mono">{draftCycleCovered ? "From your plan" : fmt(Number(it.rate) * it.qty)}</span>
             </div>
           ))}
           <div className="kv">
             <span className="k">Subtotal ({totalQty} {isCycleOrder ? "cycle" : "pc"}{totalQty !== 1 ? "s" : ""})</span>
-            <span className="mono">{fmt(Number(order.subtotal ?? 0))}</span>
+            <span className="mono">{draftCycleCovered ? "From your plan" : fmt(Number(order.subtotal ?? 0))}</span>
           </div>
           {(Number(order.surcharge ?? 0)) > 0 && (
             <div className="kv">
@@ -231,8 +245,13 @@ export default async function OrderDetailPage({ params, searchParams }: { params
           )}
           <div className="kv total">
             <span>Total</span>
-            <span className="mono">{fmt(Number(order.total))}</span>
+            <span className="mono">{draftCycleCovered ? fmt(Number(order.surcharge ?? 0)) : fmt(Number(order.total))}</span>
           </div>
+          {draftCycleCovered && (
+            <div className="muted" style={{ fontSize: "12px", marginTop: "6px" }}>
+              Confirmed at drop-off — staff burn a cycle from your plan instead of charging you, if one's available.
+            </div>
+          )}
         </div>
 
         {/* Pay button or paid badge */}

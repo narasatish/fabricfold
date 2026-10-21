@@ -76,6 +76,17 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },
+  /* "/app" has never been a real route (customer is /c, staff is /s) — found
+     2026-10-21 via a Sentry alert: a request landed there and Next's
+     "Expected RSC response, got text/plain" framework error fired because
+     there was nothing to serve. Most likely an old pinned home-screen
+     shortcut or bookmark from before the /c /s split. A plain redirect can't
+     fix a stale client's actual RSC/Server-Action payload mismatch (that
+     resolves itself on reload), but it does mean a fresh visit to /app lands
+     somewhere real instead of a dead end. */
+  async redirects() {
+    return [{ source: "/app", destination: "/c", permanent: false }];
+  },
 };
 
 /* Sentry wrapper. Source-map upload only runs when SENTRY_AUTH_TOKEN + org/project

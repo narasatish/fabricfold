@@ -133,6 +133,33 @@ export async function broadcastNotice(scope: string, text: string) {
   if (!students.length) return { ok: false as const, error: "No students to notify" };
   const ids = students.map((s) => s.id);
 
+  const label = scope === "all" ? "all campuses" : (await db.college.findUnique({ where: { id: scope } }))?.name || scope;
+
+  /* Nothing here serialized or deduped two near-simultaneous calls — a
+     double-click on "Send broadcast", or a client retry on a slow request
+     (the same failure mode already fixed elsewhere in this codebase for
+     acceptOrder/placeOrder/resolveComplaint — see the playbook's
+     concurrency-audit entries) would create TWO Notification rows and fire
+     TWO push deliveries per student for one intended notice. Guarded the
+     same way: an advisory lock keyed to the sending staff member serializes
+     their own concurrent calls, and a fresh in-lock check rejects an exact
+     repeat of the same message sent moments ago. The claim row IS the real
+     audit-log entry (not a separate sentinel) — the loser never gets this
+     far and never creates anything. */
+  const claimDetail = `"${msg.slice(0, 40)}" → ${label} (${ids.length})`;
+  const claimed = await db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`broadcast|${st.id}`}))`;
+    const dup = await tx.auditLog.findFirst({
+      where: { action: "Broadcast notice", by: st.id, detail: claimDetail, at: { gte: new Date(Date.now() - 15_000) } },
+    });
+    if (dup) return false;
+    await tx.auditLog.create({ data: { action: "Broadcast notice", detail: claimDetail, by: st.id } });
+    return true;
+  });
+  if (!claimed) {
+    return { ok: false as const, error: "This exact notice was just sent — please wait a few seconds before sending it again." };
+  }
+
   // one in-app notification per student
   await db.notification.createMany({ data: ids.map((studentId) => ({ studentId, text: msg, kind: "status" as const })) });
 
@@ -152,8 +179,7 @@ export async function broadcastNotice(scope: string, text: string) {
   }
 
   /* Broadcasts are in-app and web push only. Students get WhatsApp for order
-     placed, ready and collected only (see pushNotif in lib/notify.ts). */
-  const label = scope === "all" ? "all campuses" : (await db.college.findUnique({ where: { id: scope } }))?.name || scope;
-  await audit("Broadcast notice", `"${msg.slice(0, 40)}" → ${label} (${ids.length})`, st.id);
+     placed, ready and collected only (see pushNotif in lib/notify.ts).
+     The audit-log row was already written above, as the claim itself. */
   return { ok: true as const, sent: ids.length };
 }

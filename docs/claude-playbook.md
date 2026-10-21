@@ -2679,3 +2679,234 @@ specific and confident - same failure mode as earlier miscounted test
 claims, just applied to commit claims instead. Severity of genuine findings
 has now dropped to zero for a full round, suggesting the UI-wiring gap class
 is close to exhausted.
+
+## AUDIT 2026-10-21: complaints/notifications scope continuation, no new bugs
+
+Resumed the complaints+notifications audit after a prior instance's host
+restart. Confirmed its in-flight work was intact and left alone:
+`grantFreeReservice` (`lib/actions/complaints.ts`) and `redoOrder`
+(`lib/actions/orders.ts`) on `requireStaffPerm("refunds")`,
+`broadcastNotice`'s advisory-lock dedup guard (`lib/actions/students.ts`),
+and `lib/push.ts` logging send failures to ErrorLog. Also found, already
+present and verified by that same batch (not redone here): a real
+`refundOrder` perm-check bug (was still bare `requireStaff(1)` despite its
+own comment claiming otherwise — a file-grep test was passing by accident)
+and a pay-before-accept-order race across `payInner`/the Razorpay webhook
+(`lib/actions/orders.ts`, `app/api/razorpay/webhook/route.ts`) — both now
+covered by `tests/free-redo-perm-behavioral.test.ts` and
+`tests/pay-before-accept-race-behavioral.test.ts`.
+
+Checked the five items in this round's scope; all were already correct,
+so no new test/fix was needed:
+
+1. **redoOrder business logic** — re-verified against `scenarios.test.ts`:
+   a free redo on a cycle order does not re-consume a cycle or double-charge
+   (it creates a zero-total sibling order; the original's cycle consumption,
+   if any, isn't touched).
+2. **Photo-evidence enforcement** — `MIN_DAMAGE_PHOTOS`/`cleanPhotos`
+   (`lib/complaint-rules.ts`) is enforced server-side in both
+   `submitComplaint` and `reportOrderDamage` (`lib/actions/complaints.ts`
+   lines ~29, ~100), not just client-side — a direct server-action call
+   with 0-2 photos is rejected.
+3. **Concurrent complaint resolution / double-compensation** — already
+   race-safe three ways: `grantFreeReservice` claims the complaint
+   (`redoOrderId: null → "claiming"`) via `updateMany` before calling
+   `redoOrder()`, with the claim released on any failure including a throw;
+   `resolveComplaint` claims via `updateMany({ status: "open" → "resolved" })`
+   so only one concurrent resolve lands; `submitCompensation`
+   (`lib/actions/credits.ts`) has both an in-transaction duplicate check AND
+   a real DB unique index (`compensation_dupe_uniq`, see `ensure-guards.mjs`)
+   as the actual race-proof backstop, with P2002 handled as a friendly error.
+4. **WhatsApp failure visibility** — already fixed 2026-10-01 per
+   `lib/notify.ts`'s own comment; `waPost`'s catch blocks log to console and
+   ErrorLog the same way `lib/push.ts` was just fixed to for web push.
+5. **In-app notification mark-as-read** — no IDOR possible: both the unread
+   count (`app/c/layout.tsx`) and the mark-all-read update
+   (`app/c/notifications/page.tsx`) are scoped to `studentId: student.id`
+   from the session via `requireStudent()`, never an id taken from input.
+   The mark-read is an idempotent `updateMany({ read: false → true })` with
+   no side effect attached, so two tabs racing just both no-op after the
+   first — nothing to double-process.
+
+`npm test`: 1215/1215 passing after this round (no new tests added — no new
+bugs found in this scope).
+
+## 2026-10-21 (continued): admin/reports/registration audit, round 2
+
+Continuing the same pass whose refundOrder/redoOrder permission-gate fix is
+already documented above. Systematically checked audit-log coverage across
+lib/actions/*.ts (admin.ts, privacy.ts erasure, bags.ts, credits.ts,
+subscription.ts, cash.ts, ops.ts, cancelOrder) — every money-moving or
+access-control action already calls `audit()`; no new gap found there.
+Confirmed `app/s/admin`'s rate-change actions (`saveRates`,
+`saveCollegeRates`, `saveCollegeExpressRates`) are gated server-side with
+`requireStaff(3)` (Admin+), not just hidden in the UI, and that
+`acceptOrder` snapshots `items`/`subtotal`/`gst`/`total`/`gstPctSnapshot`
+onto the Order row at acceptance — a later rate change correctly never
+retroactively reprices an already-accepted order, since payment/report code
+always reads the stored snapshot, never live config.
+
+**Real bug found: `computeReport`'s `ordersIn` counted drafts and
+cancellations as "received".** `lib/report.ts`'s order query filtered only
+by `createdAt`, with no status filter — so an abandoned app booking that
+staff never accepted at the counter, and an order cancelled before any wash
+happened, both inflated the Reports screen's "Orders received" tile. The
+money-side figures in the same report (`payments`, `invoices`) never had
+this problem — a refund/cancellation always has an offsetting reversal
+there — but `ordersIn` (and `avgTurnaround`'s implicit context) had no such
+correction. Fixed by adding `status: { notIn: ["draft", "cancelled"] }` to
+that query. Behavioral test:
+`tests/report-ordersin-excludes-draft-cancelled-behavioral.test.ts` (real
+Postgres, isolated schema) creates one received, one draft, and one
+cancelled order in the same window and asserts `ordersIn === 1`; confirmed
+it fails without the fix and passes with it (mutation-tested).
+
+Registration edge cases checked and found already sound: two phones
+registering under the identical name (name is not unique, no conflict);
+phone reuse after a prior student's erasure (anonymisation overwrites the
+real phone with `deleted-{id}`, correctly freeing the original number in
+the unique index for reuse); `registerStudent`'s id/bag-code collision
+retry loop already disambiguates a genuine phone race from a transient
+bag-code collision (2026-10-20 fix, see comment in admin.ts) rather than
+leaving orphaned partial state — `activatePlan`'s subscription+bag mint is
+one atomic transaction (2026-10-20 fix), so a failed plan step never leaves
+a student with a paid subscription and no bag, or vice versa.
+
+`npm test`: 1216/1216 passing after this round (one new test added for the
+`ordersIn` fix).
+
+## RESOLVED 2026-10-21: Razorpay gateway signature not tied to a specific order
+
+Payments/webhooks audit (continuing the pass that fixed the draft-order
+payment gap in payInner/the webhook route — see that entry above for this
+same date). Found a real price-bypass bug in
+`confirmGatewayPayment`/`createGatewayOrder` (lib/actions/payments.ts),
+separate from the draft-order issue.
+
+**The bug:** `confirmGatewayPayment` verified that `rzp.signature` is a
+genuine HMAC(rzpOrderId|paymentId) signed by Razorpay — proof that *some*
+payment was captured — but never checked that the Razorpay order it refers
+to was the one `createGatewayOrder` actually created for the FabricFold
+order being paid. Nothing in the schema recorded which Razorpay order id
+belonged to which internal `Order`. A student could run
+`createGatewayOrder`/checkout on a cheap order of their own, get Razorpay's
+real signature for that genuine small payment, then call
+`confirmGatewayPayment` again passing a different, expensive order id
+(still their own — `payOrder`'s ownership check only requires
+`studentId === stu.id`, which both orders satisfy) together with the same
+real `rzpOrderId`/`paymentId`/`signature` triple. The signature check still
+passed — it only proves internal consistency of the triple, not which order
+it was captured against — so the expensive order was marked fully paid for
+the price of the cheap one.
+
+**Fix:** added `Order.gatewayOrderId` (prisma/schema.prisma).
+`createGatewayOrder` now stores the Razorpay order id it just created on
+the order row; `confirmGatewayPayment` refuses unless the client-supplied
+`rzp.orderId` matches that stored value, before even checking the HMAC.
+Behavioral test `tests/gateway-crossorder-behavioral.test.ts` reproduces the
+cross-order replay against a live Postgres schema, fails pre-fix, passes
+post-fix; mutation-tested (reverted the check, confirmed the test fails
+again, restored it).
+
+Also re-confirmed, no changes needed: the webhook's signature verification
+(constant-time, length-checked first) and its replay protection (the unique
+index on `Payment.gatewayRef`, confirmed by `tests/gateway.test.ts`'s own
+concurrent-delivery test) are both solid; malformed payloads (missing
+`payment.entity`, missing `notes.ff_order_id`) short-circuit safely.
+Wallet top-up (`topUpCredits`, lib/actions/ops.ts) and compensation
+(`submitCompensation`, lib/actions/credits.ts) already have an advisory
+lock + short-window dedupe and a DB-backed unique-index backstop
+respectively, both atomic with their `credits: { increment }` write — no
+mid-transaction "debited but not credited" gap found. Subscription pricing
+(`activatePlan`/`upgradeSubscription`) takes no client-suppliable price
+anywhere; every gross/difference is recomputed server-side from the locked,
+fresh DB read, matching the pattern already hardened in the 2026-10-20 pass
+noted in subscription.ts's own comments.
+
+`refundOrder` is confirmed **ledger-only by design, not an oversight**:
+there is no call to Razorpay's refund API anywhere in the codebase for any
+`via`, including `"upi"`. Given the counter-driven, cash/UPI-mixed
+business (StMary's/BVRIT campus laundry, not a card-on-file e-commerce
+store) and that there is no gateway-customer/order mapping stored that
+would support an automated refund either, this reads as "staff refund the
+student out-of-band (cash in hand, or their own UPI transfer) and the app
+just records how," the same manual pattern "cash" refunds already require.
+That said, this intent was not written down anywhere before now — nothing
+in HANDOFF.md or this playbook said so — so it is worth the owner
+explicitly confirming it rather than this being inferred. Double-refund
+protection on the same order (row lock + fresh refundAmount re-check,
+capped at `order.total`) was already fixed in a prior pass (2026-10-20) and
+is intact.
+
+One schema-maintenance note for whoever adds the next column to a "direct"
+table (Student/Staff/Plan/Order/Payment/Invoice/CreditNote/Expense/
+Complaint — see ensure-guards.mjs's per-college-views block): adding
+`Order.gatewayOrderId` made `ensure-guards.mjs`'s `CREATE OR REPLACE VIEW
+v_by_college_order` fail with "cannot change name of view column
+'collegeName' to 'gatewayOrderId'" — Postgres only allows appending columns
+to a view's output list, and `x.*, c.name AS "collegeName"` means any new
+column on the base table lands BEFORE collegeName in the view's column
+list, not after. This is pre-existing, already-handled-by-design: the
+script wraps this whole block in try/catch and only warns, specifically so
+a view-definition snag never blocks a deploy. Ran `ensure-guards.mjs`
+against every live test schema (ff_test, ff_agg, public/dev) after this
+change; the per-college views for Order are stale until someone drops and
+recreates them (or ensure-guards.mjs is changed to DROP + CREATE instead of
+CREATE OR REPLACE for this table), but nothing else depends on them in the
+test suite today.
+
+`npm test`: 1217/1217 passing after this round (one new test added:
+`tests/gateway-crossorder-behavioral.test.ts`).
+
+## RESOLVED 2026-10-21: live-tested as a real customer on both campuses — a draft cycle order's own detail page contradicted its own pre-book quote
+
+Owner, same session: "test everything once again ... go deep fixing, live
+testing in all angles like user and staff." Signed in live on production
+(fabricfold.in) as a real customer on each campus — BVRIT (per-piece
+pricing, V1019) and St Mary's (cycle-based pricing, S1746) — placed a real
+order on each, checked notifications/wallet/profile, then cleaned both test
+orders up via "Delete draft" (confirmed that's a plain `window.confirm()`,
+not a dead button — the browser-automation tool just can't click through a
+native dialog without overriding it for the test).
+
+**Real bug found: a pre-booked cycle order's own detail page shows a cash
+total that flatly contradicts what the booking form just quoted seconds
+earlier.** The "New order" form (`OrderNewClient.tsx`) correctly tells a
+subscribed student their cycle order is "Estimated total ₹0 / From your
+plan" — but `placeOrder` has no way to know yet whether staff will actually
+burn a cycle at drop-off (that's decided later in `acceptOrder`), so the
+draft row it creates stores the full cash-equivalent total (e.g. ₹200 for a
+Wash & Fold cycle) exactly as a walk-in with no plan would owe. A student
+who pre-books and then taps straight into their own order sees "Total ₹200"
+— directly contradicting the ₹0 they were just told, with no indication
+it'll resolve itself once accepted. Confirmed live: placed order #1203 on
+St Mary's production, form said ₹0, order detail page said ₹200.
+
+Not a billing bug — `acceptOrder` recomputes the real total fresh and
+correctly, so a draft order is never actually charged the shown amount.
+Purely a self-contradicting screen, but exactly the class of "silly,
+confusing mistake" the owner has been flagging all session.
+
+Fixed in `app/c/orders/[id]/page.tsx`: while an order is still a `draft`,
+is cycle-based, and the student has an active subscription, the itemised
+rows, subtotal, and total now show "From your plan" (matching the booking
+form) instead of the stored cash total, with a line explaining it's
+confirmed at drop-off. Resolves to the real number automatically once
+`acceptOrder` runs and the order leaves draft status — zero change to any
+money-computing code path.
+
+Also found via a live Sentry error the owner forwarded mid-session: a POST
+to `https://fabricfold.in/app` threw Next's framework-level "Expected RSC
+response, got text/plain" error. `/app` has never been a real route in this
+codebase (customer is `/c`, staff is `/s`) — no redirect, no manifest
+`start_url`, nothing in git history ever served it. Most likely an old
+pinned home-screen shortcut or bookmark from before the `/c`/`/s` split, or
+bot/scanner traffic. Added a redirect (`/app` → `/c`) in `next.config.ts` as
+a safety net for a fresh visit; this can't retroactively fix an already-
+stale client's own cached shell (that resolves on its own next reload), so
+if this keeps recurring from the same source it's worth asking the owner
+whether anyone has an old homescreen icon pointed there.
+
+`npm test`: 1217/1217 passing (no new tests — pure display-logic fix, no
+new money-affecting code path to regression-test; `tsc --noEmit` clean,
+`npm run build` succeeds with the same route table).

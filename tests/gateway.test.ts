@@ -108,6 +108,11 @@ async function mkOrder(id: string, opts: { noGst?: boolean; creditApplied?: numb
       subtotal: 150, gst: opts.noGst ? 0 : 27, gstPctSnapshot: opts.noGst ? 0 : 18,
       total: opts.noGst ? 150 : 177, noGst: !!opts.noGst,
       creditApplied: opts.creditApplied ?? 0,
+      // The gateway order (and thus the webhook) is only ever reachable for
+      // an order the student can already pay — the UI gates "Pay" behind
+      // acceptance, and the fix in payInner/the webhook route now enforces
+      // the same thing server-side (total is just an estimate on a draft).
+      status: "received",
     },
   });
 }

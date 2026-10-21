@@ -740,6 +740,14 @@ async function payInner(orderId: string, method: "upi" | "cash", creditApplied: 
   return db.$transaction(async (tx) => {
     const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { student: true } });
     if (o.paid) throw new Error("Already paid");
+    /* `total` is an ESTIMATE until acceptOrder runs (real weight, staff-
+       confirmed quantities, excess-weight charge) — acceptOrder overwrites
+       it unconditionally and has no idea a draft was already settled. A
+       draft paid now (credits, gateway, a replayed request) could show
+       `paid: true` against a total that later changes, silently absorbing
+       or inventing money with no record. Found in a payment-path audit:
+       nothing upstream of payCore checked status, only `paid`. */
+    if (o.status === "draft") throw new Error("This order hasn't been received yet — pay once it's checked in at the counter");
     const total = Number(o.total);
     creditApplied = Math.max(0, Math.min(creditApplied, total));
 
@@ -822,7 +830,16 @@ export type ActionResult = { ok: boolean; error?: string; id?: string; status?: 
    twice. Staff decide. */
 export async function refundOrder(orderId: string, amount: number, via: "upi" | "cash" | "credit", reason: string, restoreCycle = false): Promise<ActionResult> {
   /* Was requireStaff(1) — ANY staff could give money back. Refunds are now a
-     named tool: Manager+ by default, grantable or revocable per person. */
+     named tool: Manager+ by default, grantable or revocable per person.
+     CORRECTION 2026-10-21: this comment was already here claiming the gate
+     existed, but the line below it still read `requireStaff(1)` — the
+     actual check was never added. staff-perms.test.ts's file-grep for
+     `requireStaffPerm("refunds")` only kept passing because redoOrder's own
+     (separate) fix happened to introduce that exact string elsewhere in
+     this file; it was never actually exercising this function. Fixed for
+     real this time, with a behavioral test
+     (tests/free-redo-perm-behavioral.test.ts) that calls refundOrder()
+     itself rather than grepping source text. */
   const st = await requireStaffPerm("refunds");
   if (!isMoneyAmount(amount)) return { ok: false, error: "Enter a valid amount (up to 2 decimals)" };
   if (!["upi", "cash", "credit"].includes(via)) return { ok: false, error: "Pick how the refund is paid" };
@@ -894,7 +911,15 @@ export async function refundOrder(orderId: string, amount: number, via: "upi" | 
 
 /* ---------- Free re-do ---------- */
 export async function redoOrder(orderId: string): Promise<ActionResult> {
-  const st = await requireStaff(1);
+  // A free re-do is a real giveaway (staff time + consumables) — the same
+  // "money out the door" category as refundOrder/submitCompensation, which
+  // both correctly gate on the "refunds" tool rather than a bare role floor.
+  // This used to be `requireStaff(1)` — the lowest role, no perm check at
+  // all — so any Counter member with zero money tools granted could mint a
+  // free order directly, and a Manager with "refunds" explicitly revoked by
+  // the owner could still give one away. Found in the admin/reports/
+  // registration audit, 2026-10-21.
+  const st = await requireStaffPerm("refunds");
   const cfg = await getConfig();
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
   assertSameCollege(st, o.collegeId);

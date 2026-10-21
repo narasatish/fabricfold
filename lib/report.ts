@@ -80,7 +80,23 @@ export async function computeReport(p: Period, collegeId?: string | null) {
     db.invoice.findMany({ where: withCollege(at ? { at } : {}), orderBy: { at: "desc" } }),
     db.creditNote.findMany({ where: withCollege(at ? { at } : {}), orderBy: { at: "desc" } }),
     db.expense.findMany({ where: withCollege(at ? { at } : {}), orderBy: { at: "desc" } }),
-    db.order.findMany({ where: withCollege(at ? { createdAt: at } : {}), include: { timeline: true } }),
+    /* `status: { notIn: ["draft", "cancelled"] }` — an abandoned app booking
+       never accepted at the counter, or an order cancelled before any wash
+       happened, is not an order the counter "received". Without this, both
+       inflated `ordersIn` (the Reports screen's "Orders received" tile),
+       exactly the kind of drift the money-side figures above (payments,
+       invoices) already avoid by construction — a cancelled order's payment
+       is reversed via a refund row, never silently left in the total.
+       Found in the admin/reports/registration audit, 2026-10-21. */
+    /* `status: { notIn: ["draft", "cancelled"] }` — an abandoned app booking
+       never accepted at the counter, or an order cancelled before any wash
+       happened, is not an order the counter "received". Without this, both
+       inflated `ordersIn` (the Reports screen's "Orders received" tile),
+       exactly the kind of drift the money-side figures above (payments,
+       invoices) already avoid by construction — a cancelled order's payment
+       is reversed via a refund row, never silently left in the total.
+       Found in the admin/reports/registration audit, 2026-10-21. */
+    db.order.findMany({ where: withCollege({ ...(at ? { createdAt: at } : {}), status: { notIn: ["draft", "cancelled"] } }), include: { timeline: true } }),
     // Compensation/Complaint don't carry collegeId directly — scope through
     // the student they belong to, so a campus manager still only sees theirs.
     db.compensation.findMany({ where: { ...(at ? { at } : {}), ...(collegeId ? { student: { collegeId } } : {}) } }),

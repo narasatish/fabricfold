@@ -49,6 +49,10 @@ export async function createGatewayOrder(orderId: string, applyCredits: boolean)
     return { ok: false as const, error: "Could not start online payment — try again or pay at the counter" };
   }
   const rzp = (await res.json()) as { id: string; amount: number };
+  // Recorded so confirmGatewayPayment can verify the client's rzp.orderId
+  // actually belongs to THIS order, not just that it's a genuine Razorpay
+  // order for SOME payment the student made.
+  await db.order.update({ where: { id: o.id }, data: { gatewayOrderId: rzp.id } });
   return {
     ok: true as const,
     keyId: KEY_ID(),
@@ -67,6 +71,18 @@ export async function confirmGatewayPayment(
 ) {
   const stu = await requireStudent(); // session check; ownership is re-checked inside payOrder
   if (!(await gatewayEnabled()) || !onlinePaymentAllowed(stu.college.features, stu.kind)) return { ok: false as const, error: "Gateway not configured" };
+
+  /* The signature proves `rzp.orderId`/`rzp.paymentId` is a genuine,
+     untampered Razorpay payment — nothing more. Without this check, a
+     student could pay a cheap order of their own, get its real signature,
+     and replay the same triple against a different (more expensive) order
+     id here: both orders are theirs, so payOrder's ownership check doesn't
+     catch it, and the signature would still verify. Tie it to the specific
+     order this payment was actually created for. */
+  const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
+  if (!o.gatewayOrderId || o.gatewayOrderId !== rzp.orderId) {
+    return { ok: false as const, error: "Payment could not be verified" };
+  }
 
   const expected = crypto
     .createHmac("sha256", KEY_SECRET())

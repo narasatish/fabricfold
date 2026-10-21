@@ -1,7 +1,7 @@
 "use server";
 /* Complaints + chat threads (realtime both sides). */
 import { db } from "../db";
-import { requireStudent, requireStaff, getSession, assertSameCollege } from "../auth";
+import { requireStudent, requireStaff, requireStaffPerm, getSession, assertSameCollege } from "../auth";
 import { publish } from "../realtime";
 import { pushNotif, audit, sendWhatsAppPhotos } from "../notify";
 import { notifyOwner } from "../mail";
@@ -133,7 +133,13 @@ export async function reportOrderDamage(orderId: string, input: { comment: strin
 /* Free re-wash as the remedy for a complaint. Linked back to the complaint so
    the giveaway is always traceable to the grievance that justified it. */
 export async function grantFreeReservice(complaintId: string) {
-  const st = await requireStaff(2); // Manager+ — this is money out the door
+  // Was `requireStaff(2)` — a hardcoded role floor that ignored the owner's
+  // per-person "refunds" override entirely: a Manager with "refunds"
+  // explicitly revoked could still give away a free re-service here, and
+  // the redoOrder() call below used to have no perm check at all (found in
+  // the same audit — fixed there too). Matches refundOrder/
+  // submitCompensation, which already gate on the tool, not just the role.
+  const st = await requireStaffPerm("refunds"); // Manager+ by default — this is money out the door
   const c = await db.complaint.findUniqueOrThrow({ where: { id: complaintId } });
   assertSameCollege(st, c.collegeId);
   if (!c.orderId) return { ok: false as const, error: "This complaint isn't linked to an order" };

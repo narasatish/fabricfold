@@ -338,6 +338,19 @@ model Order {
   // them (rather than a bool) is what stops the daily cron re-sending the same
   // reminder every run while a bag sits uncollected for a fortnight.
   collectionRemindersSent Int       @default(0)
+  /**
+   * The Razorpay order id createGatewayOrder minted for THIS order, if any.
+   * confirmGatewayPayment checks the client-supplied rzp.orderId against
+   * this before trusting its signature — the signature alone only proves
+   * SOME payment was genuinely captured by Razorpay, not that it was ever
+   * captured for this order. Without this check, a valid signature from a
+   * cheap order's own real payment could be replayed against a different,
+   * expensive order of the same student (both just need `studentId ===
+   * stu.id`, which confirmGatewayPayment already re-checks via payOrder) and
+   * mark it fully paid for a fraction of its price. Found 2026-10-21 in a
+   * payments/webhooks audit.
+   */
+  gatewayOrderId          String?
 
   timeline OrderEvent[]
   tags     GarmentTag[]

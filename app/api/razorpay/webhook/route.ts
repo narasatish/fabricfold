@@ -45,6 +45,19 @@ export async function POST(req: Request) {
       // re-read inside the transaction so the common case exits cleanly
       const fresh = await tx.order.findUniqueOrThrow({ where: { id: o.id } });
       if (fresh.paid) return null;
+      // `total` is only an estimate until staff accept/weigh the order —
+      // acceptOrder overwrites it unconditionally and has no idea a gateway
+      // payment landed against the pre-acceptance number. Settling here
+      // would record money against a total that can still change. A real
+      // gateway order is only ever created (createGatewayOrder) for an
+      // order the student can already see a "Pay" button for, which the UI
+      // only shows once accepted — a draft reaching this point means the
+      // check was bypassed, so refuse rather than guess.
+      // A 500 here would make Razorpay retry forever, so this is a no-op
+      // (like the `fresh.paid` case above) rather than a thrown error —
+      // there is nothing a retry could fix about a draft order.
+      if (fresh.status === "draft") return null;
+
       await tx.payment.create({ data: { method: "upi", amount: Number(fresh.total) - Number(fresh.creditApplied), orderId: fresh.id, collegeId: fresh.collegeId, studentId: fresh.studentId, gatewayRef } });
       const paymentMethod = Number(fresh.creditApplied) > 0 ? "upi+credit" : "upi";
       const u = await tx.order.update({ where: { id: fresh.id }, data: { paid: true, paymentMethod } });

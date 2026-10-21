@@ -2989,14 +2989,27 @@ doesn't, and was only ever grouped with it for convenience. Replay is now
 added via `Sentry.addIntegration()` inside a `setTimeout(..., 0)`, which
 runs after React's hydration commit instead of racing it.
 
-Confidence: high but not 100% proven root-cause, since Sentry's own SDK
-internals are minified in production and the error itself only reports a
-minified React code with no component name. Traced it this far via direct
-elimination: the error (a) is `role` and data independent (reproduces on
-a fully static page), (b) requires JS/hydration (never happens on pure
-server HTML), (c) Sentry's replay integration is a well-documented source
-of exactly this interaction in the wider Next.js/Sentry community, and
-(d) `window.__SENTRY__` confirmed present on the affected pages. Recommend
+**CONFIRMED after deploy.** Testing the deployed fix initially appeared to
+fail — same error, same stack — until checking the actual chunk filename
+being loaded against the server directly (`curl` the live HTML for its
+`<script>` tags) showed the test browser was still serving `0nvq0j5fbtrwg.js`
+from stale cache/service-worker storage, a chunk that 404s on the real
+server; the live HTML's real chunks all had different names entirely. The
+page's own `PwaSetup` re-registers `/sw.js` on every mount, so unregistering
+the worker and clearing Cache Storage mid-session wasn't enough — only a
+brand-new browser tab with no prior visit to the origin gave an honest
+read. On that clean tab: zero console errors on `/terms`, `/s/reports`, and
+`/s` alike. Diagnosis confirmed, not just inferred.
+
+Root-cause confidence before that confirmation: high but not 100% proven,
+since Sentry's own SDK internals are minified in production and the error
+itself only reports a minified React code with no component name. Traced
+it via direct elimination: the error (a) is `role` and data independent
+(reproduces on a fully static page), (b) requires JS/hydration (never
+happens on pure server HTML), (c) Sentry's replay integration is a
+well-documented source of exactly this interaction in the wider
+Next.js/Sentry community, and (d) `window.__SENTRY__` confirmed present on
+the affected pages. Recommend
 the owner watch Sentry's own error stream for a few days after this
 deploys — if `#418` events stop appearing, that confirms the diagnosis; if
 they continue, there's a second source still to find.

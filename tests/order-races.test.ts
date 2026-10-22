@@ -78,7 +78,12 @@ describe("subscription writes are locked against concurrent top-ups/assigns/upgr
 });
 
 describe("refundOrder can't refund more than was actually billed", () => {
-  const rfn = orders.slice(orders.indexOf("export async function refundOrder"), orders.indexOf("export async function redoOrder"));
+  // 2026-10-22: this logic moved into performRefund — the shared, hardened
+  // transaction refundOrder (small, immediate refunds) and
+  // approveRefundRequest (large, approved refunds) now both call, rather
+  // than each having its own copy. Slice from there instead of refundOrder
+  // itself, which is now a thin wrapper that decides which path to take.
+  const rfn = orders.slice(orders.indexOf("async function performRefund"), orders.indexOf("export async function refundOrder"));
 
   it("caps against the order total minus whatever's already been refunded", () => {
     // A staff typo (₹5000 instead of ₹500 on a ₹500 order) used to go

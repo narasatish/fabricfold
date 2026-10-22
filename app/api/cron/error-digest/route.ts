@@ -60,10 +60,19 @@ export async function GET(req: Request) {
     "Full detail: fabricfold.in/s/admin (App errors).",
   ].join("\n");
 
-  await notifyOwner(`FabricFold: ${unseen.length} app error(s)`, body);
+  const delivered = await notifyOwner(`FabricFold: ${unseen.length} app error(s)`, body);
 
-  // Mark seen only AFTER the mail is away, so a send failure means the next
-  // run reports them again rather than losing them silently.
+  /* Mark seen only once `notifyOwner` reports a real delivery, so a send
+     failure means the next run reports them again rather than losing them
+     silently. Found 2026-10-22: this comment already existed, but
+     notifyOwner never actually communicated failure before today — it
+     swallowed every error and returned nothing, so this `updateMany` ran
+     unconditionally regardless of whether the owner was ever told. Now
+     notifyOwner returns true only if email or the new owner-push channel
+     plausibly delivered. */
+  if (!delivered) {
+    return Response.json({ ok: false, errors: unseen.length, distinct: ranked.length, sent: false, reason: "no delivery channel succeeded — not marking seen" }, { status: 502 });
+  }
   await db.errorLog.updateMany({ where: { id: { in: unseen.map((e) => e.id) } }, data: { seen: true } });
 
   return Response.json({ ok: true, errors: unseen.length, distinct: ranked.length, sent: true });

@@ -6,6 +6,7 @@ import { Svg } from "@/components/icons";
 import { Seg, Sheet, useToast } from "@/components/chrome";
 import { submitExpense } from "@/lib/actions/admin";
 import { closeDay } from "@/lib/actions/ops";
+import { approveRefundRequest, rejectRefundRequest } from "@/lib/actions/orders";
 import { fmt } from "@/lib/format";
 
 export default function ReportsControls({
@@ -229,5 +230,75 @@ export function EmailReportButton() {
     <button className="btn xs sec" disabled={busy} onClick={send}>
       <Svg name="bell" size={14} /> {busy ? "Sending…" : "Email today's report"}
     </button>
+  );
+}
+
+/** One row in the pending-large-refund approval queue (owner request
+    2026-10-22). Admin/Owner only — the page itself only renders this
+    component for staff.role >= 3, and the server actions re-check the same
+    bar independently, so this is purely the UI half of that gate. */
+export function RefundApprovalRow({ id, orderTag, studentName, amount, via, reason, requestedByName }: {
+  id: string; orderTag: string; studentName: string; amount: number; via: string; reason: string; requestedByName: string;
+}) {
+  const router = useRouter();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [showReject, setShowReject] = useState(false);
+  const [rejectNote, setRejectNote] = useState("");
+
+  const approve = async () => {
+    if (!confirm(`Approve ${fmt(amount)} via ${via.toUpperCase()} for ${studentName} (order #${orderTag})? This moves real money.`)) return;
+    setBusy(true);
+    try {
+      const r = await approveRefundRequest(id);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast("Refund approved and sent");
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reject = async () => {
+    setBusy(true);
+    try {
+      const r = await rejectRefundRequest(id, rejectNote);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast("Refund request rejected");
+      setShowReject(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card pad mt8">
+      <div className="between">
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>{studentName} · #{orderTag}</div>
+          <div className="muted" style={{ fontSize: 12.5 }}>{fmt(amount)} via {via.toUpperCase()} · requested by {requestedByName}</div>
+          {reason && <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>"{reason}"</div>}
+        </div>
+      </div>
+      {!showReject ? (
+        <div className="row gap8 mt8">
+          <button className="btn xs" disabled={busy} onClick={approve}>Approve</button>
+          <button className="btn xs sec danger" disabled={busy} onClick={() => setShowReject(true)}>Reject</button>
+        </div>
+      ) : (
+        <div className="mt8">
+          <input className="input" placeholder="Why? (optional)" value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} />
+          <div className="row gap8 mt8">
+            <button className="btn xs sec danger" disabled={busy} onClick={reject}>{busy ? "…" : "Confirm reject"}</button>
+            <button className="btn xs sec" disabled={busy} onClick={() => setShowReject(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

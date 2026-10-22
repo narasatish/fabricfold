@@ -28,13 +28,21 @@ function ensureConfigured() {
   return true;
 }
 
-export async function sendPushTo(userKind: "student" | "staff", userId: string, payload: { title: string; body: string }) {
-  if (!ensureConfigured()) return;
+/** Returns how many of this user's devices actually received the push — 0
+    isn't an error (no subscriptions, or every send failed), just an honest
+    count a caller can use to decide whether this channel came through.
+    Added 2026-10-22 for notifyOwner's redundancy check: the function never
+    threw on a real failure (by design, a push outage shouldn't break the
+    caller), so a caller previously had no way to tell "delivered" from
+    "silently did nothing" — both looked like a clean resolve. */
+export async function sendPushTo(userKind: "student" | "staff", userId: string, payload: { title: string; body: string }): Promise<number> {
+  if (!ensureConfigured()) return 0;
   const subs = await db.pushSubscription.findMany({ where: { userKind, userId } });
-  await Promise.allSettled(
+  const results = await Promise.allSettled(
     subs.map(async (s) => {
       try {
         await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(payload));
+        return true;
       } catch (e: unknown) {
         const status = (e as { statusCode?: number }).statusCode;
         if (status === 404 || status === 410) {
@@ -43,7 +51,9 @@ export async function sendPushTo(userKind: "student" | "staff", userId: string, 
           console.error("Web push send failed", status, e);
           await logPushFailure(`send failed (${status ?? "no status"}) ${e instanceof Error ? e.message : String(e)}`);
         }
+        return false;
       }
     }),
   );
+  return results.filter((r) => r.status === "fulfilled" && r.value === true).length;
 }

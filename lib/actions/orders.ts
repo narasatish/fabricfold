@@ -7,11 +7,12 @@ import { featureOn, serviceOn } from "../features";
 import { enqueueSheetEvent, enqueuePaymentEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff, requireStaffPerm, assertSameCollege } from "../auth";
-import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, expressItemRate, collegeUsesCycleBasedPricing, resolveCollegeRates, validWeight, isMoneyAmount } from "../money";
+import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, expressItemRate, collegeUsesCycleBasedPricing, resolveCollegeRates, validWeight, isMoneyAmount, REFUND_APPROVAL_THRESHOLD } from "../money";
 import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit, touchStudentActivity } from "../notify";
 import { notifyOwner } from "../mail";
+import { cleanPhotos, MIN_DAMAGE_PHOTOS } from "../complaint-rules";
 
 /* Random N-digit string — used for the pickup OTP code (not order ids,
    see nextOrderId below, which used to share this helper before order ids
@@ -828,23 +829,16 @@ export type ActionResult = { ok: boolean; error?: string; id?: string; status?: 
    always a write-off: refunding just the urgent premium on a cycle order still
    means the wash happened, so handing the cycle back too would pay the student
    twice. Staff decide. */
-export async function refundOrder(orderId: string, amount: number, via: "upi" | "cash" | "credit", reason: string, restoreCycle = false): Promise<ActionResult> {
-  /* Was requireStaff(1) — ANY staff could give money back. Refunds are now a
-     named tool: Manager+ by default, grantable or revocable per person.
-     CORRECTION 2026-10-21: this comment was already here claiming the gate
-     existed, but the line below it still read `requireStaff(1)` — the
-     actual check was never added. staff-perms.test.ts's file-grep for
-     `requireStaffPerm("refunds")` only kept passing because redoOrder's own
-     (separate) fix happened to introduce that exact string elsewhere in
-     this file; it was never actually exercising this function. Fixed for
-     real this time, with a behavioral test
-     (tests/free-redo-perm-behavioral.test.ts) that calls refundOrder()
-     itself rather than grepping source text. */
-  const st = await requireStaffPerm("refunds");
-  if (!isMoneyAmount(amount)) return { ok: false, error: "Enter a valid amount (up to 2 decimals)" };
-  if (!["upi", "cash", "credit"].includes(via)) return { ok: false, error: "Pick how the refund is paid" };
-  reason = String(reason ?? "").trim();
-  if (reason.length > 200) return { ok: false, error: "Keep the reason under 200 characters" };
+
+/* The actual money-moving transaction, extracted so refundOrder (small,
+   immediate refunds) and approveRefundRequest (large, approved refunds)
+   share ONE hardened implementation rather than a second, divergent copy
+   of the same race-sensitive logic — every comment below describing a
+   found-and-fixed concurrency bug applies equally to both callers. `st` is
+   the staff member who actually authorizes the transfer: the requester for
+   a small refund, or the APPROVER for a large one (the audit trail should
+   say who pulled the trigger, not just who asked). */
+async function performRefund(st: { id: string; collegeId: string | null }, orderId: string, amount: number, via: "upi" | "cash" | "credit", reason: string, restoreCycle: boolean): Promise<ActionResult> {
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId }, include: { invoice: true, student: { include: { subscription: true } } } });
   assertSameCollege(st, o.collegeId);
   // Nothing capped this against what was actually billed — a typo (₹5000
@@ -907,6 +901,108 @@ export async function refundOrder(orderId: string, amount: number, via: "upi" | 
   await audit("Refund", `#${o.id.slice(-4)} ₹${amount} via ${via}${restoreCycle ? " + cycle returned" : ""}${reason ? " — " + reason : ""}`, st.id);
   bcast(o);
   return { ok: true };
+}
+
+/* Was requireStaff(1) — ANY staff could give money back. Refunds are now a
+   named tool: Manager+ by default, grantable or revocable per person.
+   CORRECTION 2026-10-21: this comment was already here claiming the gate
+   existed, but the line below it still read `requireStaff(1)` — the
+   actual check was never added. staff-perms.test.ts's file-grep for
+   `requireStaffPerm("refunds")` only kept passing because redoOrder's own
+   (separate) fix happened to introduce that exact string elsewhere in
+   this file; it was never actually exercising this function. Fixed for
+   real this time, with a behavioral test
+   (tests/free-redo-perm-behavioral.test.ts) that calls refundOrder()
+   itself rather than grepping source text.
+
+   2026-10-22: above REFUND_APPROVAL_THRESHOLD, this no longer moves money
+   at all — it creates a pending RefundRequest and returns `status:
+   "pending"`, so the UI can tell the staff member it needs Admin/Owner
+   sign-off instead of showing "refunded". */
+export async function refundOrder(orderId: string, amount: number, via: "upi" | "cash" | "credit", reason: string, restoreCycle = false): Promise<ActionResult> {
+  const st = await requireStaffPerm("refunds");
+  if (!isMoneyAmount(amount)) return { ok: false, error: "Enter a valid amount (up to 2 decimals)" };
+  if (!["upi", "cash", "credit"].includes(via)) return { ok: false, error: "Pick how the refund is paid" };
+  reason = String(reason ?? "").trim();
+  if (reason.length > 200) return { ok: false, error: "Keep the reason under 200 characters" };
+
+  if (amount <= REFUND_APPROVAL_THRESHOLD) {
+    return performRefund(st, orderId, amount, via, reason, restoreCycle);
+  }
+
+  const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
+  assertSameCollege(st, o.collegeId);
+  // Same cap check as performRefund's, run here too so a request that could
+  // never be approved (already fully refunded, or over what's left) is
+  // rejected immediately with a clear reason instead of sitting pending
+  // until an approver discovers the problem.
+  const refundableNow = Number(o.total) - Number(o.refundAmount || 0);
+  if (amount > refundableNow) {
+    return { ok: false, error: refundableNow > 0 ? `Only ₹${refundableNow} left to refund on this order` : "This order has already been fully refunded" };
+  }
+
+  const reqRow = await db.refundRequest.create({
+    data: { orderId: o.id, studentId: o.studentId, collegeId: o.collegeId, amount, via, reason, restoreCycle, requestedBy: st.id, status: "pending" },
+  });
+  await audit("Refund requested (pending approval)", `#${o.id.slice(-4)} ₹${amount} via ${via}${reason ? ` — ${reason}` : ""}`, st.id);
+  // Best-effort nudge to whoever can actually approve it — push only
+  // (email/WhatsApp stay reserved for notifyOwner's own event list); a
+  // missed push doesn't lose the request, it's still sitting in
+  // listPendingRefundRequests for the next Admin/Owner who opens Reports.
+  void (async () => {
+    const approvers = await db.staff.findMany({
+      where: { role: { gte: 3 }, active: true, OR: [{ collegeId: o.collegeId }, { collegeId: null }] },
+      select: { id: true },
+    });
+    const { sendPushTo } = await import("../push");
+    await Promise.all(approvers.map((a) => sendPushTo("staff", a.id, { title: "Refund needs approval", body: `#${o.id.slice(-4)} · ₹${amount} via ${via}` }).catch(() => 0)));
+  })();
+  return { ok: true, id: reqRow.id, status: "pending" };
+}
+
+/* Admin/Owner only (role >= 3) — deliberately a HIGHER bar than the
+   "refunds" tool itself (Manager+ by default), since the entire point of
+   this gate is a second, more senior person. Re-validates the cap against
+   a FRESH order read (the order could have been partially refunded by a
+   different, smaller refund in the meantime) before handing off to
+   performRefund, which re-validates AGAIN inside its own locked
+   transaction — belt and suspenders, same as every other money path here. */
+export async function approveRefundRequest(requestId: string): Promise<ActionResult> {
+  const st = await requireStaff(3);
+  const reqRow = await db.refundRequest.findUniqueOrThrow({ where: { id: requestId } });
+  assertSameCollege(st, reqRow.collegeId);
+  if (reqRow.status !== "pending") return { ok: false, error: `This request was already ${reqRow.status}` };
+
+  const result = await performRefund(st, reqRow.orderId, Number(reqRow.amount), reqRow.via as "upi" | "cash" | "credit", reqRow.reason, reqRow.restoreCycle);
+  if (!result.ok) return result;
+
+  await db.refundRequest.update({ where: { id: reqRow.id }, data: { status: "approved", decidedBy: st.id, decidedAt: new Date() } });
+  await audit("Refund approved", `#${reqRow.orderId.slice(-4)} ₹${reqRow.amount} via ${reqRow.via} (requested by ${reqRow.requestedBy})`, st.id);
+  return result;
+}
+
+/** Admin/Owner only. Declines a pending refund request without moving any money. */
+export async function rejectRefundRequest(requestId: string, note?: string): Promise<ActionResult> {
+  const st = await requireStaff(3);
+  const reqRow = await db.refundRequest.findUniqueOrThrow({ where: { id: requestId } });
+  assertSameCollege(st, reqRow.collegeId);
+  if (reqRow.status !== "pending") return { ok: false, error: `This request was already ${reqRow.status}` };
+
+  const decisionNote = (note || "").trim().slice(0, 200) || null;
+  await db.refundRequest.update({ where: { id: reqRow.id }, data: { status: "rejected", decidedBy: st.id, decidedAt: new Date(), decisionNote } });
+  await audit("Refund rejected", `#${reqRow.orderId.slice(-4)} ₹${reqRow.amount} via ${reqRow.via} (requested by ${reqRow.requestedBy})${decisionNote ? ` — ${decisionNote}` : ""}`, st.id);
+  return { ok: true };
+}
+
+/** Pending refund requests this staff member is allowed to act on (their own
+    campus, or every campus for an Owner). Used by the Reports/Admin screen's
+    approval queue. */
+export async function listPendingRefundRequests() {
+  const st = await requireStaff(3);
+  return db.refundRequest.findMany({
+    where: { status: "pending", ...(st.collegeId ? { collegeId: st.collegeId } : {}) },
+    orderBy: { createdAt: "asc" },
+  });
 }
 
 /* ---------- Free re-do ---------- */
@@ -1025,7 +1121,7 @@ async function restoreCycleFor(
   return true;
 }
 
-export async function cancelOrder(orderId: string): Promise<ActionResult> {
+export async function cancelOrder(orderId: string, evidence?: { note?: string; photos?: string[] }): Promise<ActionResult> {
   const st = await requireStaff(1);
   const ord = await db.order.findUniqueOrThrow({
     where: { id: orderId },
@@ -1055,10 +1151,25 @@ export async function cancelOrder(orderId: string): Promise<ActionResult> {
      (only these two named methods skip the gate) rather than an allow-list
      of methods to catch, so a future payment method is gated by default
      instead of silently slipping through ungated. */
-  if (ord.paid && ord.paymentMethod !== "cycle" && ord.paymentMethod !== "redo") {
+  const isPaidCashCancel = ord.paid && ord.paymentMethod !== "cycle" && ord.paymentMethod !== "redo";
+  if (isPaidCashCancel) {
     const { staffCan, PERM_DEFS } = await import("../perms");
     if (!staffCan(st, "refunds")) {
       return { ok: false as const, error: `This order is paid — cancelling it needs "${PERM_DEFS.refunds.label}" (ask the owner)` };
+    }
+    /* Owner request 2026-10-22: cancelling a PAID order with no refund
+       recorded is the same shape of fraud as skimming a refund — collect
+       cash, cancel the order, pocket it, no evidence of why. Damage
+       complaints already require MIN_DAMAGE_PHOTOS; this closes the same
+       gap for the other end of the money, reusing the exact same constant
+       rather than inventing a second, divergent threshold. */
+    const note = (evidence?.note || "").trim();
+    const pics = cleanPhotos(evidence?.photos);
+    if (note.length < 5) {
+      return { ok: false as const, error: "This order is paid — describe why before cancelling (this is the record if the student disputes it later)" };
+    }
+    if (pics.length < MIN_DAMAGE_PHOTOS) {
+      return { ok: false as const, error: `This order is paid — attach at least ${MIN_DAMAGE_PHOTOS} photos (${pics.length} so far)` };
     }
   }
 
@@ -1080,7 +1191,11 @@ export async function cancelOrder(orderId: string): Promise<ActionResult> {
          matches a row, so only it proceeds to restoreCycleFor. */
       const updated = await tx.order.updateMany({
         where: { id: ord.id, status: { notIn: ["cancelled", "collected"] } },
-        data: { status: "cancelled", cancelledAt: new Date() },
+        data: {
+          status: "cancelled",
+          cancelledAt: new Date(),
+          ...(isPaidCashCancel ? { cancelNote: (evidence?.note || "").trim(), cancelPhotos: cleanPhotos(evidence?.photos) } : {}),
+        },
       });
       if (updated.count === 0) throw new Error(ord.status === "collected" ? "This order has already been collected" : "This order is already cancelled");
       await tx.orderEvent.create({ data: { orderId: ord.id, status: "cancelled" } });
@@ -1093,7 +1208,7 @@ export async function cancelOrder(orderId: string): Promise<ActionResult> {
   }
   await db.otp.deleteMany({ where: { purpose: "pickup", refId: ord.id } });
   await pushNotif(ord.studentId, `Your order #${ord.id.slice(-4)} was cancelled.`, "status");
-  await audit("Cancel order", `#${ord.id.slice(-4)}`, st.id);
+  await audit("Cancel order", `#${ord.id.slice(-4)}${isPaidCashCancel ? ` · paid order, ${cleanPhotos(evidence?.photos).length} photos` : ""}`, st.id);
   bcast(ord);
   return { ok: true as const };
 }

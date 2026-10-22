@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { Qr } from "@/components/qr";
 import { fmt, dateStr, initials, STATUS_LABEL, upiLink } from "@/lib/format";
-import { CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, collegeUsesCycleBasedPricing, gstLineVisible } from "@/lib/money";
+import { CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, collegeUsesCycleBasedPricing, gstLineVisible, REFUND_APPROVAL_THRESHOLD } from "@/lib/money";
 import { isOverdue } from "@/lib/money";
 import { useToast, Sheet, Seg, Switch } from "@/components/chrome";
 import {
@@ -130,6 +130,14 @@ export default function StaffOrderClient({
   const [damagePhotos, setDamagePhotos] = useState<string[]>([]);
   const [damageComment, setDamageComment] = useState("");
   const [damageBusy, setDamageBusy] = useState(false);
+  // Cancelling a PAID (real cash/UPI) order — owner request 2026-10-22: the
+  // same evidence requirement as a damage report, since cancelling after
+  // payment with nothing recorded is the same shape of fraud as skimming a
+  // refund. An unpaid/cycle/redo cancel is unaffected — still the plain
+  // confirm() below, no extra friction for routine counter work.
+  const [showCancelEvidence, setShowCancelEvidence] = useState(false);
+  const [cancelPhotos, setCancelPhotos] = useState<string[]>([]);
+  const [cancelNote, setCancelNote] = useState("");
   // Shared across collect/pay/refund/compensation — each opens its own sheet,
   // so only one can ever be in flight at a time; a double-tap on any of these
   // money-moving buttons used to fire the action twice with nothing to stop it.
@@ -251,6 +259,27 @@ export default function StaffOrderClient({
     }
   };
 
+  // Handler: upload a photo for a paid-order cancellation (same store as intake/damage)
+  const handleCancelPhoto = async (file: File) => {
+    setUploadingPhoto(true);
+    try {
+      const fd = new FormData();
+      const { file: upload } = await compressImage(file);
+      fd.append("file", upload);
+      const res = await fetch("/api/upload/intake", { method: "POST", body: fd });
+      if (!res.ok) {
+        toast((await res.text()) || "Upload failed", true);
+        return;
+      }
+      const j = (await res.json()) as { key: string };
+      setCancelPhotos((p) => [...p, j.key]);
+    } catch {
+      toast("Upload failed", true);
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
   const submitDamage = async () => {
     setDamageBusy(true);
     try {
@@ -364,7 +393,11 @@ export default function StaffOrderClient({
 
   // Handler: refund
   const handleRefund = async () => {
-    if (!confirm(`Refund ${fmt(refundInput.amount)} via ${refundInput.via.toUpperCase()}? This cannot be undone from here.`)) return;
+    const overThreshold = refundInput.amount > REFUND_APPROVAL_THRESHOLD;
+    const confirmMsg = overThreshold
+      ? `Request a ${fmt(refundInput.amount)} refund via ${refundInput.via.toUpperCase()}? This is over ₹${REFUND_APPROVAL_THRESHOLD} — an Admin or Owner will need to approve it before any money moves.`
+      : `Refund ${fmt(refundInput.amount)} via ${refundInput.via.toUpperCase()}? This cannot be undone from here.`;
+    if (!confirm(confirmMsg)) return;
     setActionBusy(true);
     try {
       const r = await refundOrder(order.id, refundInput.amount, refundInput.via, refundInput.reason, refundInput.restoreCycle);
@@ -372,7 +405,7 @@ export default function StaffOrderClient({
         toast(r.error || "Failed", true);
         return;
       }
-      toast("Refund processed");
+      toast(r.status === "pending" ? "Sent for approval — an Admin or Owner needs to sign off" : "Refund processed");
       setShowRefundSheet(false);
       router.refresh();
     } catch (e) {
@@ -428,8 +461,16 @@ export default function StaffOrderClient({
     }
   };
 
+  // A paid cash/UPI cancel needs photo evidence (server-enforced too — this
+  // only decides which UI path to take, never the actual permission).
+  const isPaidCashCancel = order.paid && order.paymentMethod !== "cycle" && order.paymentMethod !== "redo";
+
   // Handler: cancel
   const handleCancel = async () => {
+    if (isPaidCashCancel) {
+      setShowCancelEvidence(true);
+      return;
+    }
     if (!confirm("Cancel this order? This cannot be undone.")) return;
     // Every other mutating action in this file (collect/pay/refund/comp) guards
     // against a double-tap with actionBusy; this one never got the same
@@ -441,6 +482,24 @@ export default function StaffOrderClient({
     setActionBusy(true);
     try {
       const r = await cancelOrder(order.id);
+      if (!r.ok) {
+        toast(r.error || "Failed", true);
+        return;
+      }
+      toast("Order cancelled");
+      router.push("/s");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const submitCancelWithEvidence = async () => {
+    if (actionBusy) return;
+    setActionBusy(true);
+    try {
+      const r = await cancelOrder(order.id, { note: cancelNote, photos: cancelPhotos });
       if (!r.ok) {
         toast(r.error || "Failed", true);
         return;
@@ -856,6 +915,85 @@ export default function StaffOrderClient({
               : damagePhotos.length < MIN_DAMAGE_PHOTOS
                 ? `Add ${MIN_DAMAGE_PHOTOS - damagePhotos.length} more photo${MIN_DAMAGE_PHOTOS - damagePhotos.length === 1 ? "" : "s"}`
                 : "Send to student"}
+          </button>
+        </div>
+      </Sheet>
+
+      {/* Cancel a PAID order — needs the same evidence as a damage report */}
+      <Sheet open={showCancelEvidence} onClose={() => setShowCancelEvidence(false)}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "8px" }}>Cancel this paid order</h2>
+          <div className="muted" style={{ fontSize: "12.5px", marginBottom: "16px" }}>
+            This order was already paid for. Describe why it's being cancelled and photograph
+            whatever's relevant (the bag, the garments, anything that explains it) — this is the
+            record if the student disputes it later.
+          </div>
+
+          <div className="field">
+            <label>Why is this being cancelled? <span style={{ color: "var(--red)" }}>*</span></label>
+            <textarea
+              className="input"
+              rows={3}
+              placeholder="e.g. Student asked to cancel before drop-off, cash refunded separately"
+              value={cancelNote}
+              onChange={(e) => setCancelNote(e.target.value)}
+            />
+          </div>
+
+          <div className="field">
+            <label>
+              Photos <span style={{ color: "var(--red)" }}>*</span>{" "}
+              <span className="muted">({cancelPhotos.length}/{MIN_DAMAGE_PHOTOS} minimum)</span>
+            </label>
+            {cancelPhotos.length > 0 && (
+              <div className="row wrap gap8" style={{ marginBottom: "10px" }}>
+                {cancelPhotos.map((key, i) => (
+                  <div key={key} style={{ position: "relative" }}>
+                    <img
+                      src={`/api/receipt?key=${encodeURIComponent(key)}`}
+                      alt={`Cancel evidence ${i + 1}`}
+                      style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 10, border: "1px solid var(--line)" }}
+                    />
+                    <button
+                      onClick={() => setCancelPhotos((p) => p.filter((k) => k !== key))}
+                      style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%", background: "var(--red)", color: "#fff", border: "none", fontSize: 12, lineHeight: 1, display: "grid", placeItems: "center" }}
+                      aria-label="Remove photo"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <label className="btn sec" style={{ cursor: "pointer" }}>
+              <Svg name="camera" size={16} />{" "}
+              {uploadingPhoto ? "Uploading…" : cancelPhotos.length ? "Add another photo" : "Take a photo"}
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                hidden
+                disabled={uploadingPhoto}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void handleCancelPhoto(f);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+
+          <button
+            className="btn danger mt16"
+            disabled={actionBusy || uploadingPhoto || cancelPhotos.length < MIN_DAMAGE_PHOTOS || cancelNote.trim().length < 5}
+            onClick={submitCancelWithEvidence}
+          >
+            <Svg name="x" size={18} />{" "}
+            {actionBusy
+              ? "Cancelling…"
+              : cancelPhotos.length < MIN_DAMAGE_PHOTOS
+                ? `Add ${MIN_DAMAGE_PHOTOS - cancelPhotos.length} more photo${MIN_DAMAGE_PHOTOS - cancelPhotos.length === 1 ? "" : "s"}`
+                : "Cancel order"}
           </button>
         </div>
       </Sheet>

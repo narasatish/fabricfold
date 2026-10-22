@@ -18,6 +18,35 @@ const istBoundary = (dateStr: string) => new Date(`${dateStr}T00:00:00+05:30`);
 /** The current month as "YYYY-MM" in IST (the server clock is UTC, which is a month behind for the first 5½ hours of every month). */
 export const istCurrentMonth = () => istDateStr().slice(0, 7);
 
+/* Fraud-visibility flag for the Reports page's "Staff activity" table.
+   Added 2026-10-22, owner request: "we don't need to be the only one
+   noticing when one person's refund/cancel/comp numbers look off." Not a
+   verdict — a busier counter naturally does more of all three — just a
+   highlight so a real outlier doesn't require the owner to do the mental
+   math themselves every time they open the page.
+
+   Rule, deliberately simple and auditable rather than a statistical model
+   nobody can explain to a confused staff member: flag anyone whose total
+   actions (refunds + cancels + comps) are at least OUTLIER_MULTIPLIER times
+   the team's average AND at least OUTLIER_MIN_ACTIONS in absolute terms —
+   the floor exists so one action on a quiet day with a near-zero average
+   doesn't light up as a false alarm. */
+export const OUTLIER_MULTIPLIER = 2;
+export const OUTLIER_MIN_ACTIONS = 3;
+
+export type StaffActivityRow = { staffId: string; refunds: number; cancels: number; comps: number };
+
+export function flagOutlierStaff<T extends StaffActivityRow>(rows: T[]): Set<string> {
+  const totals = rows.map((r) => r.refunds + r.cancels + r.comps);
+  if (!totals.length) return new Set();
+  const avg = totals.reduce((s, n) => s + n, 0) / totals.length;
+  const flagged = new Set<string>();
+  rows.forEach((r, i) => {
+    if (totals[i] >= OUTLIER_MIN_ACTIONS && totals[i] >= avg * OUTLIER_MULTIPLIER) flagged.add(r.staffId);
+  });
+  return flagged;
+}
+
 /** [from, to) of a calendar month in IST for a "YYYY-MM" string, or null if malformed. */
 export function istMonthRange(m: unknown): { from: Date; to: Date } | null {
   if (typeof m !== "string") return null;

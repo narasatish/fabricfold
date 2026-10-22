@@ -4,11 +4,11 @@ import { getSession } from "@/lib/auth";
 import { staffCan } from "@/lib/perms";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
-import { parsePeriod, computeReport } from "@/lib/report";
+import { parsePeriod, computeReport, flagOutlierStaff, OUTLIER_MULTIPLIER } from "@/lib/report";
 import { fmt } from "@/lib/format";
 import { TimeAgo } from "@/components/time-ago";
 import { Svg } from "@/components/icons";
-import ReportsControls, { ExpenseButton, EmailReportButton, CloseDayButton } from "./_components/ReportsClient";
+import ReportsControls, { ExpenseButton, EmailReportButton, CloseDayButton, RefundApprovalRow } from "./_components/ReportsClient";
 
 export default async function StaffReportsPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
   const sp = await searchParams;
@@ -36,6 +36,21 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
   const staffList = await db.staff.findMany(selectedCollegeId ? { where: { collegeId: selectedCollegeId } } : undefined);
   const byId = (id: string) => staffList.find((x) => x.id === id)?.name || id;
   const N = (x: unknown) => Number(x || 0);
+
+  /* Pending large-refund approvals (owner request 2026-10-22) — Admin/Owner
+     only (role >= 3), same bar as approveRefundRequest/rejectRefundRequest
+     themselves enforce server-side; this is purely a visibility gate, the
+     real one lives in lib/actions/orders.ts. */
+  const pendingRefunds = staff.role >= 3
+    ? await db.refundRequest.findMany({
+        where: { status: "pending", ...(selectedCollegeId ? { collegeId: selectedCollegeId } : {}) },
+        orderBy: { createdAt: "asc" },
+      })
+    : [];
+  const pendingRefundStudents = pendingRefunds.length
+    ? await db.student.findMany({ where: { id: { in: pendingRefunds.map((p) => p.studentId) } }, select: { id: true, name: true } })
+    : [];
+  const studentNameById = (id: string) => pendingRefundStudents.find((s2) => s2.id === id)?.name || id;
 
   // analytics — 8-week revenue bars, repeat rate, subscriber split
   // Unlike computeReport() just above (properly scoped), these ran
@@ -111,6 +126,7 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
   const staffActivity = [...activityById.values()].sort(
     (x, y) => (y.refunds + y.cancels + y.comps) - (x.refunds + x.cancels + x.comps),
   );
+  const outlierStaffIds = flagOutlierStaff(staffActivity);
 
   const qs = (over: Record<string, string>) => {
     const params = new URLSearchParams({ p: period.kind, ...(sp.d ? { d: sp.d } : {}), ...(sp.m ? { m: sp.m } : {}), ...(sp.y ? { y: sp.y } : {}), ...(selectedCollegeId ? { c: selectedCollegeId } : {}), ...over });
@@ -168,6 +184,25 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
           </>
         )}
 
+        {/* Pending large-refund approvals — Admin/Owner only */}
+        {pendingRefunds.length > 0 && (
+          <>
+            <div className="sec-title mt20">Refunds awaiting your approval ({pendingRefunds.length})</div>
+            {pendingRefunds.map((p) => (
+              <RefundApprovalRow
+                key={p.id}
+                id={p.id}
+                orderTag={p.orderId.slice(-4)}
+                studentName={studentNameById(p.studentId)}
+                amount={Number(p.amount)}
+                via={p.via}
+                reason={p.reason}
+                requestedByName={byId(p.requestedBy)}
+              />
+            ))}
+          </>
+        )}
+
         {/* Staff activity — refunds / cancellations / compensation by who did it */}
         {staffActivity.length > 0 && (
           <>
@@ -176,16 +211,26 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
               <div className="muted mb8" style={{ fontSize: "12px" }}>
                 Not a verdict on its own — a busier counter naturally shows more. Worth a look when one name stands well above the rest.
               </div>
-              {staffActivity.map((a) => (
-                <div key={a.staffId} className="kv" style={{ alignItems: "flex-start" }}>
-                  <span className="k">{a.name}</span>
-                  <span className="mono" style={{ textAlign: "right", fontSize: "12.5px" }}>
-                    {a.refunds > 0 && <div>{a.refunds} refund{a.refunds === 1 ? "" : "s"} · {fmt(a.refundAmt)}</div>}
-                    {a.cancels > 0 && <div>{a.cancels} paid cancel{a.cancels === 1 ? "" : "s"}</div>}
-                    {a.comps > 0 && <div>{a.comps} comp{a.comps === 1 ? "" : "s"} · {fmt(a.compAmt)}</div>}
-                  </span>
-                </div>
-              ))}
+              {staffActivity.map((a) => {
+                const flagged = outlierStaffIds.has(a.staffId);
+                return (
+                  <div key={a.staffId} className="kv" style={{ alignItems: "flex-start", ...(flagged ? { background: "var(--amber-soft)", borderRadius: 8, padding: "6px 8px", margin: "-6px -8px" } : {}) }}>
+                    <span className="k">
+                      {a.name}
+                      {flagged && (
+                        <span className="pill amber" style={{ marginLeft: 8, fontSize: "10.5px", padding: "2px 7px" }} title={`At least ${OUTLIER_MULTIPLIER}x the team average this period`}>
+                          ⚠ above average
+                        </span>
+                      )}
+                    </span>
+                    <span className="mono" style={{ textAlign: "right", fontSize: "12.5px" }}>
+                      {a.refunds > 0 && <div>{a.refunds} refund{a.refunds === 1 ? "" : "s"} · {fmt(a.refundAmt)}</div>}
+                      {a.cancels > 0 && <div>{a.cancels} paid cancel{a.cancels === 1 ? "" : "s"}</div>}
+                      {a.comps > 0 && <div>{a.comps} comp{a.comps === 1 ? "" : "s"} · {fmt(a.compAmt)}</div>}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </>
         )}

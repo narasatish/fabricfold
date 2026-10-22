@@ -332,6 +332,18 @@ model Order {
   dropSlotAt              DateTime? // booked drop-off window START (null = no slot booked)
   dropSlotEndAt           DateTime? // booked drop-off window END
   cancelledAt             DateTime?
+  /**
+   * Evidence for cancelling a PAID (real cash/UPI, not cycle/redo) order —
+   * owner request 2026-10-22: a cancel-after-payment is the same fraud shape
+   * as skimming a refund (collect cash, cancel the order, pocket it, no
+   * record of why), and only damage complaints required photos before this.
+   * Null/empty for every other cancellation (unpaid drafts, cycle, redo) —
+   * cancelOrder() only asks for these when the paid+refunds-permission gate
+   * already in place is reached. See MIN_DAMAGE_PHOTOS in complaint-rules.ts,
+   * reused here rather than a second, divergent photo-count constant.
+   */
+  cancelPhotos            Json? // storage keys, same convention as intakePhotos
+  cancelNote              String? // what staff saw/was told — required alongside the photos
   createdAt               DateTime  @default(now())
   receivedAt              DateTime? // SLA: due = receivedAt + (express ? 1 : 2) days
   // How many "please collect" nudges have gone out for this order. Counting
@@ -352,14 +364,48 @@ model Order {
    */
   gatewayOrderId          String?
 
-  timeline OrderEvent[]
-  tags     GarmentTag[]
-  payments Payment[]
-  invoice  Invoice?
+  timeline       OrderEvent[]
+  tags           GarmentTag[]
+  payments       Payment[]
+  invoice        Invoice?
+  refundRequests RefundRequest[]
 
   @@index([studentId])
   @@index([collegeId, status])
   @@index([collegeId, dropSlotAt]) // slot capacity counts + staff slot board
+}
+
+/**
+ * Two-person approval for a large refund — owner request 2026-10-22.
+ * Any staff with the "refunds" tool can still refund up to
+ * REFUND_APPROVAL_THRESHOLD alone (lib/actions/orders.ts), unchanged from
+ * before; above it, refundOrder() creates one of these instead of moving
+ * money, and only approveRefundRequest() (Admin/Owner, role >= 3 — a
+ * deliberately HIGHER bar than the "refunds" tool itself, since the whole
+ * point is a second, more senior person) actually executes the transfer,
+ * reusing the exact same hardened transaction logic refundOrder already
+ * uses for a small refund — this model is a gate in front of that logic,
+ * never a second, divergent copy of it.
+ */
+model RefundRequest {
+  id            String    @id @default(cuid())
+  orderId       String
+  order         Order     @relation(fields: [orderId], references: [id])
+  studentId     String
+  collegeId     String
+  amount        Decimal
+  via           String // upi | cash | credit
+  reason        String
+  restoreCycle  Boolean   @default(false)
+  requestedBy   String // staff id
+  status        String    @default("pending") // pending | approved | rejected
+  decidedBy     String? // staff id (Admin/Owner)
+  decidedAt     DateTime?
+  decisionNote  String?
+  createdAt     DateTime  @default(now())
+
+  @@index([collegeId, status])
+  @@index([orderId])
 }
 
 model OrderEvent {

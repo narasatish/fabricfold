@@ -3422,3 +3422,108 @@ they continue, there's a second source still to find.
 fix with no server-testable behavior; verified via `tsc --noEmit` clean and
 `npm run build` succeeding, plus live reproduction before/after in the
 browser).
+
+## ADDED 2026-10-22: four fraud/reliability features the owner asked for directly — outlier flagging, cancel-photo evidence, two-person refund approval, a real error alert
+
+Owner, after the deploy above: "what else we can improve or add in this app
+to make sure this is 100% working and fraud proof" — picked four of the
+ideas offered back: staff-activity outlier flagging, photo evidence on
+paid-order cancellations, two-person approval above ₹500 for refunds, and
+error alerting that actually reaches someone. Explicitly deferred: the
+known wash-day gap ("we don't need wash day at all for now").
+
+**1. `error-digest` never actually knew if the owner was told.**
+`sendMail`/`notifyOwner` swallowed every failure into `console.error` (dead
+on a serverless host) and always resolved as if it worked — so the route's
+own comment, "mark seen only after the mail is away, so a send failure
+means the next run reports them again," was never true; every run marked
+every error seen regardless of whether Resend actually delivered anything.
+Fixed: `sendMail` now returns a real boolean and logs a failure to
+ErrorLog (same pattern WhatsApp/push already use); `notifyOwner` now also
+pushes straight to every Owner-role staff member's own device —
+`sendPushTo("staff", ...)` existed but had zero callers before this, so
+this is the first time push infrastructure that already works for
+students got used for the owner — and returns true only if email or push
+plausibly delivered. `error-digest`'s route now only marks errors seen
+when `notifyOwner` reports success. `sendPushTo` itself was changed to
+return a real delivery count instead of void, since it never threw on
+failure by design and a caller had no other way to distinguish "delivered"
+from "silently did nothing." New test: `error-digest-delivery.test.ts`.
+
+**2. Staff-activity outlier flagging.** `lib/report.ts`'s new
+`flagOutlierStaff()` — a small, pure, deliberately simple function (>= 2x
+the team's average total actions AND >= 3 actions absolute, not a
+statistical model nobody at the counter could explain) — flags a staff
+row on the Reports page's existing "Staff activity" table with an amber
+"⚠ above average" badge. Not a verdict, same framing the table already
+had ("a busier counter naturally shows more"); just removes the mental
+math the owner was doing by eye every time. New test:
+`staff-activity-outlier.test.ts` (6 cases, including the exact 2x boundary
+and the absolute-floor guard against a false alarm on a quiet day).
+
+**3. Photo evidence on cancelling a PAID order.** Same fraud shape as
+skimming a refund — collect cash, cancel the order, pocket it, nothing to
+show for it — and damage complaints already required `MIN_DAMAGE_PHOTOS`
+(3) for exactly this "needs to survive a dispute later" reason.
+`cancelOrder()` now requires the same (a note >= 5 chars + 3+ photos)
+whenever the order is paid with real cash/UPI (unchanged: cycle and redo
+"payments" stay exempt, same exclusion list as the existing refunds-
+permission gate). Added `Order.cancelPhotos`/`cancelNote` columns. UI:
+`OrderClient.tsx`'s Cancel button opens an evidence sheet (reusing the
+exact photo-upload component/route the damage-report flow already uses)
+instead of a plain `confirm()` — only for a paid cash/UPI order; an
+unpaid/cycle/redo cancel is completely unaffected. New test:
+`cancel-paid-order-evidence.test.ts` (6 cases).
+
+**4. Two-person approval for a refund over ₹500.** New `RefundRequest`
+model. `refundOrder()` is now a thin wrapper: at or below the threshold,
+unchanged — `requireStaffPerm("refunds")` alone still executes it
+immediately. Above it, no money moves at all; it creates a pending
+request and pushes every Admin/Owner at that campus. Only
+`approveRefundRequest()` — `requireStaff(3)`, a deliberately HIGHER bar
+than the "refunds" tool itself (Manager+ by default), since the entire
+point is a SECOND, more senior person — actually executes the transfer,
+and it does so by calling the exact same `performRefund()` transaction
+`refundOrder()` itself uses for a small refund (extracted from the
+original single function specifically so there is one hardened
+implementation, not two, of the refund-cap/row-lock/cycle-restore logic
+multiple past audits already fought hard to get right). `rejectRefundRequest()`
+declines without moving anything. A new "Refunds awaiting your approval"
+section on the Reports page (Admin/Owner only) lists pending requests with
+Approve/Reject buttons. New test: `refund-approval-workflow.test.ts` (9
+cases — threshold boundary, pending creation, Manager cannot approve
+including a different Manager, Admin can approve and the money actually
+moves, Admin can reject, can't decide twice, re-validates the cap at
+approval time against a FRESH read — not just the stale request-time
+snapshot — and campus-scoped listing).
+
+**A real near-miss caught before it shipped:** the refund-threshold
+constant was first added as `export const REFUND_APPROVAL_THRESHOLD = 500`
+directly inside `lib/actions/orders.ts` — which has `"use server"` at the
+top. A Server Actions module may only export async functions; a plain
+constant there silently breaks every other export in the file (the exact
+reason `complaint-rules.ts` exists as its own module, per that file's own
+header comment). `tsc --noEmit` did NOT catch this — only `npm run build`
+(Next's own server-action export validation) would have. Moved the
+constant to `lib/money.ts` instead, caught by re-running the build before
+calling this done, not by assuming a clean `tsc` meant a clean build.
+
+Also updated three existing source-regex tests
+(`order-races.test.ts`, `deep-audit-fixes.test.ts`,
+`refund-input-guards.test.ts`) whose assertions were written against
+`refundOrder`'s old, now-moved internals — the underlying properties they
+guard (lock-then-recheck, validate-before-transaction) are still true,
+just relocated into `performRefund`; the tests were updated to match
+where the logic now actually lives, not weakened or deleted.
+
+Housekeeping: this round added columns to `Order` and a new
+`RefundRequest` table, which needed `prisma db push` against the local
+`public` schema AND the separate `ff_test`/`ff_agg` schemas several
+existing tests use directly (`tests/gateway.test.ts`,
+`tests/reports-aggregate.test.ts`) — both initially failed with "column
+does not exist" until synced; same pattern a prior session's payments
+audit already hit and documented for `gatewayOrderId`.
+
+Verified: `tsc --noEmit` clean, `npm run build` succeeds with the same
+route table, 1247/1247 tests pass, `npm run verify` green except the
+pre-existing, now-explicitly-deferred wash-day gap.

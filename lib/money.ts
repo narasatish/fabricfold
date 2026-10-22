@@ -82,6 +82,19 @@ export function shouldInvoiceOrder(o: { noGst?: boolean }, method: string, staff
    when billing a new order. */
 export const CYCLE_KG_LIMIT = 5;
 
+/* Owner request 2026-10-22: a refund above this needs a second, more senior
+   person's sign-off (lib/actions/orders.ts's refundOrder/approveRefundRequest)
+   — the same shape of control large organizations put on any "money out the
+   door" action above a threshold, so one person alone (even one with the
+   "refunds" tool granted) can't both decide AND execute a big payout
+   unchecked. Everything below this amount is unaffected: requireStaffPerm
+   ("refunds") alone is still enough, exactly as before this was added.
+   Lives here, not in lib/actions/orders.ts, because that file has "use
+   server" at the top — a module like that may only export async functions,
+   so a plain constant there would silently break every other export in the
+   file (same reason complaint-rules.ts exists as its own module). */
+export const REFUND_APPROVAL_THRESHOLD = 500;
+
 /* UI-only toggle (owner, Sep 2026: "remove the term tax and gst from the
    total app itself... just hide them for now. No we dont need new... I
    will inform if anything changes"). GST is still CALCULATED and stored

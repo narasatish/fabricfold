@@ -209,7 +209,13 @@ describe("money-moving buttons can't be double-tapped, and refund/compensation c
   });
   it("OrderClient: refund and compensation confirm before firing", () => {
     const src = read("app/s/orders/[id]/_components/OrderClient.tsx");
-    expect(src).toMatch(/if \(!confirm\(`Refund \$\{fmt\(refundInput\.amount\)\}/);
+    // 2026-10-22: a refund above REFUND_APPROVAL_THRESHOLD needs a
+    // different confirm message (it's a REQUEST, not an immediate refund —
+    // see the two-person approval workflow) — the confirm() call itself
+    // still always gates handleRefund either way.
+    expect(src).toMatch(/const confirmMsg = overThreshold/);
+    expect(src).toMatch(/if \(!confirm\(confirmMsg\)\) return;/);
+    expect(src).toMatch(/`Refund \$\{fmt\(refundInput\.amount\)\}/);
     // Compensation went credit-only Sep 23 (owner: "compensation should be
     // used as credits thats all") — the confirm copy changed from "...
     // compensation (${method})" to "... store credit" to match.
@@ -287,7 +293,11 @@ describe("three more concurrency/state bugs found by a deep hand-traced re-audit
   const subs = read("lib/actions/subscription.ts");
 
   it("refundOrder locks the order row and re-checks the refund cap against a fresh read, not the pre-transaction snapshot", () => {
-    const fn = orders.slice(orders.indexOf("export async function refundOrder"), orders.indexOf("export async function redoOrder"));
+    // 2026-10-22: this logic moved into performRefund, the shared
+    // transaction both refundOrder (small refunds) and approveRefundRequest
+    // (large, approved refunds) now call — see order-races.test.ts for the
+    // sibling test on the exact same rename.
+    const fn = orders.slice(orders.indexOf("async function performRefund"), orders.indexOf("export async function refundOrder"));
     expect(fn).toMatch(/const table = Prisma\.raw\(`\$\{dbSchemaPrefix\}"Order"`\);/);
     expect(fn).toMatch(/SELECT id FROM \$\{table\} WHERE id = \$\{o\.id\} FOR UPDATE/);
     // Select widened 2026-10-20 to also fetch usedCycle/service/cyclesCount —

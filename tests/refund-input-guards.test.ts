@@ -21,8 +21,14 @@ describe("refundOrder input guards", () => {
   it("caps the reason length", () => {
     expect(body).toMatch(/reason.*\.length > 200|\.slice\(0, 200\)/);
   });
-  it("all of it runs before the transaction", () => {
-    for (const g of ["includes(via)", "isMoneyAmount(amount)"]) expect(body.indexOf(g)).toBeLessThan(body.indexOf("$transaction"));
+  it("all of it runs before any money can move", () => {
+    // 2026-10-22: refundOrder no longer runs $transaction directly — it's a
+    // thin wrapper that validates first, then either calls performRefund
+    // (small amounts, immediate) or creates a pending RefundRequest (large
+    // amounts, needs approval). Either way, nothing below this validation
+    // can execute until it passes, so check against where refundOrder
+    // hands off instead of a literal "$transaction" that moved elsewhere.
+    for (const g of ["includes(via)", "isMoneyAmount(amount)"]) expect(body.indexOf(g)).toBeLessThan(body.indexOf("performRefund(st, orderId, amount, via, reason, restoreCycle)"));
   });
 });
 

@@ -17,6 +17,7 @@
    errors are still caught immediately); only the replay integration is
    added a macrotask later, after hydration has committed. */
 import * as Sentry from "@sentry/nextjs";
+import { isExpectedAuthNoise } from "./lib/sentry-filter";
 
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
@@ -28,6 +29,14 @@ if (dsn) {
     replaysSessionSampleRate: 0.05,
     replaysOnErrorSampleRate: 1.0,
     debug: false,
+    // Same AuthError ("not signed in") filter as the server/edge configs —
+    // see lib/sentry-filter.ts. The actual throw sites are all server-side,
+    // but this stays here too for parity in case a client-thrown error of
+    // the same shape ever reaches this SDK instance.
+    beforeSend(event, hint) {
+      if (isExpectedAuthNoise(hint)) return null;
+      return event;
+    },
   });
 
   if (typeof window !== "undefined") {

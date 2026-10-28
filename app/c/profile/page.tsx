@@ -1,4 +1,4 @@
-import { requireStudent } from "@/lib/auth";
+import { requireStudentOrRedirect } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { initials, loyaltyBadge } from "@/lib/format";
@@ -7,7 +7,7 @@ import Link from "next/link";
 import ProfileClient from "./_components/ProfileClient";
 
 export default async function ProfilePage() {
-  const student = await requireStudent();
+  const student = await requireStudentOrRedirect();
   const college = student.college;
   const tier = loyaltyBadge(student.lifetimePieces);
   // The printed customer ID is the bag code (e.g. G1424), not the internal

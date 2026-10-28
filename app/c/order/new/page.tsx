@@ -1,4 +1,4 @@
-import { requireStudent } from "@/lib/auth";
+import { requireStudentOrRedirect } from "@/lib/auth";
 import { featureOn, serviceOn, type FeatureKey } from "@/lib/features";
 import { db } from "@/lib/db";
 import { collegeUsesCycleBasedPricing, resolveCollegeRates, type RateTable } from "@/lib/money";
@@ -9,7 +9,7 @@ import { dayLabel } from "@/lib/slots";
 import { redirect } from "next/navigation";
 
 export default async function OrderNewPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
-  const student = await requireStudent();
+  const student = await requireStudentOrRedirect();
   const appConfig = await db.appConfig.findUnique({ where: { id: "main" } });
   const college = await db.college.findUnique({ where: { id: student.collegeId } });
 

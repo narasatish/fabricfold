@@ -1,4 +1,4 @@
-import { requireStudent } from "@/lib/auth";
+import { requireStudentOrRedirect } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { fmt, dateStr, STATUS_LABEL } from "@/lib/format";
@@ -11,7 +11,7 @@ import { notFound } from "next/navigation";
 import OrderDetailClient from "./_components/OrderDetailClient";
 
 export default async function OrderDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string>> }) {
-  const student = await requireStudent();
+  const student = await requireStudentOrRedirect();
   const { id } = await params;
   const { pendingDraft } = await searchParams;
 

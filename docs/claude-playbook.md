@@ -3527,3 +3527,83 @@ audit already hit and documented for `gatewayOrderId`.
 Verified: `tsc --noEmit` clean, `npm run build` succeeds with the same
 route table, 1247/1247 tests pass, `npm run verify` green except the
 pre-existing, now-explicitly-deferred wash-day gap.
+
+## RESOLVED 2026-10-28: a real production crash ("Not signed in" on /c/profile) found via a live Sentry alert — 9 pages missing the guard app/c/layout.tsx already had, plus Sentry was never told this class of error is routine
+
+Owner forwarded a real Sentry email: `Error: Not signed in`, `POST
+https://fabricfold.in/c/profile`, production. Investigated rather than
+dismissed as noise.
+
+**Real bug: every `/c` page called `requireStudent()` a SECOND time,
+unguarded.** `app/c/layout.tsx` already does this correctly — wrapped in
+try/catch, redirecting `AuthError` to `/login`. But all 9 pages under
+`/c` (`page.tsx`, `profile`, `wallet`, `orders`, `orders/[id]`, `order/
+new`, `pay/[id]`, `notifications`, `help`) call `requireStudent()` again
+directly, to get the full student row for their own use — with no guard
+at all. A session expiring or being revoked in the gap between the
+layout's check and the page's own render (routine: a 365-day cookie
+finally expiring, "sign out everywhere" from another device, a stale tab
+surviving a deploy) threw `AuthError` straight out of the page's Server
+Component render. Next's root `error.tsx` caught it, showed the generic
+broken-error screen instead of a quiet bounce to `/login`, and reported
+it to Sentry AND this app's own `/api/error` → `notifyOwner` digest —
+twice, on every occurrence. Not a rare edge case: any student with a tab
+open is one revoked session away from hitting this on their very next
+tap.
+
+Fixed with one new helper, not nine ad-hoc try/catches:
+`requireStudentOrRedirect()` (`lib/auth.ts`) — same return value as
+`requireStudent()` on a valid session, redirects to `/login` instead of
+throwing otherwise. Swapped all 9 pages to call it (the layout keeps
+calling `requireStudent()` directly, unchanged — it already has its own
+try/catch). New test: `require-student-or-redirect.test.ts` (5 cases:
+valid session returns the student; no session redirects; a STAFF session
+redirects; a revoked epoch redirects; confirms the redirect path goes
+through the same `instanceof AuthError` check, not a catch-everything
+that would also hide a real bug).
+
+Also updated the existing `tests/route-guards.test.ts` — its
+`CUSTOMER_GUARD` regex only matched literal `requireStudent(` and would
+have silently stopped enforcing "every /c page checks for itself" the
+moment a page switched to the new helper. Widened to match either name;
+the test's actual purpose (every page establishes who's asking before
+reading anything) is unchanged, just not blind to its own fix.
+
+**Second finding, same investigation: Sentry had no filter for this
+error class at all.** `AuthError` (`lib/auth.ts`) is thrown from exactly
+12 call sites, all inside `requireStudent`/`requireStaff` — a single,
+well-defined, INTENTIONAL "not authenticated" signal every server action
+in this codebase is written to catch and handle gracefully. It fires
+constantly in ordinary use and was never a bug by itself (the crash above
+was the real bug — an unguarded call turning an expected signal into an
+unhandled one). But `sentry.server.config.ts`/`sentry.edge.config.ts`/
+`instrumentation-client.ts` had no `beforeSend` filter whatsoever, so
+every occurrence — not just the 9-page bug above, but the NORMAL cases
+every other action already handles correctly with a toast or a redirect —
+was reported to Sentry as a production error and could trigger Sentry's
+own alert emails. Added `lib/sentry-filter.ts`'s `isExpectedAuthNoise()`,
+wired into all three Sentry configs via `beforeSend`: drops any event
+whose underlying exception has `name === "AuthError"`. Checks the
+constructor name rather than `instanceof AuthError` on purpose — these
+config files load very early (edge runtime, server boot) and importing
+`lib/auth.ts` there would pull `next/headers` into the Sentry init path
+unnecessarily.
+
+Why this matters beyond cosmetics: this same week's error-digest fix
+(`error-digest` now only marks `ErrorLog` rows seen once `notifyOwner`
+actually delivers, and pushes straight to the owner's device) makes every
+reported "error" louder and more immediate than before. An alerting
+channel that also fires on routine session expiry teaches the owner to
+ignore it — worse than no alerting. This filter keeps the signal real.
+
+No test for the Sentry filter itself (it's a config-time `beforeSend`
+callback with no server-testable behavior beyond "does it return null for
+the right shape of event," which `isExpectedAuthNoise()`'s own
+implementation is small and direct enough to read in one glance) —
+verified via `tsc --noEmit` clean and `npm run build` succeeding with
+Sentry's config files compiling cleanly.
+
+`npm test`: 1252/1252 passing (one new test file, one existing file's
+regex widened to match, not weakened). `npm run build` succeeds with the
+same route table. `npm run verify` green except the pre-existing
+wash-day gap.

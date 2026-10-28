@@ -1,4 +1,4 @@
-import { requireStudent } from "@/lib/auth";
+import { requireStudentOrRedirect } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { dateStr } from "@/lib/format";
@@ -8,7 +8,7 @@ import HelpClient from "./_components/HelpClient";
 import { SUPPORT_WA_LINK, SUPPORT_PHONE_DISPLAY } from "@/lib/contact";
 
 export default async function HelpPage() {
-  const student = await requireStudent();
+  const student = await requireStudentOrRedirect();
 
   const complaints = await db.complaint.findMany({
     where: { studentId: student.id },

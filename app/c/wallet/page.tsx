@@ -1,4 +1,4 @@
-import { requireStudent } from "@/lib/auth";
+import { requireStudentOrRedirect } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { fmt, dateStr } from "@/lib/format";
@@ -10,7 +10,7 @@ const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFol
 type Bucket = { service: string; cycles: number; used?: number; kgPerCycle: number };
 
 export default async function WalletPage() {
-  const student = await requireStudent();
+  const student = await requireStudentOrRedirect();
   const sub = student.subscription;
 
   const subBuckets = ((sub?.buckets as unknown as Bucket[]) || []).map((b) => ({ ...b, used: b.used || 0, label: SERVICE_LABEL[b.service] || b.service }));

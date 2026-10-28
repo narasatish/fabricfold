@@ -2,6 +2,7 @@
    set, Sentry.init is never called and the SDK is inert (no build/runtime
    impact). Runs alongside our own /api/error logger, not instead of it. */
 import * as Sentry from "@sentry/nextjs";
+import { isExpectedAuthNoise } from "./lib/sentry-filter";
 
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
@@ -13,5 +14,9 @@ if (dsn) {
     enableLogs: true,
     // Don't spam the console during local dev
     debug: false,
+    beforeSend(event, hint) {
+      if (isExpectedAuthNoise(hint)) return null;
+      return event;
+    },
   });
 }

@@ -1,4 +1,4 @@
-import { requireStudent } from "@/lib/auth";
+import { requireStudentOrRedirect } from "@/lib/auth";
 import { featureOn, type FeatureKey } from "@/lib/features";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
@@ -8,7 +8,7 @@ import Link from "next/link";
 import HomeClient from "./_components/HomeClient";
 
 export default async function CustomerHome() {
-  const student = await requireStudent();
+  const student = await requireStudentOrRedirect();
   const college = student.college;
   const appConfig = await db.appConfig.findUnique({ where: { id: "main" } });
 

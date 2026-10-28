@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { SignJWT, jwtVerify } from "jose";
 import { db } from "./db";
 
@@ -85,6 +86,33 @@ export async function requireStudent() {
      Owner turns a campus off, with nothing else to remember to check. */
   if (!stu.college.active) throw new AuthError("This campus is temporarily unavailable — please check with the counter.");
   return stu;
+}
+
+/* Found 2026-10-28 via a real Sentry alert ("Not signed in" crashing
+   /c/profile): app/c/layout.tsx already calls requireStudent() wrapped in
+   try/catch, redirecting AuthError to /login — the correct pattern. Every
+   individual page under /c calls requireStudent() AGAIN directly (to get
+   the full student row for its own use), but none of them had the same
+   try/catch — so a session that expires/gets revoked in the gap between
+   the layout's check and the page's own render (routine: cookie expiry,
+   "sign out everywhere" from another device, a stale tab surviving a
+   deploy) threw straight out of the page's Server Component render. Next's
+   App Router error boundary (app/error.tsx) caught it and showed the
+   generic broken-error screen instead of a quiet bounce to /login — and
+   reported it to Sentry and this app's own error-digest as a real bug,
+   twice, on every occurrence. Not rare: any student with an open tab is
+   one revoked session away from hitting this on their very next tap.
+
+   Every `const student = await requireStudent();` at the top of a /c
+   page should use this instead — same return value, same shape, but
+   redirects instead of crashing. */
+export async function requireStudentOrRedirect() {
+  try {
+    return await requireStudent();
+  } catch (e) {
+    if (e instanceof AuthError) redirect("/login");
+    throw e;
+  }
 }
 
 /** Role levels: 1 Counter · 2 Manager · 3 Admin · 4 Owner — enforced HERE, server-side. */

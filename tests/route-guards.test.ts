@@ -40,7 +40,15 @@ const CUSTOMER_PAGES = pagesUnder("app/c");
    either a requireStaff/requireStudent call (which hits the database and
    checks active + epoch), or an explicit session-mode check with a redirect. */
 const STAFF_GUARD = /requireStaff\(|\.mode !== "staff"/;
-const CUSTOMER_GUARD = /requireStudent\(|\.mode !== "customer"/;
+// 2026-10-28: every /c page.tsx was changed from requireStudent() to
+// requireStudentOrRedirect() — same guard (still hits the database, still
+// checks active + epoch), but redirects to /login on failure instead of
+// throwing AuthError straight out of the page's render. See lib/auth.ts
+// and the real Sentry alert ("Not signed in" crashing /c/profile) that
+// found the gap this closed. requireStudent() itself (unprefixed) stays
+// matched too, since app/c/layout.tsx still correctly calls that one
+// directly, inside its own try/catch.
+const CUSTOMER_GUARD = /requireStudent(OrRedirect)?\(|\.mode !== "customer"/;
 
 describe("the enumeration itself is trustworthy", () => {
   it("finds the staff pages", () => {

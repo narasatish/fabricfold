@@ -1,4 +1,4 @@
-import { requireStudent } from "@/lib/auth";
+import { requireStudentOrRedirect } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import { onlinePaymentAllowed } from "@/lib/features";
@@ -6,7 +6,7 @@ import { notFound, redirect } from "next/navigation";
 import PayClient from "./_components/PayClient";
 
 export default async function PayPage({ params }: { params: Promise<{ id: string }> }) {
-  const student = await requireStudent();
+  const student = await requireStudentOrRedirect();
   const { id } = await params;
 
   const order = await db.order.findUnique({ where: { id } });

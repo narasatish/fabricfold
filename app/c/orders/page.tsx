@@ -1,9 +1,9 @@
-import { requireStudent } from "@/lib/auth";
+import { requireStudentOrRedirect } from "@/lib/auth";
 import { db } from "@/lib/db";
 import OrdersClient from "./_components/OrdersClient";
 
 export default async function OrdersPage() {
-  const student = await requireStudent();
+  const student = await requireStudentOrRedirect();
   const allOrders = await db.order.findMany({
     where: { studentId: student.id },
     orderBy: { createdAt: "desc" },

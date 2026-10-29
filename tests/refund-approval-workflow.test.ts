@@ -225,3 +225,191 @@ describe("refunds above the threshold create a pending request and move no money
     await expect(orders.approveRefundRequest(r.id!)).rejects.toThrow();
   });
 });
+
+/* Scoped re-audit 2026-10-29: performRefund (extracted from the original
+   single refundOrder function) is shared by both the small-refund path and
+   approveRefundRequest. Confirm the approval path exercises EVERY piece of
+   that shared logic, not just the Payment row — in particular the
+   proportional GST credit note refundOrder's original single-function form
+   always created for an invoiced order. */
+describe("approveRefundRequest interacting with the rest of the money system", () => {
+  async function mkInvoicedUpiOrder(subtotal: number, gst: number) {
+    const id = `REFAPPRINV${++orderSeq}`;
+    return db.order.create({
+      data: {
+        id, studentId: "444444", collegeId: "col1", service: "washIron",
+        items: [{ label: "Garment", rate: 10, qty: Math.round(subtotal / 10) }],
+        declaredPieces: Math.round(subtotal / 10), subtotal, gst, gstPctSnapshot: 18,
+        total: subtotal + gst, status: "received", paid: false, noGst: false,
+      },
+    });
+  }
+
+  it("approving a refund above the threshold on an invoiced order creates a proportional CreditNote, not just a Payment row", async () => {
+    await asManager();
+    const o = await mkInvoicedUpiOrder(1000, 180); // total 1180
+    const paid = await orders.recordPay(o.id, "upi", false, false);
+    expect(paid.ok).toBe(true);
+    const invoice = await db.invoice.findUnique({ where: { orderId: o.id } });
+    expect(invoice).toBeTruthy();
+
+    const r = await orders.refundOrder(o.id, 600, "upi", "invoiced refund above threshold");
+    expect(r.status).toBe("pending");
+
+    await asAdmin();
+    const approved = await orders.approveRefundRequest(r.id!);
+    expect(approved.ok).toBe(true);
+
+    const creditNote = await db.creditNote.findFirst({ where: { orderId: o.id } });
+    expect(creditNote).toBeTruthy();
+    expect(Number(creditNote!.total)).toBe(600);
+    // ratio = 600/1180; gst = round(180 * ratio * 100) / 100
+    const expectedGst = Math.round(180 * (600 / 1180) * 100) / 100;
+    expect(Number(creditNote!.gst)).toBe(expectedGst);
+    expect(Number(creditNote!.subtotal)).toBe(Math.round((600 - expectedGst) * 100) / 100);
+    expect(creditNote!.invoiceId).toBe(invoice!.id);
+    expect(creditNote!.by).toBe(admin.id);
+  });
+
+  it("a campus-scoped Admin cannot approve or reject a pending request from a DIFFERENT campus", async () => {
+    await db.college.create({ data: { id: "col2", name: "Other College", features: {} } });
+    const otherAdmin = await db.staff.create({ data: { phone: "9000000053", name: "Admin2", role: 3, collegeId: "col2" } });
+    await auth.createSession({ mode: "staff", staffId: otherAdmin.id, role: otherAdmin.role, epoch: otherAdmin.sessionEpoch });
+
+    await asManager(); // col1 manager requests the refund
+    const o = await mkPaidOrder(600);
+    const r = await orders.refundOrder(o.id, 600, "cash", "cross-campus block check");
+    expect(r.status).toBe("pending");
+
+    // Switch to the col2 Admin and try to act on a col1 request directly.
+    await auth.createSession({ mode: "staff", staffId: otherAdmin.id, role: otherAdmin.role, epoch: otherAdmin.sessionEpoch });
+    await expect(orders.approveRefundRequest(r.id!)).rejects.toThrow();
+    await expect(orders.rejectRefundRequest(r.id!)).rejects.toThrow();
+
+    const reqRow = await db.refundRequest.findUniqueOrThrow({ where: { id: r.id! } });
+    expect(reqRow.status).toBe("pending");
+  });
+
+  it("restores the cycle against the CURRENT subscription state at approval time, not a snapshot captured when the refund was requested", async () => {
+    // Student starts with cyclesUsed: 1 (just this order's own burn).
+    const sub = await db.subscription.create({
+      data: {
+        studentId: "444444", active: true, plan: "Bronze", cyclesTotal: 10, cyclesUsed: 1, kgPerCycle: 7,
+        buckets: [{ service: "washFold", cycles: 10, used: 1, kgPerCycle: 7 }],
+        startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000),
+      },
+    });
+    const o = await db.order.create({
+      data: {
+        id: `REFAPPRCYC${++orderSeq}`, studentId: "444444", collegeId: "col1", service: "washFold",
+        items: [{ label: "Cycle", rate: 600, qty: 1 }], cyclesCount: 1,
+        subtotal: 600, gst: 0, gstPctSnapshot: 18, total: 600,
+        paid: true, paymentMethod: "cash", usedCycle: true, status: "collected",
+      },
+    });
+    await db.cycleUse.create({ data: { subscriptionId: sub.id, orderId: o.id } });
+
+    await asManager();
+    const r = await orders.refundOrder(o.id, 600, "cash", "cycle refund above threshold", true);
+    expect(r.status).toBe("pending");
+
+    // While the refund sits pending, a SECOND, unrelated order burns another
+    // cycle on the same subscription — modeling normal usage in the approval
+    // delay window (the scenario the task description calls out: plan
+    // upgrade or cycle usage from another order between request and
+    // approval). cyclesUsed is now 2, not the 1 captured at request time.
+    await db.subscription.update({
+      where: { id: sub.id },
+      data: { cyclesUsed: 2, buckets: [{ service: "washFold", cycles: 10, used: 2, kgPerCycle: 7 }] },
+    });
+
+    await asAdmin();
+    const approved = await orders.approveRefundRequest(r.id!);
+    expect(approved.ok).toBe(true);
+
+    const subAfter = await db.subscription.findUniqueOrThrow({ where: { id: sub.id } });
+    // Must decrement off the FRESH value (2 -> 1), not the stale
+    // request-time value (which would wrongly compute 1 -> 0 and lose the
+    // second order's own still-valid cycle burn).
+    expect(subAfter.cyclesUsed).toBe(1);
+    const buckets = subAfter.buckets as unknown as { service: string; used: number }[];
+    expect(buckets.find((b) => b.service === "washFold")!.used).toBe(1);
+  });
+
+  /* The approval-delay window makes a real-world race realistic that was
+     previously a near-impossible microsecond collision: a pending refund
+     (restoreCycle: true) can sit for minutes/hours while an Admin reviews
+     it, during which a DIFFERENT staff member can cancel the very same
+     order (cancelOrder also always restores the cycle — "the wash never
+     happened"). cancelOrder reads the order ONCE, before its own
+     transaction starts, and hands that pre-transaction snapshot straight
+     to restoreCycleFor — unlike performRefund, which was already fixed
+     (2026-10-20) to re-read the order FRESH, inside the lock, specifically
+     so two cycle-restoring operations on the same order can't both see
+     usedCycle: true. If an approveRefundRequest(restoreCycle: true) and a
+     cancelOrder on the same order genuinely overlap, cancelOrder can still
+     restore off its own stale snapshot even after the refund's restore has
+     already landed — a real double-credit of one cycle. */
+  it("cancelOrder does not double-restore a cycle that a concurrent, already-approved refund already restored", async () => {
+    // cyclesUsed starts at 2 — as if a SECOND, untouched order elsewhere
+    // also burned a cycle (same deliberate choice refund-race-behavioral.
+    // test.ts makes) — so a double-restore shows up as a WRONG final count
+    // (0, i.e. restored twice) vs. the correct outcome (1, i.e. restored
+    // once), rather than both landing on the same clamped floor where a
+    // starting value of 1 would hide the bug behind Math.min's own clamp.
+    await db.student.create({ data: { id: "444445", phone: "9999900005", name: "Refund Student 2", collegeId: "col1" } });
+    const sub = await db.subscription.create({
+      data: {
+        studentId: "444445", active: true, plan: "Bronze", cyclesTotal: 10, cyclesUsed: 2, kgPerCycle: 7,
+        buckets: [{ service: "washFold", cycles: 10, used: 2, kgPerCycle: 7 }],
+        startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000),
+      },
+    });
+    const o = await db.order.create({
+      data: {
+        id: `REFAPPRCYC2${++orderSeq}`, studentId: "444445", collegeId: "col1", service: "washFold",
+        items: [{ label: "Cycle", rate: 600, qty: 1 }], cyclesCount: 1,
+        subtotal: 600, gst: 0, gstPctSnapshot: 18, total: 600,
+        paid: true, paymentMethod: "cash", usedCycle: true, status: "ready",
+      },
+    });
+    await db.cycleUse.create({ data: { subscriptionId: sub.id, orderId: o.id } });
+
+    await asManager();
+    const r = await orders.refundOrder(o.id, 600, "cash", "cycle refund, racing a cancel", true);
+    expect(r.status).toBe("pending");
+
+    // Force the exact interleaving a real race would produce, rather than
+    // hoping Promise.all happens to land on it: let cancelOrder take its
+    // pre-transaction snapshot of the order (stale `usedCycle: true`),
+    // THEN let the concurrent approval fully commit (flipping usedCycle to
+    // false and restoring the cycle for real), and only THEN let
+    // cancelOrder's own transaction run against that now-stale snapshot.
+    const originalFindFirst = db.order.findUniqueOrThrow.bind(db.order);
+    let intercepted = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const spy = vi.spyOn(db.order, "findUniqueOrThrow").mockImplementation(((...args: any[]) => (async () => {
+      const result = await (originalFindFirst as any)(...args);
+      if (!intercepted && (result as { id?: string })?.id === o.id) {
+        intercepted = true;
+        spy.mockRestore();
+        await asAdmin();
+        const approveResult = await orders.approveRefundRequest(r.id!);
+        expect(approveResult.ok).toBe(true);
+      }
+      return result;
+    })()) as any);
+
+    await asAdmin();
+    const cancelResult = await orders.cancelOrder(o.id, { note: "racing the approval", photos: ["p1.jpg", "p2.jpg", "p3.jpg"] });
+    expect(cancelResult.ok).toBe(true);
+
+    const subAfter = await db.subscription.findUniqueOrThrow({ where: { id: sub.id } });
+    // This order burned exactly ONE cycle, ever. Restored once: 2 -> 1.
+    // A double-restore (once from the cancel, once from the refund) would
+    // wrongly drive it to 0.
+    expect(subAfter.cyclesUsed).toBe(1);
+    const buckets = subAfter.buckets as unknown as { service: string; used: number }[];
+    expect(buckets.find((b) => b.service === "washFold")!.used).toBe(1);
+  });
+});

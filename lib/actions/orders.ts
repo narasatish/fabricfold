@@ -1199,8 +1199,28 @@ export async function cancelOrder(orderId: string, evidence?: { note?: string; p
       });
       if (updated.count === 0) throw new Error(ord.status === "collected" ? "This order has already been collected" : "This order is already cancelled");
       await tx.orderEvent.create({ data: { orderId: ord.id, status: "cancelled" } });
+      /* `ord` above was read OUTSIDE this transaction, before the evidence
+         checks even ran — stale by the time we get here. The updateMany
+         guard right above only protects against a second concurrent CANCEL
+         of the same order (its own documented fix); it does nothing against
+         a concurrent approveRefundRequest(restoreCycle: true) on the SAME
+         order, which doesn't touch `status` at all and so sails straight
+         through that guard. If that refund's transaction commits (flipping
+         usedCycle to false and decrementing the subscription for real) in
+         the gap between our pre-transaction read and this point, handing
+         restoreCycleFor the stale `ord.usedCycle: true` double-restores the
+         same cycle — the exact bug class performRefund was already fixed
+         for (2026-10-20) by re-reading fresh inside the lock, just never
+         applied here. Re-read fresh now, after our own update has taken
+         its row lock, so we see whatever the other transaction actually
+         committed. Found 2026-10-29 re-auditing how the two-person refund
+         approval's pending-delay window interacts with cancelOrder. */
+      const freshOrd = await tx.order.findUniqueOrThrow({
+        where: { id: ord.id },
+        select: { id: true, usedCycle: true, service: true, cyclesCount: true },
+      });
       // Cancelling means the wash never happened, so the cycle always goes back.
-      await restoreCycleFor(tx, ord, ord.student.subscription);
+      await restoreCycleFor(tx, freshOrd, ord.student.subscription);
       await touchStudentActivity(tx, ord.studentId);
     }, { timeout: 15_000 }); // restoreCycleFor locks the subscription row, which can queue under concurrent cancels
   } catch (e) {

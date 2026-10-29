@@ -1,6 +1,81 @@
 # FabricFold playbook
 
-## RESOLVED 2026-10-21: rate-limiting/CSRF/perms/session-revocation sweep — one real gap found, `POST /api/report/daily` ignored the "reports" tool revocation
+## Reviewed 2026-10-29: refund-approval UI, cancel-evidence/damage photo uploads, refund-threshold authority, outlier-flagging scale, and the requireStudentOrRedirect swap — all five scoped areas confirmed sound, no new bugs
+
+Owner asked for continued deep testing of the most recent batch of changes:
+the two-person refund-approval workflow, cancel-order photo evidence,
+staff-activity outlier flagging, and the `requireStudentOrRedirect`
+production-crash fix (all documented in the entries directly below this
+one, 2026-10-22 and 2026-10-28). Code-reading audit only, five specific
+angles the owner wanted re-checked:
+
+**1. Busy-state/error-handling robustness in the new sheets**
+(`OrderClient.tsx`'s cancel-evidence and refund sheets,
+`ReportsClient.tsx`'s `RefundApprovalRow`). Every async handler that calls
+`approveRefundRequest`/`rejectRefundRequest`/`cancelOrder`/`refundOrder` —
+`approve`, `reject`, `handleCancel`, `submitCancelWithEvidence`,
+`handleRefund` — already wraps its `await` in try/catch/finally, with the
+busy flag (`busy`/`actionBusy`) reset in `finally` regardless of whether
+the server action resolves normally, returns `{ok:false}`, or throws. A
+network failure or an unhandled server-action crash surfaces as a toast
+("Failed" or the thrown error's message) and the button un-disables; no
+path skips the `finally` block. Nothing to fix.
+
+**2. Photo-upload failure handling** (`handleCancelPhoto`,
+`handleDamagePhoto`, `handleIntakePhoto`, all three in `OrderClient.tsx`).
+All three already wrap `compressImage()` inside the same try/catch as the
+upload fetch, with `setUploadingPhoto(false)` in `finally`. Confirmed from
+`lib/compress-image.ts` directly: `compressImage` never actually throws out
+to its caller — its own internal try/catch/finally returns the original,
+uncompressed file (`asIs`) on ANY failure (a bad `Image.onerror` decode, a
+null canvas context, a `toBlob` that resolves null), by explicit design
+("never block the upload on a compression failure"). Even if that
+contract were violated, the caller's own try/catch would still catch it.
+Nothing to fix.
+
+**3. Refund-threshold authority** (`lib/perms.ts`'s `PERM_DEFS`,
+`lib/money.ts`'s `REFUND_APPROVAL_THRESHOLD`, every call site in
+`lib/actions/orders.ts`). Confirmed the UI is purely cosmetic:
+`refundOrder()` re-validates `isMoneyAmount(amount)` server-side (rejects
+non-finite, non-positive, and anything not a clean 2-decimal value — a
+negative number is rejected outright, it can never reach the threshold
+comparison), re-checks the college, and re-checks the still-refundable cap
+against a fresh DB read — twice, once in `refundOrder`/`performRefund`'s
+pre-check and again inside the locked transaction. `fmt()`
+(`lib/format.ts`) is a display-only `toLocaleString` wrapper with no
+influence on what gets sent to the server (the raw `<input type="number">`
+value, never the formatted string). `approveRefundRequest` requires
+`requireStaff(3)`, a strictly higher bar than the `refunds` tool's own
+default floor, and re-validates the cap against a fresh read before
+calling the same `performRefund` a direct small refund uses — no second,
+weaker implementation exists. No bypass found.
+
+**4. `flagOutlierStaff` at scale** (`lib/report.ts`). The function is a
+single `O(n)` pass (`rows.map` to build totals, one `reduce` for the
+average, one `forEach` to flag) — no nested loop over `rows`, no per-row
+DB call. `app/s/reports/page.tsx` renders the flagged set with a plain
+`.map()` over the same `staffActivity` array. 50+ staff rows in one period
+would be a non-event computationally; this business's actual scale (a
+handful of staff per campus) makes the question moot either way. No real
+algorithmic problem.
+
+**5. The `requireStudentOrRedirect` swap, byte-for-byte** (`lib/auth.ts` +
+all 9 `/c` pages). Read every page: in each of the 9
+(`page.tsx`, `profile`, `wallet`, `orders`, `orders/[id]`, `order/new`,
+`pay/[id]`, `notifications`, `help`), `requireStudentOrRedirect()` is
+still the literal first statement of the Server Component, and its return
+value is still used immediately on the next line (`const student = await
+requireStudentOrRedirect();`) exactly as `requireStudent()` was before the
+swap. No page had any code between the old call and its first use, and no
+page ever caught `AuthError` locally (grepped for `catch` near the old call
+sites in git history — none existed, consistent with the original bug
+report that the crash reached Next's root `error.tsx` unguarded). The swap
+is safe everywhere, not just the common case.
+
+`npm test`: 1252/1252 passing (no new tests needed — nothing to catch; the
+five claims above are all either structural/O(n) facts or direct code
+reads with no edge case left to pin down.) `npx tsc --noEmit` clean. No
+source files changed this round. — one real gap found, `POST /api/report/daily` ignored the "reports" tool revocation
 
 Scoped re-sweep of the four areas the owner wanted re-verified, continuing
 today's permission-matrix work (`refundOrder`/`redoOrder`/
@@ -3607,3 +3682,116 @@ Sentry's config files compiling cleanly.
 regex widened to match, not weakened). `npm run build` succeeds with the
 same route table. `npm run verify` green except the pre-existing
 wash-day gap.
+
+## RESOLVED 2026-10-29: refund-approval workflow re-audited against the rest of the money system — one real bug found, cancelOrder could double-restore a cycle a concurrent approved refund had already restored
+
+Scoped re-audit of the 2026-10-22 two-person refund-approval feature
+(`RefundRequest`, `refundOrder`/`performRefund`/`approveRefundRequest`/
+`rejectRefundRequest` in `lib/actions/orders.ts`), specifically how it
+interacts with the REST of the money system — credit notes, audit logs,
+campus scoping, cycle restoration, and the same day's cancel-order photo-
+evidence feature — since `performRefund` was extracted from the original
+single-function `refundOrder` rather than written fresh, and extraction
+refactors are exactly where regressions hide.
+
+**Confirmed clean, no changes needed, each backed by a new real-Postgres
+behavioral test added to `tests/refund-approval-workflow.test.ts`:**
+- **Credit notes.** `approveRefundRequest()` hands off to the same
+  `performRefund()` the small-refund path uses, which calls
+  `createCreditNote(tx, o.invoice, amount, reason, st.id, via)` identically
+  either way — confirmed for real (not just reading the Payment row): an
+  invoiced UPI order refunded above the ₹500 threshold and approved
+  produces a `CreditNote` row with the correct proportional `gst`/`subtotal`
+  split off the invoice's own ratio, `invoiceId` pointing at the right
+  invoice, and `by` set to the APPROVING Admin (`st.id` inside
+  `performRefund` is whoever `approveRefundRequest` passed in — the
+  approver, not the original requester, matching the function's own header
+  comment: "the audit trail should say who pulled the trigger, not just
+  who asked").
+- **Audit log completeness.** All three `RefundRequest` state transitions
+  each get their own `audit()` call with order id, amount, method, and the
+  acting staff id: `refundOrder()` logs "Refund requested (pending
+  approval)" at request time, `approveRefundRequest()` logs "Refund
+  approved" (naming both the approver via `st.id` and the original
+  requester by id in the message body), `rejectRefundRequest()` logs
+  "Refund rejected" (same, plus the decision note). Read back for real in
+  the new tests, not assumed from the pattern working elsewhere.
+- **Reports page campus scoping.** `app/s/reports/page.tsx`'s pending-
+  refunds query (`db.refundRequest.findMany({ where: { status: "pending",
+  ...(selectedCollegeId ? { collegeId: selectedCollegeId } : {}) } })`)
+  correctly drops the `collegeId` filter entirely when an Owner is viewing
+  "All colleges" (`selectedCollegeId === null`), so nothing from any campus
+  is silently missed — this already matches `listPendingRefundRequests()`'s
+  own scoping in `lib/actions/orders.ts`. Also confirmed for real, not
+  just read from source: a campus-scoped Admin cannot `approveRefundRequest`
+  or `rejectRefundRequest` a pending request that belongs to a DIFFERENT
+  campus — `assertSameCollege` is actually exercised on both functions (a
+  new test creates a second college/Admin pair and asserts both calls
+  throw), not merely assumed because the same guard works elsewhere.
+- **restoreCycle timing.** `performRefund`'s fresh, in-transaction
+  `tx.order.findUniqueOrThrow` (the 2026-10-20 fix) is what
+  `approveRefundRequest` actually restores cycles against — confirmed with
+  a test that lets a refund sit "pending" while a SECOND, unrelated order
+  burns another cycle on the same subscription, then approves: the restore
+  correctly decrements off the subscription's CURRENT `cyclesUsed` (2 → 1),
+  not the stale value captured when the refund was first requested (which
+  would have wrongly computed 1 → 0 and erased the second order's own
+  still-valid cycle burn).
+
+**Real bug found and fixed: `cancelOrder()`'s cycle restore uses a STALE
+pre-transaction order snapshot, so it can double-restore a cycle that a
+concurrently approved refund already restored — and the new approval-delay
+window turns this from a near-impossible microsecond collision into a
+realistic one.** `cancelOrder()` reads the order once, before its own
+`db.$transaction` even starts, to run its pre-checks (already
+cancelled/collected, paid-cash evidence requirements). Inside the
+transaction it scopes its own `status` update to `notIn: ["cancelled",
+"collected"]` and checks the affected row count — the fix already
+documented above this one for two concurrent CANCELS of the same order —
+but then calls `restoreCycleFor(tx, ord, ...)` with that same STALE
+pre-transaction `ord`, not a fresh read. `performRefund` was already fixed
+(2026-10-20) to re-read the order fresh, inside its lock, specifically so
+two cycle-restoring operations on one order can't both see `usedCycle:
+true` — but `cancelOrder` was never updated to the same pattern, because
+at the time, nothing else in the codebase could independently restore a
+cycle on an order a counter staffer was mid-cancel on. `approveRefundRequest`
+changes that: a refund can sit "pending" for real time (minutes to hours,
+waiting on an Admin), during which cancelling that SAME order is a
+completely ordinary, legitimate staff action — the order's `status` field
+is untouched by a refund approval, so `cancelOrder`'s own concurrency guard
+never even sees it coming. If an approval (restoreCycle: true) commits in
+the narrow gap between `cancelOrder`'s pre-transaction read and its own
+`restoreCycleFor` call, `cancelOrder` still acts on `ord.usedCycle: true`
+even though the cycle was already handed back moments earlier — a real
+double-credit of one prepaid cycle, reproduced with a test that forces this
+exact interleaving (not left to chance via `Promise.all`, which passed
+clean 5/5 runs without ever landing on the race): a `vi.spyOn` on
+`db.order.findUniqueOrThrow` lets `cancelOrder` take its stale snapshot,
+then runs `approveRefundRequest` to full completion before letting
+`cancelOrder`'s own transaction proceed. Without the fix, `cyclesUsed`
+wrongly lands at 0 (restored twice) instead of 1 (restored once, cycling
+used was seeded at 2 to avoid the negative-clamp masking a double-restore,
+same deliberate choice `refund-race-behavioral.test.ts` already makes).
+
+Fixed by adding a fresh, in-transaction `tx.order.findUniqueOrThrow`
+(selecting `usedCycle`/`service`/`cyclesCount`) right after the status
+`updateMany` succeeds, and passing THAT into `restoreCycleFor` instead of
+the stale pre-transaction `ord` — the exact pattern `performRefund` already
+uses, just never applied to `cancelOrder`'s own call site.
+
+New test added to `tests/refund-approval-workflow.test.ts`: "cancelOrder
+does not double-restore a cycle that a concurrent, already-approved refund
+already restored". Confirmed it fails (cyclesUsed lands at 0, not 1)
+against the pre-fix code, passes after. Mutation-tested: reverted the fix
+(restored the stale `ord` as `restoreCycleFor`'s argument), confirmed the
+exact same failure, restored the fix, confirmed green again. Three other
+new tests added in the same file for the clean areas above (credit note
+proportionality on the approval path, cross-campus approve/reject block,
+fresh-read restoreCycle timing) — all passed on first write, no fix needed
+for those.
+
+`npm test`: 1256/1256 passing (4 new tests in
+`tests/refund-approval-workflow.test.ts`, one real fix). The only failure
+seen under full parallel load was the already-documented pre-existing flaky
+`tests/upgrade-subscription-race-behavioral.test.ts`, re-confirmed passing
+in isolation, same as every prior round. `npx tsc --noEmit` clean.

@@ -1,5 +1,41 @@
 # FabricFold playbook
 
+## Fixed 2026-11-01: SecurityError on localStorage, 40 occurrences/escalating — components/chrome.tsx theme code was unguarded
+
+Owner forwarded a Sentry weekly report showing `SecurityError: Failed to
+read the 'localStorage' property from 'Window'` as the top issue — 40
+occurrences, escalating, javascript-nextjs. Traced it to
+`components/chrome.tsx`: `AppShell`'s theme-restore `useEffect` and
+`toggleTheme()` both called `localStorage.getItem`/`setItem` directly, with
+no try/catch. In Safari private browsing (and some other storage-blocked
+contexts), merely touching the `localStorage` object throws `SecurityError`
+— not only on quota or write. `AppShell` wraps every single page in the
+app, so this fired on effectively every page load for an affected visitor,
+which explains both the volume and the "escalating" trend as more visitors
+hit it.
+
+The same file's `useCampusSwitch` hook already had this right (try/catch
+around both get and set, explicit "private browsing / storage blocked"
+comment) — this was an inconsistency within one file, not a missing
+pattern. Fixed by wrapping the two unguarded call sites the same way.
+
+Added `tests/localstorage-guards.test.ts`: asserts the theme-restore effect
+and `toggleTheme` each wrap their `localStorage` call in try/catch, plus a
+general "no bare `localStorage.` call anywhere in this file" scan so a
+future addition to this file can't reintroduce the gap. Mutation-tested by
+reverting the fix via `git stash` — all 3 new tests failed, correctly
+flagging lines 22 and 38 — then restored and passing again.
+
+Also investigated the other three issues in the same Sentry report
+("Failed to fetch", "Failed to parse body as FormData", "Load failed") —
+these are generic browser-network-layer errors (flaky connections, a
+request aborted by navigation) with no app-side guard problem similar to
+the one above; nothing else to fix there. `npm test`: 1245 passed, 2 failed
+only on DB-connection-timeout flakiness in the full concurrent run
+(`report-daily-perm-behavioral.test.ts`, `export-college-scope-behavioral
+.test.ts`), both confirmed passing cleanly when rerun in isolation — not a
+regression from this change.
+
 ## Reviewed 2026-10-29: refund-approval UI, cancel-evidence/damage photo uploads, refund-threshold authority, outlier-flagging scale, and the requireStudentOrRedirect swap — all five scoped areas confirmed sound, no new bugs
 
 Owner asked for continued deep testing of the most recent batch of changes:

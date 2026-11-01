@@ -19,8 +19,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     t.current = setTimeout(() => setToast((x) => ({ ...x, show: false })), 2400);
   }, []);
   useEffect(() => {
-    const th = localStorage.getItem("ff_theme");
-    if (th) document.documentElement.setAttribute("data-theme", th);
+    try {
+      const th = localStorage.getItem("ff_theme");
+      if (th) document.documentElement.setAttribute("data-theme", th);
+    } catch { /* private browsing / storage blocked — default theme is fine */ }
   }, []);
   return (
     <ToastCtx.Provider value={showToast}>
@@ -35,7 +37,7 @@ export function toggleTheme() {
   const next = cur === "dark" ? "" : "dark";
   if (next) document.documentElement.setAttribute("data-theme", next);
   else document.documentElement.removeAttribute("data-theme");
-  localStorage.setItem("ff_theme", next);
+  try { localStorage.setItem("ff_theme", next); } catch { /* not persisted this session, theme still applies */ }
 }
 
 /* ---------- TopBar ---------- */

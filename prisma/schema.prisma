@@ -589,6 +589,11 @@ model Complaint {
   // Who owns it, and when a first response is due (24h from raising). Null on old rows.
   assignedStaffId String?
   respondBy       DateTime?
+  // Set once the overdue-complaints cron has re-notified the owner about this
+  // row, so the same overdue complaint isn't re-emailed every run — a single
+  // escalation ping, not a flood. Cleared implicitly by resolving (status
+  // flips to "resolved", which the escalation query excludes regardless).
+  escalatedAt DateTime?
   messages    ComplaintMessage[]
 }
 

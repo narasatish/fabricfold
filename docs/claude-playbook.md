@@ -1,5 +1,44 @@
 # FabricFold playbook
 
+## Added 2026-11-01: overdue-complaint escalation — owner gets re-emailed when staff don't respond in time
+
+Owner's complaint: "as staff, they are ignoring complaints." The complaints
+screen already showed an "Overdue" badge once `respondBy` (set 24h from
+raising, in `lib/actions/complaints.ts`) passed —
+`app/s/complaints/_components/ComplaintsClient.tsx` — but a badge on a page
+nobody opens changes nothing. Added the active half:
+`app/api/cron/overdue-complaints/route.ts`, same shape as the existing
+`stuck-orders` check, emails the owner (`notifyOwner`, same email+push
+channel already wired for new complaints) once a complaint passes its
+deadline unresolved.
+
+Added `Complaint.escalatedAt` (nullable `DateTime`) so a given overdue
+complaint is only emailed once, not re-flagged every cron run until
+resolved — `updateMany` with `escalatedAt: null` still in the WHERE, same
+race-safe pattern used elsewhere in this codebase. Synced to `ff_test` and
+`ff_agg` isolated test schemas with explicit owner consent (nullable-column
+add on local dev-only schemas, not production).
+
+New `tests/overdue-complaints-escalation.test.ts` (4 cases): fires + stamps
+on a genuinely overdue complaint, stays silent on one already escalated,
+stays silent on one still within its deadline, and 401s without
+CRON_SECRET/staff auth. Mutation-tested by dropping the `escalatedAt: null`
+filter from the query — the "already escalated" test correctly failed
+(expected 0, got 1), confirming it actually exercises the idempotency
+guard, not just the happy path.
+
+**Not yet wired to a schedule.** Like `stuck-orders`, this endpoint exists
+and is callable (cron secret or Admin/Owner staff session) but has no
+`render.yaml` cron entry — the owner has previously asked to cut cron
+costs (removed `cron-watchdog`, widened another cron from 5min to 15min
+cadence), and each new Render cron is a new billed service. Owner needs to
+decide: new scheduled cron (added cost, most direct), or piggyback the
+check onto the existing hourly `cron-sheets-sync` schedule (zero added
+cost, same ~hourly timeliness). Whichever is picked, wiring it is a small
+render.yaml change plus optionally folding the check into an existing
+route — flagged here rather than decided unilaterally since it's the one
+piece of this feature that touches billing.
+
 ## Fixed 2026-11-01: SecurityError on localStorage, 40 occurrences/escalating — components/chrome.tsx theme code was unguarded
 
 Owner forwarded a Sentry weekly report showing `SecurityError: Failed to

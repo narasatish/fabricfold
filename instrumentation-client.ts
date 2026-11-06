@@ -26,7 +26,13 @@ if (dsn) {
     dsn,
     tracesSampleRate: process.env.NODE_ENV === "development" ? 1.0 : 0.1,
     enableLogs: true,
-    replaysSessionSampleRate: 0.05,
+    // 2026-11-05: the 5% random-session rate was the main driver of going
+    // over the free replay quota (79/50 that cycle) — most of that volume
+    // was plain, error-free sessions with no diagnostic value. Dropped to 0:
+    // replays are now recorded only when a client error actually happens
+    // (replaysOnErrorSampleRate stays at 1.0), which is the case that's
+    // actually useful for debugging and a small fraction of total traffic.
+    replaysSessionSampleRate: 0,
     replaysOnErrorSampleRate: 1.0,
     debug: false,
     // Same AuthError ("not signed in") filter as the server/edge configs —

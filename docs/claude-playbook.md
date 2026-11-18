@@ -1,5 +1,44 @@
 # FabricFold playbook
 
+## Fixed 2026-11-17: racing approve/reject on a refund request could leave a false audit trail
+
+Owner asked for another general "check everything" pass. Found via a
+targeted bug hunt focused on areas not yet covered by prior audits (the
+two newest features, college-scoping, read-then-write races, the
+"use server" const-export bug class, money bypass) —
+`approveRefundRequest`/`rejectRefundRequest` (`lib/actions/orders.ts`) did
+a classic check-then-act race on `RefundRequest.status`: read it, check
+`=== "pending"`, act (performRefund / just write), write the final status
+— not the atomic `updateMany` claim this codebase otherwise uses for every
+other money-adjacent transition (see `performRefund`'s own row-lock-and-
+recheck).
+
+Concrete failure: two Admin/Owner staff race approve vs. reject on the
+same pending request. Both read "pending" before either writes. The money
+movement itself was always safe (`performRefund` locks + re-reads inside
+its own transaction) — but the `RefundRequest` row could end up stamped
+"rejected" even though the refund had already gone out, or the reverse.
+No double-refund, but a false audit trail that could mislead a
+reconciliation or prompt a duplicate manual refund later.
+
+Fixed by claiming the row atomically first (`updateMany` WHERE
+`status: "pending"`, check `count === 1`) before doing anything else, same
+pattern as every other money transition in this file. If `performRefund`
+then fails (e.g. the cap was consumed by another request in the meantime),
+the claim is released back to "pending" rather than leaving a stuck false
+"approved" with no money moved.
+
+New test in `tests/refund-approval-workflow.test.ts`: fires
+`approveRefundRequest` and `rejectRefundRequest` concurrently via
+`Promise.all` on the same request — real concurrent DB calls, not a
+simulated interleaving, relying on Postgres itself to serialize the two
+atomic claims — and asserts exactly one wins and the final audit state
+(status, `order.refunded`, payment row) agrees with whichever one did.
+Mutation-tested: reverting `orders.ts` via `git stash` made this new test
+fail (both calls succeeded), confirming it actually catches the race, not
+just the happy path. Full suite 1264/1264 (1263 + this one), `tsc` clean,
+build clean.
+
 ## Added 2026-11-01: overdue-complaint escalation — owner gets re-emailed when staff don't respond in time
 
 Owner's complaint: "as staff, they are ignoring complaints." The complaints

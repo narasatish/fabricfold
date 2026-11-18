@@ -973,10 +973,33 @@ export async function approveRefundRequest(requestId: string): Promise<ActionRes
   assertSameCollege(st, reqRow.collegeId);
   if (reqRow.status !== "pending") return { ok: false, error: `This request was already ${reqRow.status}` };
 
-  const result = await performRefund(st, reqRow.orderId, Number(reqRow.amount), reqRow.via as "upi" | "cash" | "credit", reqRow.reason, reqRow.restoreCycle);
-  if (!result.ok) return result;
+  /* Found 2026-11-17: this used to check reqRow.status, THEN call
+     performRefund, THEN write "approved" — a plain read-then-write race.
+     Two staff racing approve vs. reject on the same request could both pass
+     the check; approve's money movement is independently transaction-safe
+     (performRefund locks + re-reads), but the request row could end up
+     stamped "rejected" after the refund had already gone out — a false
+     audit trail, not a double-refund. Claiming the row atomically first,
+     the same "updateMany + affected-count" pattern used everywhere else in
+     this file, closes that: only one of the two racing calls gets count===1
+     and proceeds past this point. */
+  const claim = await db.refundRequest.updateMany({
+    where: { id: requestId, status: "pending" },
+    data: { status: "approved", decidedBy: st.id, decidedAt: new Date() },
+  });
+  if (claim.count !== 1) return { ok: false, error: "This request was already decided" };
 
-  await db.refundRequest.update({ where: { id: reqRow.id }, data: { status: "approved", decidedBy: st.id, decidedAt: new Date() } });
+  const result = await performRefund(st, reqRow.orderId, Number(reqRow.amount), reqRow.via as "upi" | "cash" | "credit", reqRow.reason, reqRow.restoreCycle);
+  if (!result.ok) {
+    // Refund didn't actually happen — give the request back to the queue
+    // instead of leaving it permanently stuck on a false "approved".
+    await db.refundRequest.updateMany({
+      where: { id: requestId, status: "approved" },
+      data: { status: "pending", decidedBy: null, decidedAt: null },
+    });
+    return result;
+  }
+
   await audit("Refund approved", `#${reqRow.orderId.slice(-4)} ₹${reqRow.amount} via ${reqRow.via} (requested by ${reqRow.requestedBy})`, st.id);
   return result;
 }
@@ -989,7 +1012,13 @@ export async function rejectRefundRequest(requestId: string, note?: string): Pro
   if (reqRow.status !== "pending") return { ok: false, error: `This request was already ${reqRow.status}` };
 
   const decisionNote = (note || "").trim().slice(0, 200) || null;
-  await db.refundRequest.update({ where: { id: reqRow.id }, data: { status: "rejected", decidedBy: st.id, decidedAt: new Date(), decisionNote } });
+  // Same atomic claim as approveRefundRequest — see the comment there.
+  const claim = await db.refundRequest.updateMany({
+    where: { id: requestId, status: "pending" },
+    data: { status: "rejected", decidedBy: st.id, decidedAt: new Date(), decisionNote },
+  });
+  if (claim.count !== 1) return { ok: false, error: "This request was already decided" };
+
   await audit("Refund rejected", `#${reqRow.orderId.slice(-4)} ₹${reqRow.amount} via ${reqRow.via} (requested by ${reqRow.requestedBy})${decisionNote ? ` — ${decisionNote}` : ""}`, st.id);
   return { ok: true };
 }

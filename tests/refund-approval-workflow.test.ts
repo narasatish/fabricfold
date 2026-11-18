@@ -184,6 +184,51 @@ describe("refunds above the threshold create a pending request and move no money
     expect(payments.length).toBe(1);
   });
 
+  it("racing approve and reject on the same request never leaves a false audit trail", async () => {
+    /* Found 2026-11-17: approveRefundRequest/rejectRefundRequest used to
+       check reqRow.status, THEN act, THEN write the final status — a plain
+       read-then-write race. Two Admins racing approve vs. reject on the
+       same pending request could both pass the "still pending" check;
+       performRefund's own money movement is independently transaction-safe,
+       but the request row could end up stamped "rejected" even though the
+       refund had already gone out, or vice versa — a false audit trail.
+       Real concurrent calls here, not a simulated interleaving: Postgres
+       itself serializes the two atomic claims (updateMany WHERE
+       status="pending"), so exactly one of these two promises may win, and
+       the final state must agree with whichever one did. */
+    await asManager();
+    const o = await mkPaidOrder(600);
+    const r = await orders.refundOrder(o.id, 600, "cash", "racing decision");
+    expect(r.status).toBe("pending");
+
+    await asAdmin();
+    const [approveResult, rejectResult] = await Promise.all([
+      orders.approveRefundRequest(r.id!),
+      orders.rejectRefundRequest(r.id!, "racing rejection"),
+    ]);
+
+    const oneWon = approveResult.ok !== rejectResult.ok;
+    expect(oneWon).toBe(true); // never both succeed, never both fail
+
+    const after = await db.order.findUniqueOrThrow({ where: { id: o.id } });
+    const reqRow = await db.refundRequest.findUniqueOrThrow({ where: { id: r.id! } });
+
+    if (approveResult.ok) {
+      // The refund that actually moved money must be the one reflected as the final decision.
+      expect(reqRow.status).toBe("approved");
+      expect(after.refunded).toBe(true);
+      expect(Number(after.refundAmount)).toBe(600);
+    } else {
+      expect(reqRow.status).toBe("rejected");
+      expect(after.refunded).toBe(false);
+      expect(Number(after.refundAmount || 0)).toBe(0);
+    }
+
+    // Exactly one refund payment at most — never a refund that the audit trail denies.
+    const payments = await db.payment.findMany({ where: { orderId: o.id, method: "refund" } });
+    expect(payments.length).toBe(reqRow.status === "approved" ? 1 : 0);
+  });
+
   it("re-validates the refundable cap at approval time, not just at request time", async () => {
     await asManager();
     const o = await mkPaidOrder(1000);

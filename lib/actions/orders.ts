@@ -645,7 +645,16 @@ export async function collectOrder(orderId: string, code: string) {
   const st = await requireStaff(1);
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
   assertSameCollege(st, o.collegeId);
-  const otp = await db.otp.findFirst({ where: { purpose: "pickup", refId: o.id, usedAt: null } });
+  /* Found during a deep security pass (2026-11-23): this lookup never
+     filtered on expiresAt, unlike the identical login-OTP lookup in
+     auth.ts (`expiresAt: { gt: new Date() }`). A pickup code is created
+     with a 7-day expiresAt, but with no expiry filter here it kept
+     matching forever — the column was set on every "ready" order and
+     then silently never enforced. Order ID / Customer ID (the two other
+     accepted inputs below) aren't time-limited by design and are
+     unaffected by this fix; only the short numeric pickup code now
+     actually expires as the UI already implies it does. */
+  const otp = await db.otp.findFirst({ where: { purpose: "pickup", refId: o.id, usedAt: null, expiresAt: { gt: new Date() } } });
   const v = (code || "").replace(/[^0-9]/g, "");
   const ok = (otp && v === otp.code) || v === o.id.slice(-4) || v === o.id.replace(/\D/g, "");
   if (!ok) return { ok: false as const, error: "Code / Order ID does not match" };

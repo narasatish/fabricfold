@@ -9,6 +9,7 @@ import Link from "next/link";
 import { Svg } from "@/components/icons";
 import { notFound } from "next/navigation";
 import OrderDetailClient from "./_components/OrderDetailClient";
+import { Qr } from "@/components/qr";
 
 export default async function OrderDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string>> }) {
   const student = await requireStudentOrRedirect();
@@ -23,6 +24,15 @@ export default async function OrderDetailPage({ params, searchParams }: { params
   if (!order || order.studentId !== student.id) {
     notFound();
   }
+
+  // Scan-to-collect: the pickup code is still the same one-time, per-order
+  // secret collectOrder() already verifies (lib/actions/orders.ts's advanceStatus
+  // "ready" branch) — shown here as a QR too, so staff can scan it at the
+  // counter instead of asking the student to read 4 digits aloud.
+  const pickupOtp =
+    order.status === "ready"
+      ? await db.otp.findFirst({ where: { purpose: "pickup", refId: order.id, usedAt: null }, orderBy: { expiresAt: "desc" } })
+      : null;
 
   // Same customer ID everywhere: the bag code (if one is issued) is what
   // staff look for, not the internal id — quoting the internal id here sent
@@ -140,10 +150,15 @@ export default async function OrderDetailPage({ params, searchParams }: { params
                   Ready for collection
                 </div>
                 <div style={{ color: "var(--teal-dark)", fontSize: "12.5px", marginTop: "2px" }}>
-                  Show your Order ID or FabricFold ID to collect.
+                  Show this QR at the counter — or your Order ID / FabricFold ID.
                 </div>
               </div>
             </div>
+            {pickupOtp && (
+              <div className="mt16" style={{ display: "flex", justifyContent: "center" }}>
+                <Qr text={pickupOtp.code} size={180} />
+              </div>
+            )}
           </div>
         )}
 

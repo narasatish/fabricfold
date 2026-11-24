@@ -491,9 +491,12 @@ describe("three previously-uncovered functions have their key invariants locked 
   });
 
   it("cancelSubscriptionRequest only deletes a PENDING (not-yet-active) request, never a live plan", () => {
-    const fn = subs.slice(subs.indexOf("export async function cancelSubscriptionRequest"), subs.indexOf("export async function cancelSubscriptionRequest") + 500);
+    const fn = subs.slice(subs.indexOf("export async function cancelSubscriptionRequest"), subs.indexOf("export async function cancelSubscriptionRequest") + 900);
     expect(fn).toMatch(/if \(stu\.subscription && !stu\.subscription\.active\) \{/);
-    expect(fn).toMatch(/db\.subscription\.delete\(\{ where: \{ id: stu\.subscription\.id \} \}\)/);
+    // deleteMany (not delete): fixed 2026-11-23 so a genuinely concurrent
+    // double-tap can't throw P2025 on a row the other call already removed
+    // — see tests/cancel-subscription-request-double-tap.test.ts.
+    expect(fn).toMatch(/db\.subscription\.deleteMany\(\{ where: \{ id: stu\.subscription\.id \} \}\)/);
   });
 });
 

@@ -5,6 +5,7 @@ import { initials, loyaltyBadge } from "@/lib/format";
 import { Svg } from "@/components/icons";
 import Link from "next/link";
 import ProfileClient from "./_components/ProfileClient";
+import MyQr from "./_components/MyQr";
 
 export default async function ProfilePage() {
   const student = await requireStudentOrRedirect();
@@ -74,6 +75,8 @@ export default async function ProfilePage() {
             </div>
             <Svg name="chevR" size={18} />
           </Link>
+
+          <MyQr studentId={student.id} />
 
           <ProfileClient studentName={student.name} hasPasscode={!!student.passwordHash} />
         </div>

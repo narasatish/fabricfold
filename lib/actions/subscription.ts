@@ -409,7 +409,13 @@ export async function cancelSubscriptionRequest() {
   const stu = await requireStudent();
   if (stu.subscription && !stu.subscription.active) {
     await db.cycleUse.deleteMany({ where: { subscriptionId: stu.subscription.id } });
-    await db.subscription.delete({ where: { id: stu.subscription.id } });
+    /* deleteMany, not delete: a double-tap (or a retried offline-queue
+       action) can run this twice for the same subscription — the second
+       call's plain `delete` would throw P2025 on an already-gone row
+       instead of the idempotent no-op this cancel request should be.
+       deleteMany matches zero rows silently, same as every other
+       already-gone-row case in this codebase. */
+    await db.subscription.deleteMany({ where: { id: stu.subscription.id } });
     await db.otp.deleteMany({ where: { purpose: "subscription", refId: stu.id } });
   }
   return { ok: true as const };

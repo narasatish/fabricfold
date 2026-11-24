@@ -1,5 +1,97 @@
 # FabricFold playbook
 
+## Added 2026-11-23: QR-code scan to find a student / collect an order
+
+Owner wanted the counter workflow faster — staff manually typing a
+student's ID or phone every visit, and typing a 4-digit pickup code every
+collection, was the main slow point with less tech-literate staff.
+
+Two independent, additive QR flows, both reusing existing patterns rather
+than inventing new ones:
+
+1. **Find a student**: the student's own internal `student.id` (a stable,
+   truly unique DB primary key — not the recyclable printed bag code) is
+   encoded as a URL (`/s/scan/{id}`) and shown via the existing `Qr`
+   component on `app/c/profile` ("Show my QR code"). Staff scan it with a
+   new camera-icon button on the staff home screen (`app/s/scan/page.tsx`,
+   using `jsqr` — pure JS, no WASM, no new native dependency) or any
+   generic camera app (since it's a real URL, not a bare ID), which lands
+   on `app/s/scan/[id]/page.tsx` — a server page that re-runs the exact
+   same staff-auth + same-college check `app/s/customers/[id]/page.tsx`
+   already has, then redirects to it.
+2. **Collect an order**: deliberately did NOT reuse the student's static
+   profile QR for this (that would be a long-lived, screenshot-forwardable
+   credential). Instead the EXISTING one-time, per-order pickup code
+   (already in the `Otp` table, purpose "pickup", generated on the "ready"
+   transition) is additionally rendered as a QR on the customer's own
+   ready-order screen. Staff's existing "Collect order" sheet gets a "Scan
+   QR instead" button (same `jsqr` camera loop) that auto-fills and
+   auto-submits the scanned code through the unchanged `collectOrder()`
+   action — same security checks, same atomic claim, just no typing.
+
+No new infra, no added cost (`qrcode` was already a dependency; `jsqr` is
+a small new one). Fully tested end-to-end live in the running app (not
+database shortcuts): real login, real order placement, real staff accept/
+process/ready (confirmed a genuine pickup OTP was generated), real cash
+payment recording, and real collection via both the code and the QR path.
+
+## Fixed 2026-11-23: collectOrder's pickup-code check never enforced the 7-day expiry
+
+Found during a deep security/edge-case pass prompted by the QR work above
+(checking everything the new scan-to-collect button now surfaces more
+prominently). `advanceStatus`'s "ready" branch creates the pickup `Otp`
+row with `expiresAt: new Date(Date.now() + 7 * 86_400_000)` — but
+`collectOrder`'s own lookup (`db.otp.findFirst({ where: { purpose:
+"pickup", refId: o.id, usedAt: null } })`) never filtered on `expiresAt`,
+unlike the identical login-OTP lookup in `lib/actions/auth.ts`
+(`expiresAt: { gt: new Date() }`). The column was written on every ready
+order and then silently never checked — a pickup code never actually
+expired, no matter how stale.
+
+Fixed by adding `expiresAt: { gt: new Date() }` to the same `findFirst`.
+The Order ID / Customer ID fallback (the other two accepted inputs) are
+intentionally not time-limited and are unaffected either way.
+
+New test: `tests/collect-order-pickup-code-expiry.test.ts` (3 cases — an
+expired code is rejected, a valid code still works, the Order ID fallback
+is unaffected by an expired code on the same order). Mutation-tested:
+reverted the `expiresAt` filter, confirmed the "expired code rejected"
+case fails exactly as expected, restored the fix, confirmed green again.
+
+## Fixed 2026-11-23: cancelSubscriptionRequest could throw under genuine concurrency
+
+Found in the same deep pass (a forked review of complaints/credits/
+subscription/bags/students/admin actions). A SEQUENTIAL double-tap is
+already harmless here — `requireStudent()` re-reads fresh every call, so
+a second call's `stu.subscription` is already `null` and the delete path
+is never reached. The real bug only surfaces under genuine concurrency:
+two near-simultaneous calls (two tabs, a retried offline-queue action)
+can both read the subscription as present via `requireStudent()` before
+either deletes it, both proceed into the delete block, and whichever
+call's plain `db.subscription.delete()` runs second throws an unhandled
+Prisma P2025 on a row the first call already removed.
+
+Fixed by switching to `db.subscription.deleteMany()`, which matches zero
+rows silently — the same idempotent-on-a-vanished-row pattern already
+used throughout this codebase.
+
+New test: `tests/cancel-subscription-request-double-tap.test.ts` — one
+case proving the sequential path was already fine, one case using real
+`Promise.allSettled` concurrency (same technique as this codebase's other
+race tests, relying on actual Postgres round-trip timing rather than
+mocked delays) that fails pre-fix (one call rejects) and passes post-fix.
+Mutation-tested the same way: reverted to `.delete()`, confirmed the
+concurrent case fails, restored the fix, confirmed green again.
+
+Also swept, this same pass, by two forked reviewers covering every other
+action file (complaints, credits, bags, students, admin) and every API
+route (webhooks, exports, backup, uploads, sheets sync) for the same bug
+classes (races, IDOR, missing auth, Decimal leaks) — everything else
+confirmed already correctly hardened, no further findings.
+
+`npm test`: all green (full suite + the 4 new tests above). `npx tsc
+--noEmit` clean. `npx next build` clean.
+
 ## Fixed 2026-11-17: racing approve/reject on a refund request could leave a false audit trail
 
 Owner asked for another general "check everything" pass. Found via a

@@ -343,6 +343,9 @@ export default function StaffHomeClient({
             <Svg name="x" size={18} />
           </button>
         )}
+        <button className="action" onClick={() => router.push("/s/scan")} aria-label="Scan student QR">
+          <Svg name="camera" size={20} />
+        </button>
       </div>
 
       {/* Student management */}

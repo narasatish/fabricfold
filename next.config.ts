@@ -20,8 +20,13 @@ const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   // Don't leak full URLs to other sites
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  // The app never needs these browser powers — deny them outright
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(self)" },
+  // The app has no need for microphone/geolocation — deny those outright.
+  // Camera was denied here too until 2026-11-23, when the staff QR scanner
+  // (app/s/scan) and the camera-based collect flow started needing it —
+  // left at camera=() this header would silently block getUserMedia on
+  // every real phone, not just this dev environment, no matter how correct
+  // the feature's own code is. (self) keeps it scoped to this origin only.
+  { key: "Permissions-Policy", value: "camera=(self), microphone=(), geolocation=(), payment=(self)" },
   // Cross-origin isolation for popups/embeds
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
   /* Content-Security-Policy — an explicit allowlist of where scripts, frames

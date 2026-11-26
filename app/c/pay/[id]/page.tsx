@@ -9,7 +9,12 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
   const student = await requireStudentOrRedirect();
   const { id } = await params;
 
-  const order = await db.order.findUnique({ where: { id } });
+  // Independent of each other — order needs only `id`/`student`, appConfig
+  // is a fixed lookup — so they run concurrently.
+  const [order, appConfig] = await Promise.all([
+    db.order.findUnique({ where: { id } }),
+    db.appConfig.findUnique({ where: { id: "main" } }),
+  ]);
   if (!order || order.studentId !== student.id) {
     notFound();
   }
@@ -19,8 +24,6 @@ export default async function PayPage({ params }: { params: Promise<{ id: string
      shouldn't see a real Razorpay checkout open for something already
      paid for. Send them to the order instead once it's settled. */
   if (order.paid) redirect(`/c/orders/${order.id}`);
-
-  const appConfig = await db.appConfig.findUnique({ where: { id: "main" } });
   const rateLabel = (appConfig?.rates as unknown as Record<string, { label: string }>)?.[order.service]?.label || order.service;
   const payment = appConfig?.payment as unknown as { upiId: string; payeeName: string };
 

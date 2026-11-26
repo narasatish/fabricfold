@@ -15,9 +15,11 @@ export default async function WalletPage() {
 
   const subBuckets = ((sub?.buckets as unknown as Bucket[]) || []).map((b) => ({ ...b, used: b.used || 0, label: SERVICE_LABEL[b.service] || b.service }));
 
-  // Credits ledger
-  const compensations = await db.compensation.findMany({ where: { studentId: student.id, method: "credit" }, orderBy: { at: "desc" } });
-  const creditUses = await db.creditUse.findMany({ where: { studentId: student.id }, orderBy: { at: "desc" } });
+  // Credits ledger — two independent reads, same student, run concurrently.
+  const [compensations, creditUses] = await Promise.all([
+    db.compensation.findMany({ where: { studentId: student.id, method: "credit" }, orderBy: { at: "desc" } }),
+    db.creditUse.findMany({ where: { studentId: student.id }, orderBy: { at: "desc" } }),
+  ]);
   const ledger = [
     ...compensations.map((c) => ({
       dir: 1 as const, amount: Number(c.amount), at: c.at,

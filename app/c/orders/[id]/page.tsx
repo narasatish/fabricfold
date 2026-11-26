@@ -15,26 +15,28 @@ export default async function OrderDetailPage({ params, searchParams }: { params
   const { id } = await params;
   const { pendingDraft } = await searchParams;
 
-  const order = await db.order.findUnique({
-    where: { id },
-    include: { timeline: true, invoice: true },
-  });
+  const { customerIdFor } = await import("@/lib/bagcode");
+  // order/customerId/appConfig are all independent of each other — only
+  // of `id`/`student`, already known — so they run concurrently.
+  const [order, customerId, appConfig] = await Promise.all([
+    db.order.findUnique({
+      where: { id },
+      include: { timeline: true, invoice: true },
+    }),
+    /* Same customer ID everywhere: the bag code (if one is issued) is what
+       staff look for, not the internal id — quoting the internal id here sent
+       a student to the counter with a number staff had never seen (owner,
+       Sep 2026: "one fixed customer ID", found via the home dashboard already
+       using the bag code while this banner still quoted student.id). Self-heals
+       a missing BVRIT V-code the same way the home dashboard does — see
+       customerIdFor() in lib/bagcode.ts. */
+    customerIdFor(db, student, student.college?.name),
+    db.appConfig.findUnique({ where: { id: "main" } }),
+  ]);
 
   if (!order || order.studentId !== student.id) {
     notFound();
   }
-
-  // Same customer ID everywhere: the bag code (if one is issued) is what
-  // staff look for, not the internal id — quoting the internal id here sent
-  // a student to the counter with a number staff had never seen (owner,
-  // Sep 2026: "one fixed customer ID", found via the home dashboard already
-  // using the bag code while this banner still quoted student.id). Self-heals
-  // a missing BVRIT V-code the same way the home dashboard does — see
-  // customerIdFor() in lib/bagcode.ts.
-  const { customerIdFor } = await import("@/lib/bagcode");
-  const customerId = await customerIdFor(db, student, student.college?.name);
-
-  const appConfig = await db.appConfig.findUnique({ where: { id: "main" } });
   const rates = appConfig?.rates as unknown as Record<string, { label: string }>;
   const rateLabel = rates?.[order.service]?.label || order.service;
 

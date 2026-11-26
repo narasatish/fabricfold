@@ -4,12 +4,13 @@ import OrdersClient from "./_components/OrdersClient";
 
 export default async function OrdersPage() {
   const student = await requireStudentOrRedirect();
-  const allOrders = await db.order.findMany({
-    where: { studentId: student.id },
-    orderBy: { createdAt: "desc" },
-  });
-
-  const appConfig = await db.appConfig.findUnique({ where: { id: "main" } });
+  const [allOrders, appConfig] = await Promise.all([
+    db.order.findMany({
+      where: { studentId: student.id },
+      orderBy: { createdAt: "desc" },
+    }),
+    db.appConfig.findUnique({ where: { id: "main" } }),
+  ]);
   const rates = appConfig?.rates as unknown as Record<string, { label: string }>;
 
   // Convert to a plain, serializable shape (Decimal fields -> number)

@@ -80,26 +80,51 @@ describe("upgradeSubscription charges the right amount when two concurrent upgra
 
     // Both calls race from the SAME starting point (Plan A, ₹1000), one
     // targeting B (₹1200), the other C (₹1300). Postgres serializes them on
-    // the Subscription row lock; whichever gets the lock first upgrades
-    // A->B or A->C for ₹200/₹300 respectively, and the SECOND call must see
-    // the first's new plan and charge only the remaining difference to
-    // reach its own target — not double-count the leg already paid.
+    // the Subscription row lock — but WHICH of the two truly concurrent
+    // transactions gets the lock first is not under this test's control; it
+    // depends on Postgres's own lock-wait-queue ordering, not anything
+    // deterministic about the calls themselves.
+    //
+    // If B wins the lock first: A->B (₹200), then B->C (₹100) — both calls
+    // legitimately succeed, ending on C, having charged ₹300 total.
+    //
+    // If C wins the lock first: A->C (₹300) succeeds; the second call
+    // (still targeting B, now cheaper than the student's new plan C) is
+    // correctly refused as a downgrade by upgradeSubscription's own fresh,
+    // locked re-check (lib/actions/subscription.ts) — that is NOT the bug
+    // this test exists to catch, it's the business rule working as
+    // intended on an input nobody asked for ("make me cheaper"). A test
+    // that hardcoded "both always succeed" was only ever passing because it
+    // got lucky on ordering, not because that's a real guarantee — fixed
+    // here to assert the one thing that genuinely must always hold
+    // regardless of which call wins the race: no overcharge, ever.
     const [r1, r2] = await Promise.all([
       sub.upgradeSubscription(stu.id, planB.id, "cash"),
       sub.upgradeSubscription(stu.id, planC.id, "cash"),
     ]);
     const results = [r1, r2];
-    expect(results.filter((r) => r.ok).length).toBe(2); // both legitimately succeed — serialized, not conflicting
+    const succeeded = results.filter((r) => r.ok);
+    // The very first call to grab the lock can never be refused — A is
+    // cheaper than both B and C, so at least one upgrade always goes through.
+    expect(succeeded.length).toBeGreaterThanOrEqual(1);
+    // Any call that did NOT succeed must have failed for the one legitimate
+    // reason (a same-tick downgrade attempt relative to the OTHER call's
+    // already-applied plan), never silently or for some other error.
+    for (const r of results) {
+      if (!r.ok) expect(r.error).toMatch(/isn't more expensive/i);
+    }
 
     const payments = await db.payment.findMany({ where: { studentId: stu.id }, orderBy: { at: "asc" } });
     const totalCharged = payments.reduce((s, p) => s + Number(p.amount), 0);
     const finalSub = await db.subscription.findUniqueOrThrow({ where: { studentId: stu.id } });
 
-    // Whichever order the two calls actually serialized in, ending on
-    // Plan C from a Plan A start must total exactly C's price minus A's —
-    // ₹1300 − ₹1000 = ₹300. The bug this test targets would total ₹500
-    // (₹200 for A->B, then a stale ₹300 = C−A again for the second call
-    // instead of the correct ₹100 = C−B), double-counting the A->B leg.
+    // Whichever plan the student actually ended up on (B if that race won
+    // outright, C either way the lock order fell), the TOTAL ever charged
+    // from the original Plan A must be exactly that plan's price minus A's —
+    // never more. The bug this test targets would total ₹500 when B wins the
+    // lock first (₹200 for A->B, then a stale ₹300 = C−A again for the
+    // second call instead of the correct ₹100 = C−B), double-counting the
+    // A->B leg already paid.
     expect([planB.id, planC.id]).toContain(finalSub.planId);
     const finalPlanPrice = finalSub.planId === planC.id ? 1300 : 1200;
     expect(totalCharged).toBe(finalPlanPrice - 1000);

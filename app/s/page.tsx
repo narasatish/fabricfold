@@ -54,7 +54,13 @@ export default async function StaffHomePage() {
     newStudentsByCollege,
   ] = await Promise.all([
     db.order.findMany({
-      where: { status: { in: ["draft", "received", "processing", "ready"] }, ...scope },
+      /* "draft" dropped from this list 2026-11: it was only ever created by
+         the now-retired student self-order flow. No action in the codebase
+         creates a draft order anymore (walkInOrder goes straight to
+         "received"), so any row still in this status is an orphan from
+         before that retirement — surfacing it on the busiest staff screen
+         just adds dead clutter nobody can action. */
+      where: { status: { in: ["received", "processing", "ready"] }, ...scope },
       // the ready EVENT, not createdAt, is what ages an uncollected bag — an
       // order can spend days in processing before it ever waits on a student
       include: {

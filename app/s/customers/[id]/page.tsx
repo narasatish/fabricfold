@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
 import StaffCustomerClient from "./_components/CustomerClient";
 import { resolveCollegeRates, type RateTable } from "@/lib/money";
-import { featureOn } from "@/lib/features";
+import { featureOn, serviceOn } from "@/lib/features";
 
 export default async function StaffCustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -67,7 +67,16 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
   const gstOn = (cfg.settings as Record<string, unknown>)?.gstEnabled !== false;
   const payment = cfg.payment as unknown as { upiId?: string; payeeName?: string };
   const expressEnabled = featureOn(collegeRatesRow?.features, "express");
-  const effectiveRates = resolveCollegeRates(cfg.rates as unknown as RateTable, collegeRatesRow?.rates as unknown as RateTable | null);
+  const allRates = resolveCollegeRates(cfg.rates as unknown as RateTable, collegeRatesRow?.rates as unknown as RateTable | null);
+  /* The walk-in order picker on CustomerClient builds its service <select>
+     directly from the rates table it's given — it used to see every
+     service regardless of this campus's svc_* flags, so staff could pick
+     a disabled service and only find out after submitting (walkInOrder's
+     own serviceOn() guard, lib/actions/orders.ts). Filter here instead,
+     so a disabled service never appears as an option at all. */
+  const effectiveRates = Object.fromEntries(
+    Object.entries(allRates).filter(([key]) => serviceOn(collegeRatesRow?.features, key)),
+  ) as RateTable;
   const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFold: "Wash & Fold", ironOnly: "Iron Only", dryClean: "Dry Clean" };
   const collegePlans = collegePlansRaw.map((p) => {
     const price = Number(p.price);

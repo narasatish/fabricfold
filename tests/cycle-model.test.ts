@@ -245,7 +245,10 @@ describe("urgent (same-day): flat fee on cycle colleges, 50%-per-piece on per-pi
        adds this flat fee on top of its per-item rate. */
     expect(orders.match(/collegeExpressFee\((input|o)\.service, cfg\.collegeExpressOverride\)/g)?.length).toBe(4);
     expect(orders).toMatch(/const surcharge = o\.express && usesCycles \? collegeExpressFee\(o\.service, cfg\.collegeExpressOverride\) : 0;/);
-    expect(orders).toMatch(/const surcharge = input\.express && usesCycles \? collegeExpressFee\(input\.service, cfg\.collegeExpressOverride\) : 0;/);
+    // walkInOrder resolves `express` once (gated on featureOn, see
+    // tests/deep-audit-fixes.test.ts's "express feature flag" check) rather
+    // than reading input.express directly at each use.
+    expect(orders).toMatch(/const surcharge = express && usesCycles \? collegeExpressFee\(input\.service, cfg\.collegeExpressOverride\) : 0;/);
   });
   it("per-piece colleges price the premium into each item's rate at both remaining entry points", () => {
     expect(orders.match(/expressItemRate\(found\[1\]\)/g)?.length).toBe(2);

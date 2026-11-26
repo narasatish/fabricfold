@@ -3,6 +3,7 @@
    Every mutation: validate role -> write (transaction) -> audit where the
    prototype does -> realtime broadcast -> notification. */
 import { db, dbSchemaPrefix } from "../db";
+import { featureOn, serviceOn } from "../features";
 import { enqueueSheetEvent, enqueuePaymentEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff, requireStaffPerm, assertSameCollege } from "../auth";
@@ -309,6 +310,16 @@ export async function walkInOrder(
 
   const rate = cfg.rates[input.service];
   if (!rate) return { ok: false as const, error: "Unknown service" };
+  /* Found 2026-11, alongside the counter-flow redesign: now that walkInOrder
+     is the ONLY way an order gets created (self-service placeOrder is
+     retired — see tests/scan-token-flow.test.ts), this check matters more
+     than it used to. Neither this nor the walk-in form itself (CustomerClient.tsx)
+     had ever gated on the per-college service toggle — a campus where Admin
+     turned a service off could still have staff bill it at the counter. */
+  if (!serviceOn(stu.college.features, input.service)) {
+    return { ok: false as const, error: "This service is not available at your campus" };
+  }
+  const express = !!input.express && featureOn(stu.college.features, "express");
 
   const usesCycles = collegeUsesCycleBasedPricing(input.service, cfg.collegeHasRatesOverride);
   const cyclesCount = usesCycles ? Math.min(10, Math.max(1, Math.floor(input.cycles ?? 1))) : 1;
@@ -319,7 +330,7 @@ export async function walkInOrder(
         .map((i) => {
           const found = rate.items.find((r) => r[0] === i.label);
           if (!found) throw new Error("Unknown item " + i.label);
-          return { label: found[0], rate: input.express ? expressItemRate(found[1]) : found[1], qty: Math.min(99, Math.floor(i.qty)) };
+          return { label: found[0], rate: express ? expressItemRate(found[1]) : found[1], qty: Math.min(99, Math.floor(i.qty)) };
         });
   if (!items.length) return { ok: false as const, error: usesCycles ? "Pick at least one cycle" : "Add at least one piece" };
 
@@ -361,7 +372,7 @@ export async function walkInOrder(
       }
 
       const sub2 = items.reduce((s, i) => s + i.rate * i.qty, 0);
-      const surcharge = input.express && usesCycles ? collegeExpressFee(input.service, cfg.collegeExpressOverride) : 0;
+      const surcharge = express && usesCycles ? collegeExpressFee(input.service, cfg.collegeExpressOverride) : 0;
       // Cycle-based orders are FINAL (owner): Rs 200 means Rs 200, so GST never applies.
       const noGst = !usedCycle && (usesCycles || !!input.noGst || !cfg.gstEnabled);
       const { gst, total } = computeBill(sub2, surcharge, cfg.gstPct, { usedCycle, excessCharge, noGst });
@@ -377,7 +388,7 @@ export async function walkInOrder(
           id, idemKey: input.idemKey || null,
           studentId: stu.id, collegeId: stu.collegeId, service: input.service,
           items, declaredPieces, actualPieces: declaredPieces, weightKg: input.weightKg, cyclesCount,
-          express: !!input.express, surcharge, usedCycle, noGst,
+          express, surcharge, usedCycle, noGst,
           paid: usedCycle && total === 0, paymentMethod: usedCycle && total === 0 ? "cycle" : null,
           subtotal: sub2, gst, gstPctSnapshot: noGst ? 0 : cfg.gstPct, total,
           status: "received", receivedAt: new Date(),

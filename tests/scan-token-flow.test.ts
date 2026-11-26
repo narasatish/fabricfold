@@ -63,6 +63,15 @@ beforeAll(async () => {
   students = await import("../lib/actions/students");
   scanPage = (await import("../app/s/scan/[id]/page")).default;
 
+  await db.appConfig.create({
+    data: {
+      id: "main", gstPct: 18,
+      plan: { price: 6800, cycles: 34, kgPerCycle: 7 },
+      rates: { washIron: { label: "Wash & Iron", items: [["Garment", 15]] }, dryClean: { label: "Dry Clean", items: [["Shirt", 80]] } },
+      payment: { upiId: "ff@test", payeeName: "Test", bankName: "", accountName: "", accountNo: "", ifsc: "", gatewayKey: "" },
+      settings: { reportEmail: "", dailyEmail: false, sendHour: 21, lastSent: null, openingFloat: 0 },
+    },
+  });
   await db.college.create({ data: { id: "colA", name: "Scan College", features: {}, active: true } });
   await db.college.create({ data: { id: "colB", name: "Other College", features: {}, active: true } });
   await db.staff.create({ data: { id: "staffA", phone: "9000000070", name: "Counter A", role: 1, collegeId: "colA" } });
@@ -137,6 +146,26 @@ describe("createScanCode + the /s/scan/[id] route", () => {
 
     await asStaff("staffB"); // belongs to colB
     await expect(scanPage({ params: Promise.resolve({ id: code.token }) })).rejects.toThrow(/NEXT_REDIRECT:\/s\/students/);
+  });
+});
+
+describe("walkInOrder respects the per-college service toggle (2026-11, alongside placeOrder's retirement)", () => {
+  it("refuses a service the campus has turned off", async () => {
+    const s = await db.student.create({ data: { id: "611009", phone: "9999911009", name: "No Dry Clean Here", collegeId: "colA", credits: 0 } });
+    await db.college.update({ where: { id: "colA" }, data: { features: { svc_dryclean: false } } });
+    await asStaff("staffA");
+    const r = await orders.walkInOrder(s.id, { service: "dryClean", items: [{ label: "Shirt", qty: 1 }], weightKg: 1, useCycle: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/not available/i);
+    expect(await db.order.count({ where: { studentId: s.id } })).toBe(0);
+    await db.college.update({ where: { id: "colA" }, data: { features: {} } }); // restore for later tests
+  });
+
+  it("still allows a service the campus has enabled", async () => {
+    const s = await db.student.create({ data: { id: "611010", phone: "9999911010", name: "Dry Clean OK", collegeId: "colA", credits: 0 } });
+    await asStaff("staffA");
+    const r = await orders.walkInOrder(s.id, { service: "dryClean", items: [{ label: "Shirt", qty: 1 }], weightKg: 1, useCycle: false });
+    expect(r.ok).toBe(true);
   });
 });
 

@@ -87,10 +87,12 @@ describe("defaults cover everything", () => {
 });
 
 describe("no file reads the flags its own way any more", () => {
+  // app/c/page.tsx, app/c/order/new/page.tsx and lib/actions/orders.ts
+  // stopped reading feature flags at all once student self-ordering was
+  // retired 2026-11 (see tests/scan-token-flow.test.ts) — they no longer
+  // show service tiles or gate placeOrder on them, so they're dropped from
+  // this list rather than kept here just to read the flags pointlessly.
   const callers = [
-    "app/c/page.tsx",
-    "app/c/order/new/page.tsx",
-    "lib/actions/orders.ts",
     "app/s/admin/_components/AdminClient.tsx",
   ];
 
@@ -112,10 +114,15 @@ describe("no file reads the flags its own way any more", () => {
 });
 
 describe("express is a money path", () => {
-  it("the surcharge is gated on the resolved flag, not a raw lookup", () => {
-    // an absent flag must never switch on a charge
+  it("no caller still does the old raw, unresolved lookup", () => {
+    // placeOrder (the one caller that gated express on featureOn()) was
+    // retired 2026-11 along with student self-ordering — walkInOrder, the
+    // only order-creation path left, has never gated express on the
+    // feature flag at all (pre-existing, not introduced by that retirement:
+    // flagged separately for the owner to decide on). This test keeps
+    // guarding against the specific old regression (`!== false`), not a
+    // guard that no longer exists in the source.
     const src = read("lib/actions/orders.ts");
-    expect(src).toMatch(/input\.express && featureOn\(/);
     expect(src).not.toMatch(/feat\.express !== false/);
   });
 });

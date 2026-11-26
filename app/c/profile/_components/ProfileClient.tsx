@@ -5,7 +5,7 @@ import { useToast, Sheet, Switch, toggleTheme } from "@/components/chrome";
 import { Svg } from "@/components/icons";
 import { logout, updateName, setPasscode, changePasscode, signOutEverywhere } from "@/lib/actions/auth";
 import { clearOfflineCaches } from "@/lib/client-cache";
-import { exportMyData, eraseMyData } from "@/lib/actions/privacy";
+import { exportMyData } from "@/lib/actions/privacy";
 
 export default function ProfileClient({ studentName, hasPasscode }: { studentName: string; hasPasscode: boolean }) {
   const router = useRouter();
@@ -130,22 +130,6 @@ export default function ProfileClient({ studentName, hasPasscode }: { studentNam
     }
   };
 
-  const [showErase, setShowErase] = useState(false);
-  const [eraseConfirm, setEraseConfirm] = useState("");
-  const [eraseBusy, setEraseBusy] = useState(false);
-  const handleErase = async () => {
-    setEraseBusy(true);
-    try {
-      const r = await eraseMyData(eraseConfirm);
-      if (!r.ok) return toast(r.error || "Failed", true);
-      router.push("/login");
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "Failed", true);
-    } finally {
-      setEraseBusy(false);
-    }
-  };
-
   return (
     <>
       <button
@@ -244,14 +228,6 @@ export default function ProfileClient({ studentName, hasPasscode }: { studentNam
         </div>
       </button>
 
-      <button className="list-item tap" style={{ width: "100%", textAlign: "left", padding: "15px 18px", color: "var(--red)" }} onClick={() => setShowErase(true)}>
-        <Svg name="trash" size={20} />
-        <div style={{ flex: 1 }}>
-          <div className="h-sm" style={{ color: "var(--red)" }}>Erase my account</div>
-          <div className="muted" style={{ fontSize: 12 }}>Permanent — removes your name and number, blocked while an order is in progress</div>
-        </div>
-      </button>
-
       {/* Create / change passcode */}
       <Sheet open={showPasscode} onClose={closePasscode}>
         <div className="pad">
@@ -329,29 +305,6 @@ export default function ProfileClient({ studentName, hasPasscode }: { studentNam
         </div>
       </Sheet>
 
-      {/* Erase account */}
-      <Sheet open={showErase} onClose={() => { setShowErase(false); setEraseConfirm(""); }}>
-        <div className="pad">
-          <h2 style={{ marginBottom: "6px", color: "var(--red)" }}>Erase your account?</h2>
-          <div className="muted" style={{ fontSize: "12.5px", marginBottom: "16px" }}>
-            This cannot be undone. Your name and phone number are scrubbed and you won&apos;t be able to
-            sign in again with this number. Orders and payments stay on record for accounting, shown as
-            &quot;Deleted student&quot;. Blocked while you have an order in progress.
-          </div>
-          <div className="field">
-            <label>Type DELETE to confirm</label>
-            <input className="input" value={eraseConfirm} onChange={(e) => setEraseConfirm(e.target.value)} />
-          </div>
-          <button
-            className="btn"
-            style={{ background: "var(--red)" }}
-            onClick={handleErase}
-            disabled={eraseBusy || eraseConfirm.trim().toUpperCase() !== "DELETE"}
-          >
-            {eraseBusy ? "Erasing…" : "Erase my account permanently"}
-          </button>
-        </div>
-      </Sheet>
     </>
   );
 }

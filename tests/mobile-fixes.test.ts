@@ -35,10 +35,10 @@ describe("the pickup code must come from the student, not be readable off staff'
     expect(ui).not.toMatch(/Expected code/);
     expect(ui).not.toMatch(/expectedPickupCode/);
   });
-  it("the collect sheet tells staff to ask, not just type whatever they already see (owner: staff may see the order number, but must verify it WITH the student)", () => {
+  it("the collect sheet no longer asks for a typed code at all (owner, 2026-11: the student's own scan QR IS the presence check now)", () => {
     const ui = read("app/s/orders/[id]/_components/OrderClient.tsx");
-    expect(ui).toMatch(/Ask the student for their 4-digit pickup code/);
-    expect(ui).toMatch(/always have the student say or show it themselves/);
+    expect(ui).not.toMatch(/Ask the student for their 4-digit pickup code/);
+    expect(ui).toMatch(/Mark delivered/);
   });
 });
 
@@ -57,7 +57,6 @@ describe("the 40% commission model is gone, not just hidden", () => {
   it("no order-placing path still imports the retired functions", () => {
     for (const f of [
       "lib/actions/orders.ts",
-      "app/c/order/new/_components/OrderNewClient.tsx",
       "app/c/order/new/page.tsx",
       "app/s/orders/[id]/_components/OrderClient.tsx",
       "app/s/customers/[id]/_components/CustomerClient.tsx",
@@ -72,10 +71,11 @@ describe("the 40% commission model is gone, not just hidden", () => {
   });
   it("every flat-fee call site still exists — now gated to cycle colleges only (BVRIT prices express per-piece instead, Sep 2026)", () => {
     // expressFlatFee became collegeExpressFee (college-aware) once BVRIT's
-    // per-college express pricing landed; still all 5 call sites, each now
+    // per-college express pricing landed; 4 call sites remain now that
+    // placeOrder (student self-order) was retired 2026-11, each still
     // gated on usesCycles (see cycle-model.test.ts) rather than unconditional.
     const orders = read("lib/actions/orders.ts");
-    expect(orders.match(/collegeExpressFee\((input|o)\.service, cfg\.collegeExpressOverride\)/g)?.length).toBe(5);
+    expect(orders.match(/collegeExpressFee\((input|o)\.service, cfg\.collegeExpressOverride\)/g)?.length).toBe(4);
   });
 });
 

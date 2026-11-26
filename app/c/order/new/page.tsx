@@ -1,82 +1,12 @@
 import { requireStudentOrRedirect } from "@/lib/auth";
-import { featureOn, serviceOn, type FeatureKey } from "@/lib/features";
-import { db } from "@/lib/db";
-import { collegeUsesCycleBasedPricing, resolveCollegeRates, type RateTable } from "@/lib/money";
-import { TopBar } from "@/components/chrome";
-import OrderNewClient from "./_components/OrderNewClient";
-import { listDropSlots } from "@/lib/actions/slots";
-import { dayLabel } from "@/lib/slots";
 import { redirect } from "next/navigation";
 
-export default async function OrderNewPage({ searchParams }: { searchParams: Promise<Record<string, string>> }) {
-  const student = await requireStudentOrRedirect();
-  const appConfig = await db.appConfig.findUnique({ where: { id: "main" } });
-  const college = await db.college.findUnique({ where: { id: student.collegeId } });
-
-  if (!appConfig || !college) redirect("/c");
-
-  // One open draft at a time (owner, Oct 2026: bulk undropped drafts were
-  // flooding the counter's queue) — send the student straight to it instead
-  // of letting them fill out a new order that the server will then refuse.
-  const openDraft = await db.order.findFirst({ where: { studentId: student.id, status: "draft" }, select: { id: true } });
-  if (openDraft) redirect(`/c/orders/${openDraft.id}?pendingDraft=1`);
-
-  const rates = resolveCollegeRates(appConfig.rates as unknown as RateTable, college.rates as unknown as RateTable | null);
-  const collegeHasRatesOverride = !!college.rates;
-  const gstEnabled = (appConfig.settings as Record<string, unknown>)?.gstEnabled !== false;
-  const gstPct = gstEnabled ? Number(appConfig.gstPct) : 0;
-
-  const sp = await searchParams;
-  const serviceParam = sp.service || "washIron";
-  const reorderParam = sp.reorder;
-
-  // Validate service is enabled (serviceOn also rejects an unknown service)
-  const feat = student.college.features;
-  if (!serviceOn(feat, serviceParam)) {
-    redirect("/c");
-  }
-
-  // If reorder, load items from that order
-  let reorderItems: { label: string; qty: number }[] = [];
-  if (reorderParam) {
-    const originalOrder = await db.order.findUnique({ where: { id: reorderParam } });
-    if (originalOrder?.studentId === student.id) {
-      const items = originalOrder.items as unknown as Array<{ label: string; qty: number }>;
-      reorderItems = items.map((i) => ({ label: i.label, qty: i.qty }));
-    }
-  }
-
-  const enabledServices = [
-    { key: "washIron", flag: "svc_wash", label: "Wash & Iron" },
-    { key: "washFold", flag: "svc_washfold", label: "Wash & Fold" },
-    { key: "ironOnly", flag: "svc_iron", label: "Iron Only" },
-    { key: "dryClean", flag: "svc_dryclean", label: "Dry Clean" },
-  ].filter((s) => featureOn(feat, s.flag as FeatureKey));
-
-  // Bookable drop-off windows for this student's campus (empty = feature unused here).
-  const slots = await listDropSlots();
-  const slotDayLabels: Record<string, string> = {};
-  for (const s of slots) slotDayLabels[s.dateStr] ||= dayLabel(s.dateStr);
-
-  return (
-    <div className="screen">
-      <TopBar title="New order" sub="Declare what you'll bring" back="/c" />
-
-      <div className="pad">
-        <OrderNewClient
-          enabledServices={enabledServices}
-          currentService={serviceParam}
-          allRates={Object.fromEntries(enabledServices.map((sv) => [sv.key, rates[sv.key]?.items ?? []]))}
-          gstPct={gstPct}
-          expressEnabled={featureOn(feat, "express")}
-          hasActiveSubscription={!!student.subscription?.active}
-          collegeUsesCycles={collegeUsesCycleBasedPricing(serviceParam, collegeHasRatesOverride)}
-          collegeExpressOverride={college.expressRates as Record<string, number> | null}
-          reorderItems={reorderItems}
-          slots={slots}
-          slotDayLabels={slotDayLabels}
-        />
-      </div>
-    </div>
-  );
+/* Owner, 2026-11: students no longer place their own orders — staff create
+   the order at the counter after scanning the student's one-time QR
+   (lib/actions/students.ts createScanCode). placeOrder() itself refuses
+   unconditionally now (lib/actions/orders.ts); this route just keeps a
+   direct link or old bookmark from reaching a dead form instead of /c. */
+export default async function OrderNewPage() {
+  await requireStudentOrRedirect();
+  redirect("/c");
 }

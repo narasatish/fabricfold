@@ -76,7 +76,7 @@ export default async function ProfilePage() {
             <Svg name="chevR" size={18} />
           </Link>
 
-          <MyQr studentId={student.id} />
+          <MyQr />
 
           <ProfileClient studentName={student.name} hasPasscode={!!student.passwordHash} />
         </div>

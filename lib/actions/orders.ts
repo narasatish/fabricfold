@@ -3,12 +3,10 @@
    Every mutation: validate role -> write (transaction) -> audit where the
    prototype does -> realtime broadcast -> notification. */
 import { db, dbSchemaPrefix } from "../db";
-import { featureOn, serviceOn } from "../features";
 import { enqueueSheetEvent, enqueuePaymentEvent, customerIdFor, istStamp, flushSoon } from "../sheet-events";
 import { Prisma } from "../generated/prisma/client";
 import { requireStudent, requireStaff, requireStaffPerm, assertSameCollege } from "../auth";
 import { createInvoice, createCreditNote, shouldInvoiceOrder, computeBill, excessWeightCharge, CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, expressItemRate, collegeUsesCycleBasedPricing, resolveCollegeRates, validWeight, isMoneyAmount, REFUND_APPROVAL_THRESHOLD } from "../money";
-import { assertSlotBookable } from "../slot-capacity";
 import { publish, orderChannels } from "../realtime";
 import { pushNotif, audit, touchStudentActivity } from "../notify";
 import { notifyOwner } from "../mail";
@@ -83,99 +81,17 @@ function cycleItems(service: string, label: string, cycles: number) {
   return [{ label: `${label} — cycle`, rate: CYCLE_RATES[service], qty: n }];
 }
 
-export async function placeOrder(input: { service: string; items: { label: string; qty: number }[]; cycles?: number; express: boolean; dropSlotAt?: string }) {
-  const stu = await requireStudent();
-  /* A draft is a pre-booking nobody has dropped off yet. Letting a student
-     stack up endless drafts was flooding the counter's queue with orders that
-     were never coming (owner, Oct 2026: "bulk drafts... hectic") — so one open
-     draft blocks a new one until it's dropped off (accepted) or cancelled. */
-  const openDraft = await db.order.findFirst({ where: { studentId: stu.id, status: "draft" }, select: { id: true } });
-  if (openDraft) {
-    return { ok: false as const, error: `Finish or cancel your pending order #${openDraft.id.slice(-4)} first` };
-  }
-  const cfg = await getConfig(stu.collegeId);
-  const rate = cfg.rates[input.service];
-  if (!rate) return { ok: false as const, error: "Unknown service" };
-  if (!serviceOn(stu.college.features, input.service)) {
-    return { ok: false as const, error: "This service is not available at your campus" };
-  }
-
-  const usesCycles = collegeUsesCycleBasedPricing(input.service, cfg.collegeHasRatesOverride);
-  const cyclesCount = usesCycles ? Math.min(10, Math.max(1, Math.floor(input.cycles ?? 1))) : 1;
-  /* Express defaults OFF. The old `!== false` meant a college whose map
-     lacked the key would have the surcharge applied anyway — a money path
-     turned on by an absent flag rather than a deliberate one. */
-  const express = input.express && featureOn(stu.college.features, "express");
-  const items = usesCycles
-    ? cycleItems(input.service, rate.label, cyclesCount)
-    : input.items
-        .filter((i) => i.qty > 0)
-        .map((i) => {
-          const found = rate.items.find((r) => r[0] === i.label);
-          if (!found) throw new Error("Unknown item " + i.label);
-          return { label: found[0], rate: express ? expressItemRate(found[1]) : found[1], qty: Math.min(99, Math.floor(i.qty)) };
-        });
-  if (!items.length) return { ok: false as const, error: usesCycles ? "Pick at least one cycle" : "Add at least one piece" };
-
-  const sub = items.reduce((s, i) => s + i.rate * i.qty, 0);
-  // Cycle colleges add a flat same-day fee; per-piece colleges already
-  // priced the premium into each item's rate above, so no separate charge.
-  const surcharge = express && usesCycles ? collegeExpressFee(input.service, cfg.collegeExpressOverride) : 0;
-  // Cycle-based orders never add GST; per-piece orders add GST if enabled.
-  const gst = !usesCycles && cfg.gstEnabled ? Math.round((sub + surcharge) * (cfg.gstPct / 100)) : 0;
-  const total = sub + surcharge + gst;
-
-  /* Drop-off slot is optional; when given, re-validate server-side (existence,
-     still in the future, and capacity) — never trust the client's pick.
-     assertSlotBookable's own capacity check MUST run in the same transaction
-     as this order's creation, not before it as a separate round trip — two
-     students booking the last seat in a slot would otherwise both pass the
-     stale check before either's insert commits, silently overbooking it. */
-  let o;
-  try {
-    o = await db.$transaction(async (tx) => {
-      /* The "one open draft" check above runs OUTSIDE this transaction, with
-         no re-check inside it and no DB constraint backing it (no unique
-         index on (studentId) WHERE status='draft') — found 2026-10-20 in a
-         deep audit: two concurrent placeOrder calls from the same student
-         (a double-tap, a retried request after a dropped response) both pass
-         the stale check and both create a draft, defeating the rule this
-         whole check exists for ("bulk drafts... hectic", owner, Oct 2026).
-         Locked and re-checked fresh, same pattern as every other
-         precondition-then-write in this file. */
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`draft|${stu.id}`}))`;
-      const stillOpen = await tx.order.findFirst({ where: { studentId: stu.id, status: "draft" }, select: { id: true } });
-      if (stillOpen) throw new Error(`Finish or cancel your pending order #${stillOpen.id.slice(-4)} first`);
-      let dropSlotAt: Date | null = null, dropSlotEndAt: Date | null = null;
-      if (input.dropSlotAt) {
-        dropSlotEndAt = await assertSlotBookable(tx, stu.collegeId, input.dropSlotAt);
-        dropSlotAt = new Date(input.dropSlotAt);
-      }
-      return tx.order.create({
-        data: {
-          id: await nextOrderId(tx), studentId: stu.id, collegeId: stu.collegeId, service: input.service,
-          items, declaredPieces: items.reduce((s, i) => s + i.qty, 0),
-          cyclesCount, noGst: usesCycles,
-          express, surcharge, status: "draft",
-          dropSlotAt, dropSlotEndAt,
-          subtotal: sub, gst, gstPctSnapshot: cfg.gstEnabled ? cfg.gstPct : 0, total,
-          timeline: { create: { status: "placed" } },
-        },
-      });
-    }, { timeout: 15_000 }); // assertSlotBookable's advisory lock can queue a concurrent caller past Prisma's 5s default
-  } catch (e) {
-    // Same reasoning as acceptOrder's catch: a thrown Error with no .code is
-    // one of assertSlotBookable's own business messages (e.g. "That slot is
-    // full") and is safe to show; only a genuine internal error gets hidden.
-    const hasCode = !!(e as { code?: string }).code;
-    return { ok: false as const, error: !hasCode ? (e as Error).message : "Order placement failed — please try again" };
-  }
-  bcast(o, "order.created");
-  void notifyOwner(
-    `New order #${o.id.slice(-4)}${express ? " (EXPRESS)" : ""}`,
-    `${stu.name} pre-booked ${cfg.rates[input.service].label}: ${items.reduce((s, i) => s + i.qty, 0)} pieces, est. ₹${total}. Campus: ${stu.college.name}.`,
-  );
-  return { ok: true as const, id: o.id };
+/* Owner, 2026-11: students no longer place their own orders — staff create
+   the order at the counter (walkInOrder) once the student drops off their
+   laundry, found via their one-time scan QR (lib/actions/students.ts
+   createScanCode). This action is kept, not deleted — it's referenced by
+   tests/scan-token-flow.test.ts and the id/slot-booking machinery it used
+   (nextOrderId, assertSlotBookable) is exercised elsewhere too — but it is
+   now a dead end for every caller: this is the real boundary, not just a
+   hidden "Start an order" button. */
+export async function placeOrder(_input: { service: string; items: { label: string; qty: number }[]; cycles?: number; express: boolean; dropSlotAt?: string }) {
+  await requireStudent();
+  return { ok: false as const, error: "Orders are created by staff at the counter — just show your QR code there." };
 }
 
 /* ---------- Staff: verify & accept (receive) ---------- */
@@ -641,23 +557,31 @@ export async function advanceStatus(orderId: string, input?: { countedPieces?: n
 }
 
 /* ---------- Staff: collect (verify pickup code / order id) ---------- */
-export async function collectOrder(orderId: string, code: string) {
+/* `code` is OPTIONAL (owner, 2026-11: simplify delivery — the student's
+   one-time scan QR, lib/actions/students.ts createScanCode, already got
+   staff to this exact account/order; that scan IS the presence check, so
+   typing a second pickup code is no longer required). Passing one still
+   works unchanged. */
+export async function collectOrder(orderId: string, code?: string) {
   const st = await requireStaff(1);
   const o = await db.order.findUniqueOrThrow({ where: { id: orderId } });
   assertSameCollege(st, o.collegeId);
-  /* Found during a deep security pass (2026-11-23): this lookup never
-     filtered on expiresAt, unlike the identical login-OTP lookup in
-     auth.ts (`expiresAt: { gt: new Date() }`). A pickup code is created
-     with a 7-day expiresAt, but with no expiry filter here it kept
-     matching forever — the column was set on every "ready" order and
-     then silently never enforced. Order ID / Customer ID (the two other
-     accepted inputs below) aren't time-limited by design and are
-     unaffected by this fix; only the short numeric pickup code now
-     actually expires as the UI already implies it does. */
-  const otp = await db.otp.findFirst({ where: { purpose: "pickup", refId: o.id, usedAt: null, expiresAt: { gt: new Date() } } });
-  const v = (code || "").replace(/[^0-9]/g, "");
-  const ok = (otp && v === otp.code) || v === o.id.slice(-4) || v === o.id.replace(/\D/g, "");
-  if (!ok) return { ok: false as const, error: "Code / Order ID does not match" };
+  let otp: Awaited<ReturnType<typeof db.otp.findFirst>> = null;
+  if (code) {
+    /* Found during a deep security pass (2026-11-23): this lookup never
+       filtered on expiresAt, unlike the identical login-OTP lookup in
+       auth.ts (`expiresAt: { gt: new Date() }`). A pickup code is created
+       with a 7-day expiresAt, but with no expiry filter here it kept
+       matching forever — the column was set on every "ready" order and
+       then silently never enforced. Order ID / Customer ID (the two other
+       accepted inputs below) aren't time-limited by design and are
+       unaffected by this fix; only the short numeric pickup code now
+       actually expires as the UI already implies it does. */
+    otp = await db.otp.findFirst({ where: { purpose: "pickup", refId: o.id, usedAt: null, expiresAt: { gt: new Date() } } });
+    const v = code.replace(/[^0-9]/g, "");
+    const ok = (otp && v === otp.code) || v === o.id.slice(-4) || v === o.id.replace(/\D/g, "");
+    if (!ok) return { ok: false as const, error: "Code / Order ID does not match" };
+  }
   // Payment-timing rule (owner, Sep 2026):
   // "for bvrit payment is mandatory we cant deliver unless payment is done
   // or recorded unless it is complaint order" — BVRIT: unpaid orders with a

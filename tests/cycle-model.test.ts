@@ -136,14 +136,9 @@ describe("as faculty", () => {
 });
 
 describe("the screens quote what the server bills", () => {
-  it("customer order form: cycle stepper, final price, no GST line", () => {
-    const ui = read("app/c/order/new/_components/OrderNewClient.tsx");
-    expect(ui).toMatch(/const gst = cycleBased \? 0 :/);
-    expect(ui).toMatch(/cycles: cycleBased \? cycles : undefined/);
-    expect(ui).toMatch(/CYCLE_KG_LIMIT \* cycles\} kg total/);
-    // Students never see a cycle price; a plan order shows the plan covers it.
-    expect(ui).not.toMatch(/per cycle · up to/);
-  });
+  // The customer self-order form (OrderNewClient.tsx) was retired 2026-11 —
+  // students no longer place their own orders, see tests/scan-token-flow.test.ts
+  // — so its cycle-pricing display no longer applies.
   it("staff accept sheet scales the allowance with the cycle count", () => {
     const ui = read("app/s/orders/[id]/_components/OrderClient.tsx");
     expect(ui).toMatch(/const allowanceKg = CYCLE_KG_LIMIT \* \(cycleBased \? acceptInput\.cycles : 1\)/);
@@ -210,23 +205,8 @@ describe("the dry-clean menu", () => {
   });
 });
 
-describe("switching the service tab shows THAT service's menu", () => {
-  /* Found live: the page passed only the FIRST service's item list, so a
-     student on the Dry Clean tab was quoted Wash & Iron's names and prices.
-     A menu that lies about prices is the bug a laundry can least afford. */
-  it("the page hands over the whole rates map", () => {
-    expect(read("app/c/order/new/page.tsx")).toMatch(/allRates=\{Object\.fromEntries\(enabledServices\.map/);
-  });
-  it("the client derives items from the SELECTED service and clears stale counts", () => {
-    const ui = read("app/c/order/new/_components/OrderNewClient.tssx".replace(".tssx", ".tsx"));
-    expect(ui).toMatch(/const rateItems = allRates\[service\] \?\? \[\]/);
-    expect(ui).toMatch(/setService\(sv\); setQuantities\(\{\}\);/);
-  });
-  it("the subtotal counts cycles on a cycle order, not zero pieces", () => {
-    const ui = read("app/c/order/new/_components/OrderNewClient.tsx");
-    expect(ui).toMatch(/Cycles \(\{cycles\}\)/);
-  });
-});
+// "switching the service tab shows THAT service's menu" (app/c/order/new's
+// OrderNewClient.tsx) was retired along with student self-ordering, 2026-11.
 
 describe("urgent (same-day): flat fee on cycle colleges, 50%-per-piece on per-piece colleges (owner, third pass Sep 2026)", () => {
   it("Rs 79 Wash & Fold and Dry Cleaning, Rs 99 Wash & Iron — the flat fee cycle colleges still use", async () => {
@@ -258,22 +238,19 @@ describe("urgent (same-day): flat fee on cycle colleges, 50%-per-piece on per-pi
     expect(expressItemRate(20)).toBe(30);
     expect(expressItemRate(15)).toBe(23); // 22.5 rounds to 23
   });
-  it("cycle colleges keep the flat fee at all three entry points, gated on usesCycles", () => {
-    /* place (1) + accept (urgent-cash branch + general surcharge = 2) +
-       walkIn (same shape = 2) = 5 call sites, each now gated so a per-piece
-       college's order never adds this flat fee on top of its per-item rate. */
-    expect(orders.match(/collegeExpressFee\((input|o)\.service, cfg\.collegeExpressOverride\)/g)?.length).toBe(5);
-    expect(orders).toMatch(/const surcharge = express && usesCycles \? collegeExpressFee\(input\.service, cfg\.collegeExpressOverride\) : 0;/);
+  it("cycle colleges keep the flat fee at both remaining entry points, gated on usesCycles", () => {
+    /* accept (urgent-cash branch + general surcharge = 2) + walkIn (same
+       shape = 2) = 4 call sites now that placeOrder (student self-order)
+       is retired — each still gated so a per-piece college's order never
+       adds this flat fee on top of its per-item rate. */
+    expect(orders.match(/collegeExpressFee\((input|o)\.service, cfg\.collegeExpressOverride\)/g)?.length).toBe(4);
     expect(orders).toMatch(/const surcharge = o\.express && usesCycles \? collegeExpressFee\(o\.service, cfg\.collegeExpressOverride\) : 0;/);
     expect(orders).toMatch(/const surcharge = input\.express && usesCycles \? collegeExpressFee\(input\.service, cfg\.collegeExpressOverride\) : 0;/);
   });
-  it("per-piece colleges price the premium into each item's rate at all three entry points", () => {
-    expect(orders.match(/expressItemRate\(found\[1\]\)/g)?.length).toBe(3);
+  it("per-piece colleges price the premium into each item's rate at both remaining entry points", () => {
+    expect(orders.match(/expressItemRate\(found\[1\]\)/g)?.length).toBe(2);
   });
-  it("both apps apply the right model per college: flat fee for cycle colleges, per-piece premium otherwise", () => {
-    const ui = read("app/c/order/new/_components/OrderNewClient.tsx");
-    expect(ui).toMatch(/rate: express && !cycleBased \? expressItemRate\(rate\) : rate/);
-    expect(ui).toMatch(/const surcharge = express && cycleBased \? collegeExpressFee\(service, collegeExpressOverride\) : 0;/);
+  it("the staff order screen applies the flat same-day fee for cycle colleges", () => {
     expect(read("app/s/orders/[id]/_components/OrderClient.tsx")).toMatch(/flat same-day fee of ₹\{collegeExpressFee\(order\.service, collegeExpressOverride\)\}/);
   });
   it("the walk-in counter form prices the premium into wiSubtotal for per-piece colleges", () => {
@@ -287,9 +264,5 @@ describe("urgent (same-day): flat fee on cycle colleges, 50%-per-piece on per-pi
   });
 });
 
-describe("Pre-book is alive on cycle orders", () => {
-  it("the button no longer gates on pieces, which are always zero for cycles", () => {
-    const ui = read("app/c/order/new/_components/OrderNewClient.tsx");
-    expect(ui).toMatch(/disabled=\{loading \|\| \(!cycleBased && pieces === 0\) \|\| \(cycleBased && !hasActiveSubscription\)\}/);
-  });
-});
+// "Pre-book" (the OrderNewClient.tsx self-order form) was retired along
+// with student self-ordering, 2026-11 — see tests/scan-token-flow.test.ts.

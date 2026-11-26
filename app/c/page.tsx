@@ -1,8 +1,7 @@
 import { requireStudentOrRedirect } from "@/lib/auth";
-import { featureOn, type FeatureKey } from "@/lib/features";
 import { db } from "@/lib/db";
 import { TopBar } from "@/components/chrome";
-import { Svg, type IconName } from "@/components/icons";
+import { Svg } from "@/components/icons";
 import { fmt, dateStr, loyaltyBadge, STATUS_LABEL } from "@/lib/format";
 import Link from "next/link";
 import HomeClient from "./_components/HomeClient";
@@ -44,16 +43,6 @@ export default async function CustomerHome() {
   // Check subscription expiry
   const sub = student.subscription;
   const subExpiryWarning = sub?.active && sub.expiresAt && sub.expiresAt.getTime() - Date.now() < 30 * 86400000;
-
-  // Build enabled services
-  const services: Array<{ key: string; flag: FeatureKey; label: string; icon: IconName }> = [
-    { key: "washIron", flag: "svc_wash", label: "Wash & Iron", icon: "layers" },
-    { key: "washFold", flag: "svc_washfold", label: "Wash & Fold", icon: "gift" },
-    { key: "ironOnly", flag: "svc_iron", label: "Iron Only", icon: "shirt" },
-    { key: "dryClean", flag: "svc_dryclean", label: "Dry Clean", icon: "bag" },
-  ];
-
-  const enabledServices = services.filter((s) => featureOn(college.features, s.flag));
 
   const loyaltyTier = loyaltyBadge(student.lifetimePieces);
 
@@ -188,20 +177,18 @@ export default async function CustomerHome() {
           </Link>
         )}
 
-        {/* Service tiles */}
-        <div className="sec-title mt20">Start an order</div>
-        <div className="svc-grid">
-          {enabledServices.map((svc) => (
-            <Link key={svc.key} href={`/c/order/new?service=${svc.key}`} className="card svc-tile" data-svc={svc.key}>
-              <div className="icon-tile">
-                <Svg name={svc.icon} size={21} />
-              </div>
-              <div className="svc-lbl">{svc.label}</div>
-            </Link>
-          ))}
-        </div>
-        <Link href="/c/order/new" className="btn mt12">
-          <Svg name="plus" size={20} /> Pre-book an order
+        {/* Drop off at the counter — orders are created by staff now, not here */}
+        <Link href="/c/profile" className="card between mt20" style={{ padding: "14px 16px", width: "100%", textDecoration: "none" }}>
+          <span className="row gap8">
+            <span style={{ color: "var(--teal)" }}>
+              <Svg name="camera" size={20} />
+            </span>
+            <span>
+              <span className="h-sm">Dropping off laundry?</span>
+              <div className="muted" style={{ fontSize: "12px" }}>Show your QR code at the counter</div>
+            </span>
+          </span>
+          <Svg name="chevR" size={18} />
         </Link>
 
         {/* Draft orders */}

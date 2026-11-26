@@ -86,7 +86,6 @@ function OrderRow({ order, rates }: { order: Order; rates: Record<string, any> }
   const items = order.items as unknown as Array<{ label: string; qty: number }>;
   const totalQty = items.reduce((s, i) => s + i.qty, 0);
   const rateLabel = rates?.[order.service]?.label || order.service;
-  const canReorder = !["draft", "cancelled"].includes(order.status);
 
   return (
     <div className="card mt10" style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: "13px" }}>
@@ -132,16 +131,6 @@ function OrderRow({ order, rates }: { order: Order; rates: Record<string, any> }
           </div>
         </div>
       </Link>
-      {canReorder && (
-        <Link
-          href={`/c/order/new?service=${order.service}&reorder=${order.id}`}
-          className="btn xs sec"
-          title="Order again"
-          style={{ flexShrink: 0 }}
-        >
-          <Svg name="bag" size={15} />
-        </Link>
-      )}
       <Link href={`/c/orders/${order.id}`} aria-label={`View order #${order.id.slice(-4)}`} style={{ color: "var(--faint)", flexShrink: 0 }}>
         <Svg name="chevR" size={18} />
       </Link>

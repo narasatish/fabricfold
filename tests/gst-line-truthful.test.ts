@@ -24,7 +24,8 @@ describe("gstLineVisible", () => {
 
 describe("no bill screen hides charged GST behind the blanket flag", () => {
   const screens = [
-    "app/c/order/new/_components/OrderNewClient.tsx",
+    // OrderNewClient.tsx (student self-order form) was retired 2026-11 —
+    // see tests/scan-token-flow.test.ts.
     "app/c/orders/[id]/page.tsx",
     "app/c/wallet/_components/WalletClient.tsx",
     "app/s/customers/[id]/_components/CustomerClient.tsx",

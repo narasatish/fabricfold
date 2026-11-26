@@ -1,10 +1,9 @@
 "use client";
 import { TimeAgo } from "@/components/time-ago";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { Qr } from "@/components/qr";
-import jsQR from "jsqr";
 import { fmt, dateStr, initials, STATUS_LABEL, upiLink } from "@/lib/format";
 import { CYCLE_KG_LIMIT, CYCLE_RATES, collegeExpressFee, collegeUsesCycleBasedPricing, gstLineVisible, REFUND_APPROVAL_THRESHOLD } from "@/lib/money";
 import { isOverdue } from "@/lib/money";
@@ -144,10 +143,6 @@ export default function StaffOrderClient({
   // money-moving buttons used to fire the action twice with nothing to stop it.
   const [actionBusy, setActionBusy] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const [collectCode, setCollectCode] = useState("");
-  const [scanningCollect, setScanningCollect] = useState(false);
-  const collectVideoRef = useRef<HTMLVideoElement>(null);
-  const collectCanvasRef = useRef<HTMLCanvasElement>(null);
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "upi">("cash");
   const [applyCredits, setApplyCredits] = useState(false);
   const [staffInvoice, setStaffInvoice] = useState(false);
@@ -337,21 +332,21 @@ export default function StaffOrderClient({
     }
   };
 
-  // Handler: collect order — shared by the typed-code path and the scanner,
-  // which passes the just-scanned code directly rather than relying on
-  // `collectCode` state (still async at that point, so the state value could
-  // be stale on the very first render after a scan).
-  const handleCollect = async (codeOverride?: string) => {
+  // Handler: mark delivered. No code needed any more — the student's
+  // one-time scan QR (lib/actions/students.ts createScanCode) already got
+  // staff to this exact account/order, and that scan IS the presence
+  // check (owner, 2026-11: keep the counter flow to one scan, not a scan
+  // plus a typed code).
+  const handleCollect = async () => {
     setActionBusy(true);
     try {
-      const r = await collectOrder(order.id, codeOverride ?? collectCode);
+      const r = await collectOrder(order.id);
       if (!r.ok) {
         toast(r.error || "Failed", true);
         return;
       }
-      toast("Order collected");
+      toast("Order delivered");
       setShowCollectSheet(false);
-      setScanningCollect(false);
       router.refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
@@ -359,69 +354,6 @@ export default function StaffOrderClient({
       setActionBusy(false);
     }
   };
-
-  // Camera-based scan for the pickup QR shown on the student's own ready-order
-  // screen — same one-time, per-order pickup code as the typed path, just
-  // read off a camera frame instead of a keyboard. jsQR (pure JS, no WASM),
-  // same approach as the staff student-lookup scanner (app/s/scan/page.tsx).
-  useEffect(() => {
-    if (!scanningCollect) return;
-    let stream: MediaStream | null = null;
-    let raf = 0;
-    let stopped = false;
-
-    async function start() {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        if (stopped) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        const video = collectVideoRef.current;
-        if (!video) return;
-        video.srcObject = stream;
-        await video.play();
-        tick();
-      } catch {
-        toast("Camera unavailable — type the code instead", true);
-        setScanningCollect(false);
-      }
-    }
-
-    function tick() {
-      if (stopped) return;
-      const video = collectVideoRef.current;
-      const canvas = collectCanvasRef.current;
-      if (video && canvas && video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const code = jsQR(frame.data, frame.width, frame.height);
-          if (code && code.data) {
-            stopped = true;
-            stream?.getTracks().forEach((t) => t.stop());
-            const scanned = code.data.trim().toUpperCase();
-            setCollectCode(scanned);
-            setScanningCollect(false);
-            void handleCollect(scanned);
-            return;
-          }
-        }
-      }
-      raf = requestAnimationFrame(tick);
-    }
-
-    start();
-    return () => {
-      stopped = true;
-      cancelAnimationFrame(raf);
-      stream?.getTracks().forEach((t) => t.stop());
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanningCollect]);
 
   // Handler: record payment (cash)
   const handlePayCash = async () => {
@@ -797,7 +729,7 @@ export default function StaffOrderClient({
 
               {order.status === "ready" && (
                 <button className="btn mt16" onClick={() => setShowCollectSheet(true)}>
-                  <Svg name="check" size={18} /> Collect order
+                  <Svg name="check" size={18} /> Mark delivered
                 </button>
               )}
             </>
@@ -1203,48 +1135,15 @@ export default function StaffOrderClient({
       </Sheet>
 
       {/* Collect sheet */}
-      <Sheet open={showCollectSheet} onClose={() => { setShowCollectSheet(false); setScanningCollect(false); }}>
+      <Sheet open={showCollectSheet} onClose={() => setShowCollectSheet(false)}>
         <div className="pad">
-          <h2 style={{ marginBottom: "16px" }}>Collect order</h2>
-          <p className="muted" style={{ fontSize: "13px", marginBottom: "12px" }}>
-            Ask the student for their 4-digit pickup code or their Order ID / FabricFold ID — you can see this order's own number on screen, but always have the student say or show it themselves before you type it in.
+          <h2 style={{ marginBottom: "16px" }}>Mark delivered</h2>
+          <p className="muted" style={{ fontSize: "13px", marginBottom: "16px" }}>
+            Confirm the student is here and has their bag, then mark this order delivered.
           </p>
-
-          {scanningCollect ? (
-            <>
-              <div className="card" style={{ overflow: "hidden", borderRadius: 14, position: "relative" }}>
-                <video ref={collectVideoRef} playsInline muted style={{ width: "100%", display: "block", background: "#000" }} />
-                <canvas ref={collectCanvasRef} style={{ display: "none" }} />
-              </div>
-              <div className="muted center mt12" style={{ fontSize: "12.5px" }}>
-                Point the camera at the student's pickup QR
-              </div>
-              <button className="btn ghost mt12" onClick={() => setScanningCollect(false)}>
-                Type the code instead
-              </button>
-            </>
-          ) : (
-            <>
-              <div className="field">
-                <label>Code or tag</label>
-                <input
-                  className="input"
-                  type="text"
-                  placeholder="e.g. 1234"
-                  autoFocus
-                  value={collectCode}
-                  onChange={(e) => setCollectCode(e.target.value.toUpperCase())}
-                  onKeyDown={(e) => { if (e.key === "Enter" && collectCode.trim() && !actionBusy) handleCollect(); }}
-                />
-              </div>
-              <button className="btn mt16" onClick={() => handleCollect()} disabled={actionBusy}>
-                <Svg name="check" size={18} /> {actionBusy ? "Collecting…" : "Verify & collect"}
-              </button>
-              <button className="btn ghost mt10" onClick={() => setScanningCollect(true)} disabled={actionBusy}>
-                <Svg name="camera" size={17} /> Scan QR instead
-              </button>
-            </>
-          )}
+          <button className="btn mt4" onClick={() => handleCollect()} disabled={actionBusy}>
+            <Svg name="check" size={18} /> {actionBusy ? "Marking…" : "Mark delivered"}
+          </button>
         </div>
       </Sheet>
 

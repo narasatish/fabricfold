@@ -610,11 +610,10 @@ describe("order ids are simple, sequential, and never reused", () => {
     expect(src).not.toMatch(/const orderCode = /);
   });
 
-  it("all three order-creation call sites use nextOrderId, not the old generator", () => {
+  it("the remaining order-creation call sites use nextOrderId, not the old generator", () => {
     const src = read("lib/actions/orders.ts");
-    // placeOrder
-    const placeOrderFn = src.slice(src.indexOf("export async function placeOrder"), src.indexOf("export async function acceptOrder"));
-    expect(placeOrderFn).toMatch(/id: await nextOrderId\(tx\)/);
+    // placeOrder was retired 2026-11 (students no longer self-place orders —
+    // see tests/scan-token-flow.test.ts) and no longer creates anything.
     // walkInOrder
     const walkInFn = src.slice(src.indexOf("export async function walkInOrder"), src.indexOf("export async function walkInOrder") + 6000);
     expect(walkInFn).toMatch(/const id = await nextOrderId\(tx\)/);

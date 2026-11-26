@@ -64,13 +64,15 @@ export default function ScanClient() {
       stopped = true;
       setScanning(false);
       stream?.getTracks().forEach((t) => t.stop());
-      // The QR encodes a full /s/scan/{id} URL (see app/c/profile/_components/MyQr.tsx)
-      // so it also works with a generic camera app; here, pull the id straight out
-      // and go, instead of a second redirect round-trip.
+      // The QR encodes a full /s/scan/{token} URL (see
+      // app/c/profile/_components/MyQr.tsx) — token is a one-time,
+      // short-lived code, not the student's id, so it must go through
+      // that route (which looks it up, consumes it, and redirects) rather
+      // than jumping straight to /s/customers/{token}.
       const match = text.match(/\/s\/scan\/([A-Za-z0-9]+)/);
-      const id = match ? match[1] : null;
-      if (id) {
-        router.push(`/s/customers/${id}`);
+      const token = match ? match[1] : null;
+      if (token) {
+        router.push(`/s/scan/${token}`);
       } else {
         setError("That QR code isn't a FabricFold student code.");
         setScanning(true);

@@ -1,8 +1,29 @@
 "use server";
 /* Admin student tools: bulk import and campus-wide broadcast. */
+import crypto from "crypto";
 import { db } from "../db";
-import { requireStaff, assertSameCollege } from "../auth";
+import { requireStaff, requireStudent, assertSameCollege } from "../auth";
 import { audit } from "../notify";
+
+/* One-time, short-lived scan code for the counter — covers BOTH drop-off
+   (staff scans it to land on the student's account and create the order)
+   and pickup (same screen, scanned again to land on the account and mark
+   the ready order delivered). Owner (2026-11): the QR must be different
+   every time it's shown — a static per-student code could be screenshotted
+   and reused by someone else, or reused by the same student to claim an
+   order drop-off/pickup that didn't actually happen at the counter. A fresh
+   random token, single-use (usedAt) and short-lived (10 min), closes that:
+   screenshotting it only helps until it's scanned once or it expires. */
+const SCAN_CODE_TTL_MS = 10 * 60 * 1000;
+
+export async function createScanCode() {
+  const stu = await requireStudent();
+  const token = crypto.randomBytes(16).toString("hex");
+  await db.otp.create({
+    data: { phone: stu.phone, purpose: "scan", code: token, refId: stu.id, expiresAt: new Date(Date.now() + SCAN_CODE_TTL_MS) },
+  });
+  return { ok: true as const, token, expiresAt: Date.now() + SCAN_CODE_TTL_MS };
+}
 
 /**
  * Find students by customer ID, phone or name — on the SERVER.

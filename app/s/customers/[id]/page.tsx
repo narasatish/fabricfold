@@ -34,36 +34,42 @@ export default async function StaffCustomerPage({ params }: { params: Promise<{ 
      id, regardless of their own role or campus assignment. */
   if (staff.collegeId && staff.collegeId !== student.collegeId) redirect("/s/students");
 
-  /* The bag code (B1001/S1055/G1002.../V1001) is the CUSTOMER-FACING ID —
-     printed on the physical bag, quoted at the counter. student.id is an
-     internal random 6-digit row key nobody outside the database should ever
-     see; the header was showing that instead, which is exactly what looked
-     wrong. Self-heals a missing BVRIT V-code — see customerIdFor() in
-     lib/bagcode.ts — rather than relying on the student having opened the
-     customer app first. */
+  /* Found 2026-11, same pattern as app/s/page.tsx: four independent reads
+     (plus displayId's own read-or-mint) running one after another, on the
+     page every drop-off/pickup scan lands staff on. None of them depend on
+     each other's results, only on `student` above, so batch them. */
   const { customerIdFor } = await import("@/lib/bagcode");
-  const displayId = await customerIdFor(db, student, student.college?.name);
-
-  /* Campuses a student may be moved to, plus each one's closed day so the
-     edit sheet can grey out a wash day the campus does not operate. */
-  const colleges = await db.college.findMany({
-    where: { active: true },
-    select: { id: true, name: true, closedWeekday: true },
-    orderBy: { name: "asc" },
-  });
-  const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
+  const [displayId, colleges, cfg, collegeRatesRow, collegePlansRaw] = await Promise.all([
+    /* The bag code (B1001/S1055/G1002.../V1001) is the CUSTOMER-FACING ID —
+       printed on the physical bag, quoted at the counter. student.id is an
+       internal random 6-digit row key nobody outside the database should
+       ever see; the header was showing that instead, which is exactly what
+       looked wrong. Self-heals a missing BVRIT V-code — see customerIdFor()
+       in lib/bagcode.ts — rather than relying on the student having opened
+       the customer app first. */
+    customerIdFor(db, student, student.college?.name),
+    // Campuses a student may be moved to, plus each one's closed day so the
+    // edit sheet can grey out a wash day the campus does not operate.
+    db.college.findMany({
+      where: { active: true },
+      select: { id: true, name: true, closedWeekday: true },
+      orderBy: { name: "asc" },
+    }),
+    db.appConfig.findUniqueOrThrow({ where: { id: "main" } }),
+    /* Staff placing a walk-in order for THIS student must see THEIR college's
+       rates, not the global default — otherwise a BVRIT walk-in shows St
+       Mary's-style pricing on screen while the actual charge (computed
+       server-side in walkInOrder, already college-aware) differs, which reads
+       as the total being wrong even though it isn't. */
+    db.college.findUnique({ where: { id: student.collegeId }, select: { rates: true, expressRates: true, features: true } }),
+    db.plan.findMany({ where: { collegeId: student.collegeId, active: true }, orderBy: { price: "asc" } }),
+  ]);
   const gstOn = (cfg.settings as Record<string, unknown>)?.gstEnabled !== false;
   const payment = cfg.payment as unknown as { upiId?: string; payeeName?: string };
-  /* Staff placing a walk-in order for THIS student must see THEIR college's
-     rates, not the global default — otherwise a BVRIT walk-in shows St
-     Mary's-style pricing on screen while the actual charge (computed
-     server-side in walkInOrder, already college-aware) differs, which reads
-     as the total being wrong even though it isn't. */
-  const collegeRatesRow = await db.college.findUnique({ where: { id: student.collegeId }, select: { rates: true, expressRates: true, features: true } });
   const expressEnabled = featureOn(collegeRatesRow?.features, "express");
   const effectiveRates = resolveCollegeRates(cfg.rates as unknown as RateTable, collegeRatesRow?.rates as unknown as RateTable | null);
   const SERVICE_LABEL: Record<string, string> = { washIron: "Wash & Iron", washFold: "Wash & Fold", ironOnly: "Iron Only", dryClean: "Dry Clean" };
-  const collegePlans = (await db.plan.findMany({ where: { collegeId: student.collegeId, active: true }, orderBy: { price: "asc" } })).map((p) => {
+  const collegePlans = collegePlansRaw.map((p) => {
     const price = Number(p.price);
     const gstApplies = gstOn && !p.gstFree;
     return {

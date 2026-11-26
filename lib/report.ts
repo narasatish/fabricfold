@@ -181,6 +181,28 @@ export async function computeReport(p: Period, collegeId?: string | null) {
   const compCredit = compensations.filter((c) => c.method === "credit").reduce((s, c) => s + N(c.amount), 0);
   const compCash = compensations.filter((c) => c.method === "cash").reduce((s, c) => s + N(c.amount), 0);
 
+  /* Cash fraud-tightening, 2026-11: `cash`/`expectedDrawer` above already
+     told a manager THAT the drawer doesn't match, but never WHO handled
+     which rupee of it — every cash Payment row looked the same regardless
+     of which staff member recorded it. Payment.recordedBy (added
+     alongside this) now carries that; group it here so a drawer mismatch
+     narrows to a shift/person instead of staying a mystery for the whole
+     day. Unattributed rows (recordedBy null — a student's own online
+     payment, or anything predating this column) are grouped separately
+     rather than silently dropped. */
+  const cashByStaffId = new Map<string, number>();
+  for (const p of payments) {
+    if (p.method !== "cash" || N(p.amount) <= 0) continue;
+    const key = p.recordedBy || "—";
+    cashByStaffId.set(key, (cashByStaffId.get(key) || 0) + N(p.amount));
+  }
+  const staffIds = [...cashByStaffId.keys()].filter((k) => k !== "—");
+  const staffRows = staffIds.length ? await db.staff.findMany({ where: { id: { in: staffIds } }, select: { id: true, name: true } }) : [];
+  const staffName = new Map(staffRows.map((s) => [s.id, s.name]));
+  const cashByStaff = [...cashByStaffId.entries()]
+    .map(([id, amount]) => ({ id, name: id === "—" ? "Unattributed" : staffName.get(id) || "Former staff", amount }))
+    .sort((a, b) => b.amount - a.amount);
+
   return {
     payments, invoices, creditNotes, expenses, orders, compensations, complaints,
     cash, upi, credit, total, refunds, cashOut,
@@ -189,6 +211,7 @@ export async function computeReport(p: Period, collegeId?: string | null) {
     ordersIn: orders.length, ordersDone: done.length, avgTurnaround, avgRating,
     compCredit, compCash, compCount: compensations.length,
     expTotal, net: total - refunds - cashOut - expTotal,
+    cashByStaff,
   };
 }
 

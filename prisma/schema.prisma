@@ -315,6 +315,11 @@ model Order {
   paymentMethod           String? // upi | cash | credit | upi+credit | cash+credit | redo
   creditApplied           Decimal   @default(0)
   usedCycle               Boolean   @default(false)
+  /* Set once the stuck-orders cron has sent the student an apology push for
+     this order sitting too long in received/processing — idempotency, same
+     pattern as Complaint.escalatedAt, so a repeat cron run never re-sends
+     the same "sorry for the delay" notice every time it fires. */
+  delayNotifiedAt         DateTime?
   /**
    * How many cycles this order burns (Sep 2026, cycle-basis billing). A 9 kg
    * bag may deliberately use two cycles — the student's choice — and the
@@ -456,6 +461,16 @@ model Payment {
   // — a real, unguarded double-payment-recording race for exactly those
   // orders. This constraint makes the route's own claim true.
   gatewayRef String? @unique
+
+  /* Which staff member actually took this payment — null for a student's
+     own online payment (payOrder), set for anything a staff member records
+     at the counter (recordPay) or refunds (refundOrder). Added 2026-11:
+     a cash payment had NO attribution at all on the Payment row itself —
+     only an AuditLog entry when staff chose the "GST bill for cash"
+     override, which most cash payments never use. Without this, a drawer
+     mismatch at day's end couldn't even be narrowed to a shift, let alone
+     a person. */
+  recordedBy String?
 
   @@index([collegeId, at])
   /**

@@ -212,6 +212,29 @@ services:
           property: hostport
 
   - type: cron
+    # Found 2026-11: this route (app/api/cron/stuck-orders) existed and
+    # worked, but had no cron entry here — it only ever ran if a staff
+    # member happened to hit it manually (isCronOrStaff allows that too),
+    # so the "stuck order" owner email and the student delay-apology push
+    # it sends were effectively dead. Every 2h, not daily — a 6h-stuck
+    # order deserves to be caught within the same working day it happens.
+    name: cron-stuck-orders
+    runtime: node
+    plan: starter
+    region: singapore
+    schedule: "0 */2 * * *"
+    buildCommand: "echo no build needed"
+    startCommand: 'curl -sf -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/stuck-orders"'
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+      - key: APP_URL
+        fromService:
+          type: web
+          name: fabricfold
+          property: hostport
+
+  - type: cron
     name: cron-error-digest
     runtime: node
     plan: starter

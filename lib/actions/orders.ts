@@ -666,7 +666,7 @@ export async function collectOrder(orderId: string, code?: string) {
 }
 
 /* ---------- Payment (shared core: credit split + method + GST invoice) ---------- */
-async function payCore(orderId: string, method: "upi" | "cash", creditApplied: number, opts: { staffInvoice?: boolean; gatewayRef?: string | null }) {
+async function payCore(orderId: string, method: "upi" | "cash", creditApplied: number, opts: { staffInvoice?: boolean; gatewayRef?: string | null; staffId?: string }) {
   /* The `o.paid` check below cannot stop a double tap on its own. Postgres runs
      READ COMMITTED, so two concurrent calls both read paid = false and both
      insert — and Payment rows are immutable, so the duplicate charge could
@@ -681,7 +681,7 @@ async function payCore(orderId: string, method: "upi" | "cash", creditApplied: n
   }
 }
 
-async function payInner(orderId: string, method: "upi" | "cash", creditApplied: number, opts: { staffInvoice?: boolean; gatewayRef?: string | null }) {
+async function payInner(orderId: string, method: "upi" | "cash", creditApplied: number, opts: { staffInvoice?: boolean; gatewayRef?: string | null; staffId?: string }) {
   return db.$transaction(async (tx) => {
     const o = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: { student: true } });
     if (o.paid) throw new Error("Already paid");
@@ -700,11 +700,11 @@ async function payInner(orderId: string, method: "upi" | "cash", creditApplied: 
       if (Number(o.student.credits) < creditApplied) throw new Error("Not enough credits");
       await tx.student.update({ where: { id: o.studentId }, data: { credits: { decrement: creditApplied } } });
       await tx.creditUse.create({ data: { studentId: o.studentId, orderId: o.id, amount: creditApplied } });
-      await tx.payment.create({ data: { method: "credit", amount: creditApplied, orderId: o.id, collegeId: o.collegeId, studentId: o.studentId } });
+      await tx.payment.create({ data: { method: "credit", amount: creditApplied, orderId: o.id, collegeId: o.collegeId, studentId: o.studentId, recordedBy: opts.staffId || null } });
     }
     const rest = total - creditApplied;
     if (rest > 0) {
-      await tx.payment.create({ data: { method, amount: rest, orderId: o.id, collegeId: o.collegeId, studentId: o.studentId, gatewayRef: opts.gatewayRef || null } });
+      await tx.payment.create({ data: { method, amount: rest, orderId: o.id, collegeId: o.collegeId, studentId: o.studentId, gatewayRef: opts.gatewayRef || null, recordedBy: opts.staffId || null } });
     }
     const paymentMethod = creditApplied >= total ? "credit" : creditApplied > 0 ? `${method}+credit` : method;
     const updated = await tx.order.update({ where: { id: o.id }, data: { paid: true, creditApplied, paymentMethod } });
@@ -756,8 +756,15 @@ export async function recordPay(orderId: string, method: "upi" | "cash", applyCr
   const creditApplied = applyCredits ? Math.min(Number(o.student.credits), Number(o.total)) : 0;
   if (staffInvoice && o.noGst) return { ok: false as const, error: "This order was billed without GST — no invoice can be issued" };
   try {
-    const updated = await payCore(orderId, method, creditApplied, { staffInvoice });
-    if (staffInvoice && method === "cash") await audit("GST bill for cash", `#${o.id.slice(-4)}`, st.id);
+    const updated = await payCore(orderId, method, creditApplied, { staffInvoice, staffId: st.id });
+    /* Every cash payment a staff member records gets its own audit entry
+       now, not just the "GST bill for cash" override case — a counter
+       taking cash off-book had no trail at all otherwise beyond the
+       Payment row's `recordedBy`, which isn't shown anywhere staff-facing.
+       Found 2026-11 alongside the recordedBy column, same fraud-tightening
+       pass (owner chose to keep cash, with stricter logging, over banning
+       it outright). */
+    if (method === "cash") await audit(staffInvoice ? "GST bill for cash" : "Cash payment recorded", `#${o.id.slice(-4)} · ${o.student.name} · ₹${Number(o.total)}`, st.id);
     bcast(updated);
     flushSoon();
     return { ok: true as const };
@@ -822,7 +829,7 @@ async function performRefund(st: { id: string; collegeId: string | null }, order
         throw new Error(stillRefundable > 0 ? `Only ₹${stillRefundable} left to refund on this order` : "This order has already been fully refunded");
       }
       await tx.payment.create({
-        data: { method: "refund", refundVia: via, amount: -amount, orderId: o.id, collegeId: o.collegeId, studentId: o.studentId, note: "Refund" + (reason ? " — " + reason : "") },
+        data: { method: "refund", refundVia: via, amount: -amount, orderId: o.id, collegeId: o.collegeId, studentId: o.studentId, note: "Refund" + (reason ? " — " + reason : ""), recordedBy: st.id },
       });
       await enqueuePaymentEvent(tx, { collegeId: o.collegeId, studentId: o.studentId, label: "#" + o.id.slice(-6), method: `refund (${via})`, amount: -amount });
       if (via === "credit") await tx.student.update({ where: { id: o.studentId }, data: { credits: { increment: amount } } });

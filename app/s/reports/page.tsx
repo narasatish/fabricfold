@@ -197,6 +197,26 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
           </>
         )}
 
+        {/* Cash collected, by staff — fraud-tightening pass 2026-11. The
+            drawer total above says whether cash is short; this says whose
+            shift it's short on. Payment.recordedBy is only populated going
+            forward (see lib/report.ts cashByStaff), so "Unattributed" will
+            include a student's own online payment as well as anything
+            recorded before this column existed — not itself suspicious. */}
+        {r.cashByStaff.length > 0 && (
+          <>
+            <div className="sec-title mt20">Cash collected, by staff</div>
+            <div className="card pad">
+              {r.cashByStaff.map((c) => (
+                <div key={c.id} className="kv">
+                  <span className="k">{c.name}</span>
+                  <span className="mono">{fmt(c.amount)}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
         {/* Pending large-refund approvals — Admin/Owner only */}
         {pendingRefunds.length > 0 && (
           <>

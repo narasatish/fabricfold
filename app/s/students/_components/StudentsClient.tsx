@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Svg } from "@/components/icons";
 import { TimeAgo } from "@/components/time-ago";
-import { Seg, Sheet, TopBar, useToast, CampusSwitch, useCampusSwitch } from "@/components/chrome";
+import { Seg, Sheet, Switch, TopBar, useToast, CampusSwitch, useCampusSwitch } from "@/components/chrome";
 import { fmt, initials } from "@/lib/format";
 import { bulkRegisterStudents, broadcastNotice } from "@/lib/actions/students";
 
@@ -41,6 +41,7 @@ export default function StudentsClient({ students, colleges, staffRole }: { stud
   const [showCast, setShowCast] = useState(false);
   const [castScope, setCastScope] = useState<"all" | string>("all");
   const [castText, setCastText] = useState("");
+  const [castWhatsApp, setCastWhatsApp] = useState(false);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -78,11 +79,12 @@ export default function StudentsClient({ students, colleges, staffRole }: { stud
     if (castText.trim().length < 3) return toast("Enter a message", true);
     setBusy(true);
     try {
-      const r = await broadcastNotice(castScope, castText);
+      const r = await broadcastNotice(castScope, castText, castWhatsApp);
       if (!r.ok) return toast(r.error || "Failed", true);
-      toast(`Sent to ${r.sent} student${r.sent === 1 ? "" : "s"}`);
+      toast(`Sent to ${r.sent} student${r.sent === 1 ? "" : "s"}${castWhatsApp ? " (in-app, push & WhatsApp)" : ""}`);
       setShowCast(false);
       setCastText("");
+      setCastWhatsApp(false);
     } catch (e) {
       toast(e instanceof Error ? e.message : "Failed", true);
     } finally {
@@ -226,6 +228,17 @@ export default function StudentsClient({ students, colleges, staffRole }: { stud
           <div className="field">
             <label>Message</label>
             <textarea className="input" style={{ minHeight: "100px" }} placeholder="e.g. Counter closed this Sunday for Diwali. Back Monday 9am." value={castText} onChange={(e) => setCastText(e.target.value)} maxLength={280} />
+          </div>
+          <div className="chip-toggle" style={{ marginBottom: "12px" }}>
+            <div>
+              <div className="h-sm">Also send on WhatsApp</div>
+              <div className="muted" style={{ fontSize: "12px" }}>
+                Account/order-related notices only — e.g. a subscription expiring, a pickup delay. Not for general
+                announcements or offers: this goes through the same approved template as order alerts, and Meta can
+                restrict the number if it's used for anything else.
+              </div>
+            </div>
+            <Switch on={castWhatsApp} onToggle={() => setCastWhatsApp(!castWhatsApp)} />
           </div>
           <button className="btn" onClick={doCast} disabled={busy || castText.trim().length < 3}>
             <Svg name="bell" size={18} /> {busy ? "Sending…" : "Send notice"}

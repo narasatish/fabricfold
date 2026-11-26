@@ -265,7 +265,23 @@ export async function upgradeSubscription(studentId: string, planId: string, met
   type Used = { service: string; cycles: number; used: number; kgPerCycle: number };
   let cyclesTotal = 0, cyclesUsed = 0, kgPerCycle = Number(cur.kgPerCycle), difference = 0;
 
-  await db.$transaction(async (tx) => {
+  /* Found in a perf/quality pass (2026-11): the two re-checks inside this
+     transaction (already-on-that-plan, isn't-more-expensive) throw — and
+     unlike every other action in this file (see acceptOrder/collectOrder's
+     own try/catch-then-return pattern), nothing here ever caught that
+     throw. It escaped upgradeSubscription entirely as a raw, unhandled
+     rejection instead of the `{ok:false,error}` shape this whole codebase
+     relies on. The one caller today (CustomerClient.tsx) happens to wrap
+     every call in try/catch and show `e.message`, so the on-screen result
+     looked identical to the real pattern — but a genuinely unexpected
+     error (a dropped connection, not a business rule) would leak its raw
+     message the same way a deliberate rejection does, and the NEXT caller
+     that doesn't wrap this in try/catch would get a hard crash instead of
+     a result to check. Caught here the same way acceptOrder does: a
+     thrown Error with no `.code` is one of the two business messages
+     above and safe to show; anything else is hidden behind a generic one. */
+  try {
+    await db.$transaction(async (tx) => {
     /* Locked, then re-read fresh — not the `cur` fetched before this
        transaction started. A cycle burned by an in-flight order between
        that read and this write (accept/walk-in run their own transaction
@@ -332,6 +348,10 @@ export async function upgradeSubscription(studentId: string, planId: string, met
     await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId, label: `Plan change: ${cur.plan} → ${plan.name}`, method, amount: difference });
     await touchStudentActivity(tx, studentId);
   }, { timeout: 15_000 }); // row lock can queue concurrent upgrade attempts
+  } catch (e) {
+    const hasCode = !!(e as { code?: string }).code;
+    return { ok: false as const, error: !hasCode ? (e as Error).message : "Plan change failed — please try again" };
+  }
 
   flushSoon();
 

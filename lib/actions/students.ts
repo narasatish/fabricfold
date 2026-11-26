@@ -3,7 +3,7 @@
 import crypto from "crypto";
 import { db } from "../db";
 import { requireStaff, requireStudent, assertSameCollege } from "../auth";
-import { audit } from "../notify";
+import { audit, sendWhatsApp } from "../notify";
 
 /* One-time, short-lived scan code for the counter — covers BOTH drop-off
    (staff scans it to land on the student's account and create the order)
@@ -138,8 +138,19 @@ export async function bulkRegisterStudents(text: string, collegeId: string) {
   return { ok: true as const, created, skipped };
 }
 
-/** Send a notice to every student at a campus (or all campuses). Manager+. */
-export async function broadcastNotice(scope: string, text: string) {
+/** Send a notice to every student at a campus (or all campuses). Manager+.
+    `viaWhatsApp` additionally fans the SAME text out over WhatsApp, through
+    the existing approved utility template (see sendWhatsApp, lib/notify.ts)
+    — the one already used for order-status alerts. Owner (2026-11): keep
+    this to account/order-related notices only. Meta categorizes WhatsApp
+    templates by purpose (utility / marketing / authentication); a utility
+    template is approved for transactional updates, not general
+    announcements or promotions, and using it for those risks Meta
+    restricting the business number. There's no reliable way to check a
+    message's content for this automatically, so the sheet that calls this
+    (app/s/students/_components/StudentsClient.tsx) carries the warning
+    instead — the judgment call is the sending staff member's. */
+export async function broadcastNotice(scope: string, text: string, viaWhatsApp = false) {
   const st = await requireStaff(2);
   const msg = text.trim();
   if (msg.length < 3) return { ok: false as const, error: "Enter a message" };
@@ -199,8 +210,16 @@ export async function broadcastNotice(scope: string, text: string) {
     ));
   }
 
-  /* Broadcasts are in-app and web push only. Students get WhatsApp for order
-     placed, ready and collected only (see pushNotif in lib/notify.ts).
-     The audit-log row was already written above, as the claim itself. */
+  /* WhatsApp fan-out — opt-in per send (`viaWhatsApp`), not automatic like
+     push/in-app above. Per-student order-event WhatsApp (pushNotif, lib/
+     notify.ts) is unaffected either way; this is purely additive. Routed
+     through the same sendWhatsApp() every order-status message already
+     uses, so it's the same approved utility template, not a separate
+     integration to get wrong. */
+  if (viaWhatsApp) {
+    await Promise.allSettled(students.map((s) => sendWhatsApp(s.phone, msg)));
+  }
+
+  /* The audit-log row was already written above, as the claim itself. */
   return { ok: true as const, sent: ids.length };
 }

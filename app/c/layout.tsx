@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSession, requireStudent, AuthError } from "@/lib/auth";
 import { RealtimeRefresh } from "@/components/chrome";
 import { InstallPrompt } from "@/components/pwa";
+import { SafePaymentBanner } from "@/components/safe-payment-banner";
 import CustomerTabBar from "./_components/TabBar";
 import { db } from "@/lib/db";
 
@@ -23,13 +24,18 @@ export default async function CustomerLayout({ children }: { children: React.Rea
     throw e;
   }
 
-  // Get unread notification count
-  const unreadCount = await db.notification.count({
-    where: { studentId: student.id, read: false },
-  });
+  // This layout wraps every /c page, so these two reads run on every
+  // customer page load — parallelized like the other hot student-facing
+  // pages (app/c/page.tsx), not sequential round-trips.
+  const [unreadCount, appConfig] = await Promise.all([
+    db.notification.count({ where: { studentId: student.id, read: false } }),
+    db.appConfig.findUnique({ where: { id: "main" } }),
+  ]);
+  const officialUpiId = (appConfig?.payment as unknown as { upiId?: string } | null)?.upiId || "";
 
   return (
     <>
+      <SafePaymentBanner upiId={officialUpiId} />
       {children}
       <CustomerTabBar unread={unreadCount} />
       <InstallPrompt />

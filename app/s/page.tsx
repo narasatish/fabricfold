@@ -23,30 +23,111 @@ export default async function StaffHomePage() {
   // sees everything, unchanged.
   const scope = staff.collegeId ? { collegeId: staff.collegeId } : {};
 
-  const orders = await db.order.findMany({
-    where: { status: { in: ["draft", "received", "processing", "ready"] }, ...scope },
-    // the ready EVENT, not createdAt, is what ages an uncollected bag — an
-    // order can spend days in processing before it ever waits on a student
-    include: {
-      // Only the fields this page actually renders — the full Student row
-      // (credits, passwordHash/Salt, lifetimePieces, etc.) has no business
-      // riding along on the highest-traffic staff screen, refreshed every 10s.
-      student: { select: { id: true, name: true, phone: true, collegeId: true } },
-      timeline: { where: { status: "ready" }, orderBy: { at: "desc" }, take: 1 },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  /* Found 2026-11 while chasing a "the app feels slow" report: everything in
+     this function used to be a chain of sequential `await`s — roughly a
+     dozen independent reads, each one waiting on the last round trip to
+     Postgres before starting the next, on the single busiest screen in the
+     app. None of these queries depend on each other's RESULTS (only on
+     `staff`/`scope`/`istDate`, already known), so there is no reason they
+     can't all be in flight at once. Batched into one Promise.all — the
+     page's total DB time is now the SLOWEST single query, not the sum of
+     all of them. The two queries that genuinely depend on a result above
+     (pendingOtps needs `pending`; cashRows/reports need `colleges`) stay
+     sequential, further down. */
+  const istDate = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+  const startOfDay = new Date(`${istDate}T00:00:00+05:30`);
+  const cashDay = istDateStr(Date.now());
+  const canCount = staff.role >= 3;
 
-  // Collected but still unpaid: money the counter has not yet taken. Oldest
-  // first, so the longest-outstanding amount is the first thing seen.
-  const unpaidRows = await db.order.findMany({
-    where: { status: "collected", paid: false, ...scope },
-    include: {
-      student: { select: { name: true, collegeId: true } },
-      timeline: { where: { status: "collected" }, orderBy: { at: "desc" }, take: 1 },
-    },
-    take: 200,
-  });
+  const [
+    orders,
+    unpaidRows,
+    pending,
+    colleges,
+    registerCollegesRaw,
+    registerPlansCfg,
+    registerPlansRaw,
+    att,
+    openComplaintsRaw,
+    todayPays,
+    activeSubsRows,
+    newStudentsByCollege,
+  ] = await Promise.all([
+    db.order.findMany({
+      where: { status: { in: ["draft", "received", "processing", "ready"] }, ...scope },
+      // the ready EVENT, not createdAt, is what ages an uncollected bag — an
+      // order can spend days in processing before it ever waits on a student
+      include: {
+        // Only the fields this page actually renders — the full Student row
+        // (credits, passwordHash/Salt, lifetimePieces, etc.) has no business
+        // riding along on the highest-traffic staff screen.
+        student: { select: { id: true, name: true, phone: true, collegeId: true } },
+        timeline: { where: { status: "ready" }, orderBy: { at: "desc" }, take: 1 },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    // Collected but still unpaid: money the counter has not yet taken. Oldest
+    // first, so the longest-outstanding amount is the first thing seen.
+    db.order.findMany({
+      where: { status: "collected", paid: false, ...scope },
+      include: {
+        student: { select: { name: true, collegeId: true } },
+        timeline: { where: { status: "collected" }, orderBy: { at: "desc" }, take: 1 },
+      },
+      take: 200,
+    }),
+    // Pending subscription requests (active=false) + their cash OTP codes
+    db.subscription.findMany({
+      where: { active: false, ...(staff.collegeId ? { student: { collegeId: staff.collegeId } } : {}) },
+      include: { student: { select: { id: true, name: true, collegeId: true } } },
+    }),
+    /* The whole student table used to be fetched here and shipped to the
+       browser so the browser could filter it and show ten matches — on every
+       render. Search now runs on the server (searchStudents), which also
+       means it finds students the old first-page fetch would have missed. */
+    db.college.findMany({
+      where: { active: true, ...(staff.collegeId ? { id: staff.collegeId } : {}) },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+    /* Registration is NOT campus-scoped (owner, Sep 22: "staff should have
+       right to register students in both colleges") — unlike `colleges`
+       above, which still drives the dashboard filter and must stay scoped to
+       what THIS staff member is allowed to see. Only actually queried when
+       the signed-in staff IS campus-scoped; an unscoped staffer just reuses
+       `colleges` below, same as before. */
+    staff.collegeId
+      ? db.college.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } })
+      : Promise.resolve(null),
+    db.appConfig.findUniqueOrThrow({ where: { id: "main" } }),
+    /* Plans for the mandatory plan-picker on a St Mary's-style registration
+       (owner, Sep 22: "staff need to give plan as mandatory"). Unscoped, same
+       reasoning as registerColleges — whichever campus is picked on the form
+       needs its own plans available, not just the signed-in staff's own.
+       BVRIT never has plans (requireCyclesEnabled refuses it), so this is
+       empty for BVRIT and the register sheet simply won't ask for one there. */
+    db.plan.findMany({ where: { active: true }, orderBy: { price: "asc" } }),
+    // Attendance state for THIS staff member (IST business day)
+    db.attendance.findUnique({ where: { staffId_date: { staffId: staff.id, date: istDate } } }),
+    /* Open complaints where the STUDENT has the last word — either no reply
+       yet, or the student wrote again after staff last answered. A complaint
+       staff already replied to (last message from "staff") is not waiting on
+       anyone here; it's waiting on the student or on resolution. */
+    db.complaint.findMany({
+      where: { status: "open", ...scope },
+      include: { student: { select: { name: true, collegeId: true } }, messages: { orderBy: { at: "desc" }, take: 1 } },
+      orderBy: { at: "desc" },
+    }),
+    /* At-a-glance dashboard metrics — one campus at a time, switched instantly
+       on the client rather than a server round-trip per tap. */
+    db.payment.findMany({ where: { at: { gte: startOfDay }, amount: { gt: 0 }, method: { in: ["cash", "upi", "credit"] }, ...scope }, select: { amount: true, collegeId: true } }),
+    db.subscription.findMany({ where: { active: true, ...(staff.collegeId ? { student: { collegeId: staff.collegeId } } : {}) }, select: { student: { select: { collegeId: true } } } }),
+    // Still a COUNT, not a fetch — groupBy aggregates in the database, same
+    // as db.student.count() did before campuses needed splitting apart.
+    db.student.groupBy({ by: ["collegeId"], where: { createdAt: { gte: startOfDay }, ...scope }, _count: true }),
+  ]);
+  const registerColleges = registerCollegesRaw ?? colleges;
+
   const unpaid = unpaidRows
     .map((o) => ({
       id: o.id,
@@ -57,14 +138,10 @@ export default async function StaffHomePage() {
     }))
     .sort((a, b) => a.since - b.since);
 
-  // Pending subscription requests (active=false) + their cash OTP codes
-  const pending = await db.subscription.findMany({
-    where: { active: false, ...(staff.collegeId ? { student: { collegeId: staff.collegeId } } : {}) },
-    include: { student: { select: { id: true, name: true, collegeId: true } } },
-  });
   /* One query for every pending code, not one per row. This was a findFirst
      inside a Promise.all — invisible with three pending, a queue of round
-     trips with thirty. */
+     trips with thirty. (Depends on `pending`'s result, so it has to come
+     after that batch resolves — can't be folded into it.) */
   const pendingOtps = pending.length
     ? await db.otp.findMany({
         where: { purpose: "subscription", usedAt: null, refId: { in: pending.map((p) => p.studentId) } },
@@ -78,53 +155,15 @@ export default async function StaffHomePage() {
     hasOtp: withOtp.has(p.studentId),
   }));
 
-  /* The whole student table used to be fetched here and shipped to the
-     browser so the browser could filter it and show ten matches — on every
-     render, and this screen refreshes every 10 seconds. Search now runs on
-     the server (searchStudents), which also means it finds students the old
-     first-page fetch would have missed. */
-  const colleges = await db.college.findMany({
-    where: { active: true, ...(staff.collegeId ? { id: staff.collegeId } : {}) },
-    select: { id: true, name: true },
-    orderBy: { name: "asc" },
-  });
-  /* Registration is NOT campus-scoped (owner, Sep 22: "staff should have
-     right to register students in both colleges") — unlike `colleges` above,
-     which still drives the dashboard filter and must stay scoped to what
-     THIS staff member is allowed to see. A separate, always-unscoped list so
-     the Register-student campus picker offers both campuses to everyone. */
-  const registerColleges = staff.collegeId
-    ? await db.college.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } })
-    : colleges;
-
-  /* Plans for the mandatory plan-picker on a St Mary's-style registration
-     (owner, Sep 22: "staff need to give plan as mandatory"). Unscoped, same
-     reasoning as registerColleges — whichever campus is picked on the form
-     needs its own plans available, not just the signed-in staff's own. BVRIT
-     never has plans (requireCyclesEnabled refuses it), so this is empty for
-     BVRIT and the register sheet simply won't ask for one there. */
-  const registerPlansCfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const registerGstOn = (registerPlansCfg.settings as Record<string, unknown>)?.gstEnabled !== false;
-  const registerPlans = (await db.plan.findMany({ where: { active: true }, orderBy: { price: "asc" } })).map((p) => {
+  const registerPlans = registerPlansRaw.map((p) => {
     const price = Number(p.price);
     const gstApplies = registerGstOn && !p.gstFree;
     return { id: p.id, collegeId: p.collegeId, name: p.name, tier: p.tier, gross: price + (gstApplies ? Math.round(price * Number(registerPlansCfg.gstPct) / 100) : 0) };
   });
 
-  // Attendance state for THIS staff member (IST business day)
-  const istDate = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
-  const att = await db.attendance.findUnique({ where: { staffId_date: { staffId: staff.id, date: istDate } } });
   const attendance = { clockedIn: !!att, clockedOut: !!att?.clockOut, since: att?.clockIn.getTime() ?? null };
 
-  /* Open complaints where the STUDENT has the last word — either no reply
-     yet, or the student wrote again after staff last answered. A complaint
-     staff already replied to (last message from "staff") is not waiting on
-     anyone here; it's waiting on the student or on resolution. */
-  const openComplaintsRaw = await db.complaint.findMany({
-    where: { status: "open", ...scope },
-    include: { student: { select: { name: true, collegeId: true } }, messages: { orderBy: { at: "desc" }, take: 1 } },
-    orderBy: { at: "desc" },
-  });
   const openComplaints = openComplaintsRaw
     .filter((c) => !c.messages[0] || c.messages[0].from === "student")
     .map((c) => ({ id: c.id, studentId: c.studentId, studentName: c.student.name, collegeId: c.student.collegeId, at: (c.messages[0]?.at ?? c.at).getTime() }));
@@ -133,19 +172,6 @@ export default async function StaffHomePage() {
      on the client rather than a server round-trip per tap. Cheap because the
      college count is small (a handful, not hundreds): grouping in memory
      beats N+1 queries, one per campus. */
-  /* setHours(0,0,0,0) zeroes out the SERVER's local day, which is UTC on
-     Render — near midnight IST that's the previous IST day, so "today's
-     takings" would silently span the wrong 24 hours while `istDate` above
-     (used for attendance on this same page) correctly says otherwise.
-     `istDate` is already the IST calendar day; anchor the boundary to it. */
-  const startOfDay = new Date(`${istDate}T00:00:00+05:30`);
-  const [todayPays, activeSubsRows, newStudentsByCollege] = await Promise.all([
-    db.payment.findMany({ where: { at: { gte: startOfDay }, amount: { gt: 0 }, method: { in: ["cash", "upi", "credit"] }, ...scope }, select: { amount: true, collegeId: true } }),
-    db.subscription.findMany({ where: { active: true, ...(staff.collegeId ? { student: { collegeId: staff.collegeId } } : {}) }, select: { student: { select: { collegeId: true } } } }),
-    // Still a COUNT, not a fetch — groupBy aggregates in the database, same
-    // as db.student.count() did before campuses needed splitting apart.
-    db.student.groupBy({ by: ["collegeId"], where: { createdAt: { gte: startOfDay }, ...scope }, _count: true }),
-  ]);
   const newStudentsCount = (collegeId: string | null) =>
     newStudentsByCollege.filter((g) => !collegeId || g.collegeId === collegeId).reduce((s, g) => s + g._count, 0);
   const metricsFor = (collegeId: string | null) => ({
@@ -178,8 +204,6 @@ export default async function StaffHomePage() {
 
   // Cash count (admin+ only): today's expected drawer per campus, and whether
   // the count has already been recorded for today.
-  const canCount = staff.role >= 3;
-  const cashDay = istDateStr(Date.now());
   const cashRows = canCount
     ? await db.dayCashCount.findMany({ where: { day: cashDay, collegeId: { in: colleges.map((c) => c.id) } } })
     : [];

@@ -5,8 +5,8 @@
    This can't stop that by itself, but it puts the ONE fact students need —
    the official UPI ID, repeated every time they open the app — in front of
    them, so a personal QR looks obviously wrong instead of unremarkable. */
-export function SafePaymentBanner({ upiId }: { upiId: string }) {
-  if (!upiId) return null;
+export function SafePaymentBanner({ payeeName }: { payeeName: string }) {
+  if (!payeeName) return null;
   return (
     <div
       style={{
@@ -19,7 +19,7 @@ export function SafePaymentBanner({ upiId }: { upiId: string }) {
         fontWeight: 600,
       }}
     >
-      Pay only to <span style={{ fontWeight: 800 }}>{upiId}</span> or in-app — never to a staff member&apos;s personal number or QR.
+      Pay to <span style={{ fontWeight: 800 }}>{payeeName}</span> only — use that QR, never a staff member&apos;s personal number or QR.
     </div>
   );
 }

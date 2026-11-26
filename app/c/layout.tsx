@@ -31,11 +31,11 @@ export default async function CustomerLayout({ children }: { children: React.Rea
     db.notification.count({ where: { studentId: student.id, read: false } }),
     db.appConfig.findUnique({ where: { id: "main" } }),
   ]);
-  const officialUpiId = (appConfig?.payment as unknown as { upiId?: string } | null)?.upiId || "";
+  const payeeName = (appConfig?.payment as unknown as { payeeName?: string } | null)?.payeeName || "";
 
   return (
     <>
-      <SafePaymentBanner upiId={officialUpiId} />
+      <SafePaymentBanner payeeName={payeeName} />
       {children}
       <CustomerTabBar unread={unreadCount} />
       <InstallPrompt />

@@ -9,27 +9,31 @@ export default async function StaffOrderPage({ params }: { params: Promise<{ id:
   const { id } = await params;
   const s = await getSession();
   if (!s || s.mode !== "staff") redirect("/login");
-  const staff = await db.staff.findUnique({ where: { id: s.staffId } });
-  if (!staff) redirect("/login");
 
-  const order = await db.order.findUnique({
-    where: { id },
-    include: {
-      student: { include: { subscription: true, bags: { where: { status: "active" }, take: 1 } } },
-      college: true,
-      payments: true,
-      invoice: true,
-      timeline: { orderBy: { at: "asc" } },
-      tags: true,
-    },
-  });
+  // staff/order/cfg depend only on the URL param and the session, not on
+  // each other's results, so they run concurrently rather than as three
+  // sequential round trips before this page can render anything.
+  const [staff, order, cfg] = await Promise.all([
+    db.staff.findUnique({ where: { id: s.staffId } }),
+    db.order.findUnique({
+      where: { id },
+      include: {
+        student: { include: { subscription: true, bags: { where: { status: "active" }, take: 1 } } },
+        college: true,
+        payments: true,
+        invoice: true,
+        timeline: { orderBy: { at: "asc" } },
+        tags: true,
+      },
+    }),
+    db.appConfig.findUniqueOrThrow({ where: { id: "main" } }),
+  ]);
+  if (!staff) redirect("/login");
   if (!order) notFound();
   // Same explicit check as customers/[id] — this page queries the DB
   // directly rather than through a server action, so it needs its own
   // campus guard rather than inheriting one from assertSameCollege().
   if (staff.collegeId && staff.collegeId !== order.collegeId) redirect("/s");
-
-  const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const rates = resolveCollegeRates(cfg.rates as unknown as RateTable, order.college?.rates as unknown as RateTable | null);
   const serviceRates = rates[order.service] || { label: order.service, items: [] };
   const payment = cfg.payment as { upiId?: string; payeeName?: string };

@@ -9,36 +9,33 @@ import HomeClient from "./_components/HomeClient";
 export default async function CustomerHome() {
   const student = await requireStudentOrRedirect();
   const college = student.college;
-  const appConfig = await db.appConfig.findUnique({ where: { id: "main" } });
+  const { customerIdFor } = await import("@/lib/bagcode");
+
+  // These five reads are all independent — each depends only on `student`
+  // above, not on each other's results — so they run concurrently instead of
+  // as five sequential round trips on the page every student lands on first.
+  const [appConfig, activeOrders, drafts, unreadCount, customerId] = await Promise.all([
+    db.appConfig.findUnique({ where: { id: "main" } }),
+    // Active orders (not draft, not collected)
+    db.order.findMany({
+      where: { studentId: student.id, status: { in: ["received", "processing", "ready"] } },
+      orderBy: { createdAt: "desc" },
+    }),
+    // Draft orders
+    db.order.findMany({
+      where: { studentId: student.id, status: "draft" },
+      orderBy: { createdAt: "desc" },
+    }),
+    // Unread notifications count
+    db.notification.count({ where: { studentId: student.id, read: false } }),
+    // The Customer ID to show — the student's active bag code (printed on
+    // the bag, what staff look for at the counter), self-healing a missing
+    // V-series code for BVRIT students. See customerIdFor() in lib/bagcode.ts.
+    customerIdFor(db, student, college?.name),
+  ]);
 
   // Parse rates from config
   const rates = appConfig?.rates as unknown as Record<string, { label: string; items: [string, number][] }>;
-
-  // Get active orders (not draft, not collected)
-  const activeOrders = await db.order.findMany({
-    where: {
-      studentId: student.id,
-      status: { in: ["received", "processing", "ready"] },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-
-  // Get draft orders
-  const drafts = await db.order.findMany({
-    where: { studentId: student.id, status: "draft" },
-    orderBy: { createdAt: "desc" },
-  });
-
-  // Get unread notifications count
-  const unreadCount = await db.notification.count({
-    where: { studentId: student.id, read: false },
-  });
-
-  // The Customer ID to show — the student's active bag code (printed on the
-  // bag, what staff look for at the counter), self-healing a missing
-  // V-series code for BVRIT students. See customerIdFor() in lib/bagcode.ts.
-  const { customerIdFor } = await import("@/lib/bagcode");
-  const customerId = await customerIdFor(db, student, college?.name);
 
   // Check subscription expiry
   const sub = student.subscription;

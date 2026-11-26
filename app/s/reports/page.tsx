@@ -15,11 +15,13 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
   const s = await getSession();
   if (!s || s.mode !== "staff") redirect("/login");
   /* Money reports are a named tool, not a staff birthright: Counter staff
-     see the queue, not the revenue. The owner grants exceptions per person. */
-  const me = await db.staff.findUnique({ where: { id: s.staffId } });
-  if (!me || !staffCan(me, "reports")) redirect("/s");
+     see the queue, not the revenue. The owner grants exceptions per person.
+     (Found alongside a perf pass: this used to fetch the SAME staff row
+     twice under two different names, `me` then `staff` — one real,
+     avoidable round trip.) */
   const staff = await db.staff.findUnique({ where: { id: s.staffId } });
   if (!staff) redirect("/login");
+  if (!staffCan(staff, "reports")) redirect("/s");
 
   /* A campus-scoped staffer's own campus always wins (computeReport already
      enforces this). An Owner (collegeId null) previously had NO way to view
@@ -30,86 +32,97 @@ export default async function StaffReportsPage({ searchParams }: { searchParams:
   const selectedCollegeId = staff.collegeId ?? (sp.c && ownerColleges.some((c) => c.id === sp.c) ? sp.c : null);
 
   const period = parsePeriod(sp);
-  const r = await computeReport(period, selectedCollegeId);
   const istDate = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
-  const dayClose = await db.dayClose.findUnique({ where: { date_collegeId: { date: istDate, collegeId: selectedCollegeId ?? "" } } });
-  const staffList = await db.staff.findMany(selectedCollegeId ? { where: { collegeId: selectedCollegeId } } : undefined);
-  const byId = (id: string) => staffList.find((x) => x.id === id)?.name || id;
   const N = (x: unknown) => Number(x || 0);
-
-  /* Pending large-refund approvals (owner request 2026-10-22) — Admin/Owner
-     only (role >= 3), same bar as approveRefundRequest/rejectRefundRequest
-     themselves enforce server-side; this is purely a visibility gate, the
-     real one lives in lib/actions/orders.ts. */
-  const pendingRefunds = staff.role >= 3
-    ? await db.refundRequest.findMany({
-        where: { status: "pending", ...(selectedCollegeId ? { collegeId: selectedCollegeId } : {}) },
-        orderBy: { createdAt: "asc" },
-      })
-    : [];
-  const pendingRefundStudents = pendingRefunds.length
-    ? await db.student.findMany({ where: { id: { in: pendingRefunds.map((p) => p.studentId) } }, select: { id: true, name: true } })
-    : [];
-  const studentNameById = (id: string) => pendingRefundStudents.find((s2) => s2.id === id)?.name || id;
-
-  // analytics — 8-week revenue bars, repeat rate, subscriber split
-  // Unlike computeReport() just above (properly scoped), these ran
-  // company-wide regardless of the viewing staff member's own campus — a
-  // campus-scoped Manager reading "repeat customer rate" was actually
-  // seeing every campus's number, silently mixed into what looks like
-  // their own report on the same page.
   const now = Date.now();
   const weekMs = 7 * 86_400_000;
-  const allPayments = await db.payment.findMany({
-    where: { at: { gte: new Date(now - 8 * weekMs) }, ...(selectedCollegeId ? { collegeId: selectedCollegeId } : {}) },
-  });
+
+  /* Found in the same perf pass: this whole page used to run roughly a
+     dozen reads one after another — this is the HEAVIEST screen in the
+     app (computeReport alone touches several tables) and it re-renders on
+     a timer. None of these depend on each other's results, only on
+     `selectedCollegeId`/`period`/`staff.role`, already known — batched
+     into one Promise.all. The two genuinely dependent follow-ups
+     (pendingRefundStudents needs `pendingRefunds`; activityLog needs
+     `staffList`) stay as their own, much shorter, second wave. */
+  const [r, dayClose, staffList, pendingRefunds, allPayments, perStudent, payAgg, activeSubs, cfgRow] = await Promise.all([
+    computeReport(period, selectedCollegeId),
+    db.dayClose.findUnique({ where: { date_collegeId: { date: istDate, collegeId: selectedCollegeId ?? "" } } }),
+    db.staff.findMany(selectedCollegeId ? { where: { collegeId: selectedCollegeId } } : undefined),
+    /* Pending large-refund approvals (owner request 2026-10-22) — Admin/Owner
+       only (role >= 3), same bar as approveRefundRequest/rejectRefundRequest
+       themselves enforce server-side; this is purely a visibility gate, the
+       real one lives in lib/actions/orders.ts. */
+    staff.role >= 3
+      ? db.refundRequest.findMany({
+          where: { status: "pending", ...(selectedCollegeId ? { collegeId: selectedCollegeId } : {}) },
+          orderBy: { createdAt: "asc" },
+        })
+      : Promise.resolve([]),
+    // analytics — 8-week revenue bars, repeat rate, subscriber split
+    // Unlike computeReport() (properly scoped), these ran company-wide
+    // regardless of the viewing staff member's own campus — a campus-scoped
+    // Manager reading "repeat customer rate" was actually seeing every
+    // campus's number, silently mixed into what looks like their own
+    // report on the same page.
+    db.payment.findMany({
+      where: { at: { gte: new Date(now - 8 * weekMs) }, ...(selectedCollegeId ? { collegeId: selectedCollegeId } : {}) },
+    }),
+    /* Two numbers used to cost one row per ORDER EVER RECORDED.
+
+       This page re-renders on a timer, so at 50,000 orders it was
+       re-reading 50,000 rows every few seconds to display a percentage and
+       a total. groupBy returns one row per STUDENT instead (bounded by
+       enrolment, not by history), and the revenue total comes back as a
+       single aggregate. Same arithmetic, same answers — pinned by a test
+       that runs both ways over the same data and compares.
+
+       Prisma aggregates rather than raw SQL on purpose: the money suite
+       still has a SQLite fallback, and `count(*) FILTER (...)` is
+       Postgres-only. */
+    db.order.groupBy({ by: ["studentId"], _count: { _all: true }, where: selectedCollegeId ? { collegeId: selectedCollegeId } : undefined }),
+    db.order.aggregate({ _sum: { total: true }, where: { usedCycle: false, paid: true, ...(selectedCollegeId ? { collegeId: selectedCollegeId } : {}) } }),
+    db.subscription.count({ where: { active: true, ...(selectedCollegeId ? { student: { collegeId: selectedCollegeId } } : {}) } }),
+    db.appConfig.findUniqueOrThrow({ where: { id: "main" } }),
+  ]);
+  const byId = (id: string) => staffList.find((x) => x.id === id)?.name || id;
+
+  const [pendingRefundStudents, activityLog] = await Promise.all([
+    pendingRefunds.length
+      ? db.student.findMany({ where: { id: { in: pendingRefunds.map((p) => p.studentId) } }, select: { id: true, name: true } })
+      : Promise.resolve([]),
+    /* Staff activity — refunds, paid-order cancellations, and compensation,
+       grouped by who did it. Not a fraud finding on its own: a Manager who
+       handles 200 orders a week will always show more refunds than someone
+       on 20. It's a visibility tool — the owner can't watch every counter in
+       person, and today the only way to notice "one staff member refunds/
+       comps far more than everyone else on the same shift" was reading the
+       raw AuditLog by hand. AuditLog has no collegeId column, so campus
+       scoping goes through staffList's ids (already scoped above) instead. */
+    db.auditLog.findMany({
+      where: {
+        action: { in: ["Refund", "Cancel order", "Compensation"] },
+        ...(period.from ? { at: { gte: period.from, ...(period.to ? { lt: period.to } : {}) } } : {}),
+        ...(selectedCollegeId ? { by: { in: staffList.map((s) => s.id) } } : {}),
+      },
+      orderBy: { at: "desc" },
+    }),
+  ]);
+  const studentNameById = (id: string) => pendingRefundStudents.find((s2) => s2.id === id)?.name || id;
+
   const weeks = Array.from({ length: 8 }, (_, i) => {
     const from = now - (8 - i) * weekMs, to = now - (7 - i) * weekMs;
     return allPayments.filter((p) => p.at.getTime() >= from && p.at.getTime() < to && N(p.amount) > 0).reduce((s2, p) => s2 + N(p.amount), 0);
   });
   const maxWeek = Math.max(1, ...weeks);
-  /* Two numbers used to cost one row per ORDER EVER RECORDED.
-
-     This page re-renders on a timer, so at 50,000 orders it was re-reading
-     50,000 rows every few seconds to display a percentage and a total.
-     groupBy returns one row per STUDENT instead (bounded by enrolment, not by
-     history), and the revenue total comes back as a single aggregate. Same
-     arithmetic, same answers — pinned by a test that runs both ways over the
-     same data and compares.
-
-     Prisma aggregates rather than raw SQL on purpose: the money suite still
-     has a SQLite fallback, and `count(*) FILTER (...)` is Postgres-only. */
-  const [perStudent, payAgg, activeSubs] = await Promise.all([
-    db.order.groupBy({ by: ["studentId"], _count: { _all: true }, where: selectedCollegeId ? { collegeId: selectedCollegeId } : undefined }),
-    db.order.aggregate({ _sum: { total: true }, where: { usedCycle: false, paid: true, ...(selectedCollegeId ? { collegeId: selectedCollegeId } : {}) } }),
-    db.subscription.count({ where: { active: true, ...(selectedCollegeId ? { student: { collegeId: selectedCollegeId } } : {}) } }),
-  ]);
   const repeatRate = perStudent.length
     ? Math.round((perStudent.filter((g) => g._count._all >= 2).length / perStudent.length) * 100)
     : 0;
   const payRevenue = N(payAgg._sum.total);
-  const cfgRow = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
   const plan = cfgRow.plan as { price: number };
   const subRevenueApprox = activeSubs * plan.price;
   const cohortPct = subRevenueApprox + payRevenue > 0 ? Math.round((subRevenueApprox / (subRevenueApprox + payRevenue)) * 100) : 0;
 
-  /* Staff activity — refunds, paid-order cancellations, and compensation,
-     grouped by who did it. Not a fraud finding on its own: a Manager who
-     handles 200 orders a week will always show more refunds than someone
-     on 20. It's a visibility tool — the owner can't watch every counter in
-     person, and today the only way to notice "one staff member refunds/
-     comps far more than everyone else on the same shift" was reading the
-     raw AuditLog by hand. AuditLog has no collegeId column, so campus
-     scoping goes through staffList's ids (already scoped above) instead. */
-  const ACTIVITY_ACTIONS = ["Refund", "Cancel order", "Compensation"] as const;
-  const activityLog = await db.auditLog.findMany({
-    where: {
-      action: { in: [...ACTIVITY_ACTIONS] },
-      ...(period.from ? { at: { gte: period.from, ...(period.to ? { lt: period.to } : {}) } } : {}),
-      ...(selectedCollegeId ? { by: { in: staffList.map((s) => s.id) } } : {}),
-    },
-    orderBy: { at: "desc" },
-  });
   const AMOUNT_RE = /₹([\d,]+(?:\.\d+)?)/;
   type ActivityRow = { staffId: string; name: string; refunds: number; refundAmt: number; cancels: number; comps: number; compAmt: number };
   const activityById = new Map<string, ActivityRow>();

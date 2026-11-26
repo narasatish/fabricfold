@@ -8,10 +8,10 @@ import StaffAdminClient from "./_components/AdminClient";
 export default async function StaffAdminPage() {
   const s = await getSession();
   if (!s || s.mode !== "staff") redirect("/login");
-  const gate = await db.staff.findUnique({ where: { id: s.staffId }, select: { role: true } });
   // Admin+ only: this page carries payment config and staff phone numbers.
-  // Client-side section-hiding was never a wall.
-  if (!gate || gate.role < 3) redirect("/s");
+  // Client-side section-hiding was never a wall. (Found alongside a perf
+  // pass: this used to fetch the SAME staff row twice under two different
+  // names, `gate` then `staff` — one real, avoidable round trip.)
   const staff = await db.staff.findUnique({ where: { id: s.staffId } });
   if (!staff) redirect("/login");
   if (staff.role < 3) redirect("/s");
@@ -27,11 +27,13 @@ export default async function StaffAdminPage() {
   const todayStart = new Date(new Date(istDate + "T00:00:00+05:30").getTime());
   const todayEnd = new Date(todayStart.getTime() + 24 * 3600_000);
 
-  // Fetch staffList first so we can scope the AuditLog query by staff ID.
-  const staffList = await db.staff.findMany({ where: staffScope, orderBy: { role: "desc" } });
-  const staffIds = staffList.map(s => s.id);
-
-  const [cfg, colleges, payslips, plans, attToday, attMonth, actionsToday] = await Promise.all([
+  /* Found in a perf pass: this page ran ~9 independent reads one after
+     another, only `actionsToday` genuinely depending on another's result
+     (staffIds, from staffList) — everything else depends only on
+     `staffScope`/`staff`/`istDate`/`month`, already known. Batched; the one
+     real dependency stays as a short second wave below. */
+  const [staffList, cfg, colleges, payslips, plans, attToday, attMonth, slotWindows, recentErrors] = await Promise.all([
+    db.staff.findMany({ where: staffScope, orderBy: { role: "desc" } }),
     db.appConfig.findUniqueOrThrow({ where: { id: "main" } }),
     /* ALL colleges, not just active ones, for an OWNER — filtering here is
        what made "remove campus" a one-way door: the removed campus vanished
@@ -45,25 +47,24 @@ export default async function StaffAdminPage() {
     db.plan.findMany({ where: staffScope, orderBy: [{ collegeId: "asc" }, { price: "asc" }] }),
     db.attendance.findMany({ where: { date: istDate, ...(staff.collegeId ? { staff: staffScope } : {}) } }),
     db.attendance.groupBy({ by: ["staffId"], where: { date: { startsWith: month }, ...(staff.collegeId ? { staff: staffScope } : {}) }, _count: true }),
-    db.auditLog.groupBy({ by: ["by"], where: { at: { gte: todayStart, lt: todayEnd }, ...(staff.collegeId ? { by: { in: staffIds } } : {}) }, _count: true }),
+    db.slotWindow.findMany({
+      where: staffScope,
+      orderBy: [{ collegeId: "asc" }, { weekday: "asc" }, { startMin: "asc" }],
+    }),
+    /* "Mark reviewed" (markErrorsSeen) sets seen:true, but this query never
+       filtered on it — it just took the 15 most recent errors regardless, so
+       a dismissed error stayed on screen (looking identical to a fresh one,
+       just slightly dimmer) until 15 newer ones pushed it out, sometimes days
+       later. Found live, Sep 23: the owner saw a 2-day-old, already-reviewed
+       error and reasonably read it as a current crash. Reviewed errors are
+       dropped from the query entirely now — "Mark reviewed" actually clears
+       the panel instead of just dimming it. */
+    staff.role >= 4
+      ? db.errorLog.findMany({ where: { seen: false }, orderBy: { at: "desc" }, take: 15 })
+      : Promise.resolve([]),
   ]);
-
-  const slotWindows = await db.slotWindow.findMany({
-    where: staffScope,
-    orderBy: [{ collegeId: "asc" }, { weekday: "asc" }, { startMin: "asc" }],
-  });
-
-  /* "Mark reviewed" (markErrorsSeen) sets seen:true, but this query never
-     filtered on it — it just took the 15 most recent errors regardless, so
-     a dismissed error stayed on screen (looking identical to a fresh one,
-     just slightly dimmer) until 15 newer ones pushed it out, sometimes days
-     later. Found live, Sep 23: the owner saw a 2-day-old, already-reviewed
-     error and reasonably read it as a current crash. Reviewed errors are
-     dropped from the query entirely now — "Mark reviewed" actually clears
-     the panel instead of just dimming it. */
-  const recentErrors = staff.role >= 4
-    ? await db.errorLog.findMany({ where: { seen: false }, orderBy: { at: "desc" }, take: 15 })
-    : [];
+  const staffIds = staffList.map((x) => x.id);
+  const actionsToday = await db.auditLog.groupBy({ by: ["by"], where: { at: { gte: todayStart, lt: todayEnd }, ...(staff.collegeId ? { by: { in: staffIds } } : {}) }, _count: true });
 
   const N = (x: unknown) => Number(x || 0);
   return (

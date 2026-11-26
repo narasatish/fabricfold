@@ -35,10 +35,11 @@ export default async function StaffAuditPage() {
      everyone. Owner (collegeId null) still sees everything, unfiltered,
      exactly as before. See docs/claude-playbook.md for the full writeup and
      the real fix this defers to. */
-  const staffRows = await db.staff.findMany({ select: { id: true, name: true, role: true, collegeId: true } });
+  const [staffRows, allLogs] = await Promise.all([
+    db.staff.findMany({ select: { id: true, name: true, role: true, collegeId: true } }),
+    db.auditLog.findMany({ orderBy: { at: "desc" } }),
+  ]);
   const staffById = new Map(staffRows.map((s) => [s.id, s]));
-
-  const allLogs = await db.auditLog.findMany({ orderBy: { at: "desc" } });
   const logs = staff.collegeId
     ? allLogs.filter((l) => staffById.get(l.by)?.collegeId === staff.collegeId)
     : allLogs;

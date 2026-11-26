@@ -55,11 +55,14 @@ describe("the holes that were open", () => {
   });
   it("the Reports page let any staff see revenue", () => {
     const src = read("app/s/reports/page.tsx");
-    expect(src).toMatch(/staffCan\(me, "reports"\)/);
+    // `me` was deduped into `staff` in a perf pass (2026-11) that removed a
+    // redundant duplicate fetch of the same staff row — same gate either way.
+    expect(src).toMatch(/staffCan\(staff, "reports"\)/);
     expect(src).toMatch(/redirect\("\/s"\)/);
   });
   it("the Admin page let any staff read payment config and phone numbers", () => {
-    expect(read("app/s/admin/page.tsx")).toMatch(/gate\.role < 3/);
+    // `gate` was deduped into `staff` in the same perf pass — same gate.
+    expect(read("app/s/admin/page.tsx")).toMatch(/staff\.role < 3/);
   });
   it("day close is the dayclose tool", () => {
     expect(read("lib/actions/ops.ts")).toMatch(/requireStaffPerm\("dayclose"\)/);

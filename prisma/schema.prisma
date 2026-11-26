@@ -595,6 +595,11 @@ model Complaint {
   // flips to "resolved", which the escalation query excludes regardless).
   escalatedAt DateTime?
   messages    ComplaintMessage[]
+
+  // Found in the same perf pass as app/s/page.tsx (the staff home dashboard
+  // counts open complaints per campus) and app/s/complaints/page.tsx (the
+  // full list, same filter) — both ran this with no index at all.
+  @@index([collegeId, status])
 }
 
 /* The owner's end-of-day cash count, per campus. `expectedCash` is what the
@@ -633,6 +638,11 @@ model Notification {
   kind      String   @default("status") // ready | status | credit | ...
   read      Boolean  @default(false)
   at        DateTime @default(now())
+
+  // The unread-count query on app/c/page.tsx — every student's home screen,
+  // every load — had no index to use at all; a table that only grows (1000+
+  // rows already) was getting a full scan for a number shown in a bell icon.
+  @@index([studentId, read])
 }
 
 // ───────────── Attendance (staff clock in/out) ─────────────

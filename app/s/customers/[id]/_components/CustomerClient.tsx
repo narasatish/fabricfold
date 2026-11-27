@@ -591,7 +591,21 @@ Currently ${current}. Type the code printed on the bag they are being given.
         <div className="kv"><span className="k">Member since</span><span>{dateStr(student.createdAt)}</span></div>
       </div>
 
-      <button className="btn mt12" onClick={() => setShowWalkIn(true)}>
+      <button
+        className="btn mt12"
+        onClick={() => {
+          // Recompute from the current subscription rather than trusting
+          // these useStates' mount-time values: staff routinely assign a
+          // plan then immediately open a walk-in order for the same visit,
+          // which updates `student` via a server refresh without remounting
+          // this component — leaving the old (pre-plan) defaults in place.
+          setShowAllServices(!hasRestrictedPlanServices);
+          setWiService(defaultWiService);
+          setWiUseCycle(subHasCycles);
+          setWiQty({});
+          setShowWalkIn(true);
+        }}
+      >
         <Svg name="plus" size={17} /> New walk-in order
       </button>
 

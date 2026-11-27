@@ -98,6 +98,7 @@ export async function activatePlan(
   method: "cash" | "upi",
   applyCredits: boolean,
   firstBag?: { code: string; tier: string; issuedBy: string },
+  staffId?: string | null,
 ) {
   const plan = await db.plan.findUnique({ where: { id: planId } });
   if (!plan || !plan.active) return { ok: false as const, error: "Pick a plan" };
@@ -145,11 +146,11 @@ export async function activatePlan(
       }
       if (creditApplied > 0) {
         await tx.student.update({ where: { id: stu.id }, data: { credits: { decrement: creditApplied } } });
-        await tx.payment.create({ data: { method: "credit", amount: creditApplied, collegeId: stu.collegeId, studentId: stu.id, note: `Subscription: ${plan.name} (credit applied)` } });
+        await tx.payment.create({ data: { method: "credit", amount: creditApplied, collegeId: stu.collegeId, studentId: stu.id, note: `Subscription: ${plan.name} (credit applied)`, recordedBy: staffId || null } });
         await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId: stu.id, label: `Plan: ${plan.name}`, method: "credit", amount: creditApplied });
       }
       if (cash > 0) {
-        await tx.payment.create({ data: { method, amount: cash, collegeId: stu.collegeId, studentId: stu.id, note: `Subscription: ${plan.name} (assigned at counter)` } });
+        await tx.payment.create({ data: { method, amount: cash, collegeId: stu.collegeId, studentId: stu.id, note: `Subscription: ${plan.name} (assigned at counter)`, recordedBy: staffId || null } });
         await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId: stu.id, label: `Plan: ${plan.name}`, method, amount: cash });
       }
     }, { timeout: 15_000 });

@@ -149,7 +149,7 @@ export async function topUpCredits(studentId: string, amount: number, method: "c
       });
       if (recent) throw new Error("This top-up was just recorded — check the wallet before adding it again");
       await tx.student.update({ where: { id: studentId }, data: { credits: { increment: amount }, lastActivityAt: new Date() } });
-      await tx.payment.create({ data: { method, amount, collegeId: stu.collegeId, studentId, note: "Wallet top-up" } });
+      await tx.payment.create({ data: { method, amount, collegeId: stu.collegeId, studentId, note: "Wallet top-up", recordedBy: st.id } });
       await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId, label: "Wallet top-up", method, amount });
       // appears in the student's wallet ledger as money added
       await tx.compensation.create({ data: { studentId, kind: "topup", amount, method: "credit", comment: `Top-up (${method})`, by: st.id } });

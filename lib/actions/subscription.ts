@@ -146,7 +146,7 @@ export async function activateSubscription(studentId: string, method: "cash" | "
         where: { studentId },
         data: { active: true, startedAt: new Date(), expiresAt: new Date(Date.now() + 365 * 86_400_000), cyclesUsed: 0 },
       });
-      await tx.payment.create({ data: { method, amount: gross, collegeId: stu.collegeId, studentId, note: `Subscription: ${stu.subscription!.plan}` } });
+      await tx.payment.create({ data: { method, amount: gross, collegeId: stu.collegeId, studentId, note: `Subscription: ${stu.subscription!.plan}`, recordedBy: st.id } });
       await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId, label: `Plan: ${stu.subscription!.plan}`, method, amount: gross });
     }, { timeout: 15_000 }); // row lock can queue concurrent activation attempts
   } catch (e) {
@@ -187,7 +187,7 @@ export async function assignSubscription(studentId: string, planId: string, meth
      money/plan logic had to be reachable from admin.ts without duplicating
      it (a "use server" file may only export async server actions, so
      admin.ts could not import a plain helper defined here). */
-  const result = await activatePlan(stu, planId, method, applyCredits);
+  const result = await activatePlan(stu, planId, method, applyCredits, undefined, st.id);
   if (!result.ok) return result;
   flushSoon();
   await db.otp.deleteMany({ where: { purpose: "subscription", refId: studentId } });
@@ -343,7 +343,7 @@ export async function upgradeSubscription(studentId: string, planId: string, met
       data: { plan: plan.name, planId: plan.id, buckets, cyclesTotal, cyclesUsed, kgPerCycle },
     });
     await tx.payment.create({
-      data: { method, amount: difference, collegeId: stu.collegeId, studentId, note: `Plan change: ${cur.plan} → ${plan.name}` },
+      data: { method, amount: difference, collegeId: stu.collegeId, studentId, note: `Plan change: ${cur.plan} → ${plan.name}`, recordedBy: st.id },
     });
     await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId, label: `Plan change: ${cur.plan} → ${plan.name}`, method, amount: difference });
     await touchStudentActivity(tx, studentId);
@@ -558,13 +558,13 @@ export async function sellCyclePack(
     });
     if (creditApplied > 0) {
       await tx.student.update({ where: { id: studentId }, data: { credits: { decrement: creditApplied } } });
-      await tx.payment.create({ data: { method: "credit", amount: creditApplied, collegeId: stu.collegeId, studentId, note: `Cycle pack: ${cycles}× ${label} (credit applied)` } });
+      await tx.payment.create({ data: { method: "credit", amount: creditApplied, collegeId: stu.collegeId, studentId, note: `Cycle pack: ${cycles}× ${label} (credit applied)`, recordedBy: st.id } });
     }
     if (cash > 0) {
       await tx.payment.create({
         data: {
           method: input.method, amount: cash, collegeId: stu.collegeId, studentId,
-          note: `Cycle pack: ${cycles}× ${label} @ ₹${rate}`,
+          note: `Cycle pack: ${cycles}× ${label} @ ₹${rate}`, recordedBy: st.id,
         },
       });
     }

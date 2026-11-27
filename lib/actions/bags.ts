@@ -109,7 +109,7 @@ export async function issueBag(
         });
         if (price > 0) {
           await tx.payment.create({
-            data: { method: input.method || "cash", amount: price, collegeId: stu.collegeId, studentId, note: `Bag ${code}` },
+            data: { method: input.method || "cash", amount: price, collegeId: stu.collegeId, studentId, note: `Bag ${code}`, recordedBy: st.id },
           });
           await enqueuePaymentEvent(tx, { collegeId: stu.collegeId, studentId, label: `Bag ${code}`, method: input.method || "cash", amount: price });
         }

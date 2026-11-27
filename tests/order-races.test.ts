@@ -59,7 +59,7 @@ describe("subscription writes are locked against concurrent top-ups/assigns/upgr
     // shared with registerStudent's now-mandatory plan step; assignSubscription
     // just delegates to it.
     const wrapper = subs.slice(subs.indexOf("export async function assignSubscription"), subs.indexOf("export async function upgradeSubscription"));
-    expect(wrapper).toMatch(/const result = await activatePlan\(stu, planId, method, applyCredits\)/);
+    expect(wrapper).toMatch(/const result = await activatePlan\(stu, planId, method, applyCredits, undefined, st\.id\)/);
     const core = fs.readFileSync(path.resolve(__dirname, "..", "lib/plan-activation.ts"), "utf8");
     expect(core).toMatch(/await tx\.\$executeRaw`SELECT pg_advisory_xact_lock\(hashtext\(\$\{`subscription\|\$\{stu\.id\}`\}\)\)`/);
     expect(core).toMatch(/if \(fresh\?\.active\) throw new Error\("This student already has an active plan"\)/);

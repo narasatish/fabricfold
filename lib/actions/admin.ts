@@ -162,6 +162,7 @@ export async function registerStudent(input: { name: string; phone: string; coll
       input.method!,
       false,
       isBvrit ? undefined : { code: typedCode, tier: expectedKind!, issuedBy: st.id },
+      st.id,
     );
     if (result.ok) {
       planName = result.plan.name;

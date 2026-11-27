@@ -374,7 +374,7 @@ export async function writeStudentsTab(): Promise<{ ok: boolean; error?: string 
       // sheet — erasing a demo account in Admin anonymised it correctly, but
       // it kept showing up here forever after, because this query never
       // excluded anonymised rows.
-      where: { anonymisedAt: null },
+      where: { anonymisedAt: null, isTestAccount: false },
       orderBy: { createdAt: "asc" },
       include: {
         college: { select: { id: true, name: true } },

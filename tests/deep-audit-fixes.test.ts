@@ -34,7 +34,7 @@ describe("campus-boundary bypasses closed in API routes", () => {
     expect(src).toMatch(/if \(!scopeId && asked\)/);
     expect(src).toMatch(/computeReport\(p, scopeId\)/);
     expect(src).toMatch(/db\.staff\.findMany\(scopeId \? \{ where: \{ collegeId: scopeId \} \} : undefined\)/);
-    expect(src).toMatch(/db\.student\.findMany\(scopeId \? \{ where: \{ collegeId: scopeId \} \} : undefined\)/);
+    expect(src).toMatch(/db\.student\.findMany\(\{ where: scopeId \? \{ collegeId: scopeId, isTestAccount: false \} : \{ isTestAccount: false \} \}\)/);
   });
   it("the Reports screen itself scopes computeReport too — not just its export", () => {
     // Renamed staff.collegeId -> selectedCollegeId when the Owner per-campus
@@ -959,6 +959,6 @@ describe("account erasure now refreshes the Sheet roster immediately, matching r
 
   it("writeStudentsTab already excludes anonymised rows — the fix was purely about WHEN that takes effect, not what it excludes", () => {
     const sync = read("lib/sheets-sync.ts");
-    expect(sync).toMatch(/where: \{ anonymisedAt: null \}/);
+    expect(sync).toMatch(/where: \{ anonymisedAt: null, isTestAccount: false \}/);
   });
 });

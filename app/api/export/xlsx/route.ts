@@ -31,7 +31,7 @@ export async function GET(req: Request) {
   const scopeName = scopeId ? (await db.college.findUnique({ where: { id: scopeId }, select: { name: true } }))?.name ?? scopeId : "All colleges";
   const r = await computeReport(p, scopeId);
   const staff = await db.staff.findMany(scopeId ? { where: { collegeId: scopeId } } : undefined);
-  const students = await db.student.findMany(scopeId ? { where: { collegeId: scopeId } } : undefined);
+  const students = await db.student.findMany({ where: scopeId ? { collegeId: scopeId, isTestAccount: false } : { isTestAccount: false } });
   const byId = (id: string | null | undefined, list: { id: string; name: string }[]) => list.find((x) => x.id === id)?.name || id || "";
   const N = (x: unknown) => Number(x || 0);
 

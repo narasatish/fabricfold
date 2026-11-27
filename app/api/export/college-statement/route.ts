@@ -36,7 +36,7 @@ export async function GET(req: Request) {
     db.order.findMany({ where: { collegeId, createdAt: { gte: from, lt: to }, status: { not: "cancelled" } } }),
     db.payment.findMany({ where: { collegeId, at: { gte: from, lt: to }, amount: { gt: 0 }, method: { in: ["cash", "upi", "credit"] } } }),
     db.invoice.findMany({ where: { collegeId, at: { gte: from, lt: to } } }),
-    db.student.count({ where: { collegeId } }),
+    db.student.count({ where: { collegeId, isTestAccount: false } }),
   ]);
 
   const N = (x: unknown) => Number(x || 0);

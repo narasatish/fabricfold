@@ -125,6 +125,14 @@ model Student {
    */
   anonymisedAt DateTime?
 
+  /** Owner's own account(s) used to test the student app, created directly
+   * against the database for exactly that purpose (2026-11) — not a real
+   * enrolled student. Excluded from the Sheets "Students" tab, the staff
+   * roster, and student-count exports for the same reason anonymisedAt is:
+   * noise that isn't a real person to count. Never set via the normal
+   * registration form (which has no field for it) — only by hand. */
+  isTestAccount Boolean @default(false)
+
   subscription  Subscription?
   orders        Order[]
   payments      Payment[]

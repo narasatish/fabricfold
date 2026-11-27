@@ -476,6 +476,44 @@ export async function saveSettings(settings: Record<string, unknown>) {
   return { ok: true as const };
 }
 
+/* ----- Student-facing announcement banner (any staff; owner request 2026-11:
+   "we need to show the banners to students if we want to change anything we
+   should show them only staff/owners should have the option"). Stored on the
+   same AppConfig.settings JSON blob saveSettings above already uses, under
+   its own key — no schema migration needed, and it stays independent of the
+   Admin-only (requireStaff(3)) report-email/alert-phone settings: any staff
+   member (requireStaff(1)) can post or clear this, since it's an operational
+   notice ("machines down Tuesday"), not a business-config change. */
+export async function getAnnouncementBanner() {
+  const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
+  const banner = (cfg.settings as Record<string, unknown>)?.announcementBanner as
+    | { text: string; active: boolean; updatedAt: string; by?: string }
+    | undefined;
+  if (!banner?.active || !banner.text?.trim()) return null;
+  return { text: banner.text.trim().slice(0, 300) };
+}
+
+export async function getAnnouncementBannerAdmin() {
+  await requireStaff(1);
+  const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
+  const banner = (cfg.settings as Record<string, unknown>)?.announcementBanner as
+    | { text: string; active: boolean; updatedAt: string; by?: string }
+    | undefined;
+  return banner ?? { text: "", active: false, updatedAt: "" };
+}
+
+export async function setAnnouncementBanner(text: string, active: boolean) {
+  const st = await requireStaff(1);
+  const trimmed = text.trim().slice(0, 300);
+  if (active && !trimmed) return { ok: false as const, error: "Enter what the banner should say" };
+  const cfg = await db.appConfig.findUniqueOrThrow({ where: { id: "main" } });
+  const banner = { text: trimmed, active, updatedAt: new Date().toISOString(), by: st.name };
+  const merged = { ...(cfg.settings as Record<string, unknown>), announcementBanner: banner };
+  await db.appConfig.update({ where: { id: "main" }, data: { settings: JSON.parse(JSON.stringify(merged)) } });
+  await audit(active ? "Student banner posted" : "Student banner cleared", trimmed || "(cleared)", st.id);
+  return { ok: true as const };
+}
+
 /* ----- Colleges + per-college feature flags ----- */
 export async function toggleFeature(collegeId: string, key: string) {
   const st = await requireStaff(2); // Manager+ toggle features

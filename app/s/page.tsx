@@ -162,6 +162,9 @@ export default async function StaffHomePage() {
   }));
 
   const registerGstOn = (registerPlansCfg.settings as Record<string, unknown>)?.gstEnabled !== false;
+  const announcementBanner = (registerPlansCfg.settings as Record<string, unknown>)?.announcementBanner as
+    | { text: string; active: boolean }
+    | undefined;
   const registerPlans = registerPlansRaw.map((p) => {
     const price = Number(p.price);
     const gstApplies = registerGstOn && !p.gstFree;
@@ -245,6 +248,7 @@ export default async function StaffHomePage() {
         unpaid={unpaid}
         cash={cash}
         canCount={canCount}
+        banner={announcementBanner ?? null}
       />
     </div>
   );

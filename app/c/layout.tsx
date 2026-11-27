@@ -3,6 +3,7 @@ import { getSession, requireStudent, AuthError } from "@/lib/auth";
 import { RealtimeRefresh } from "@/components/chrome";
 import { InstallPrompt } from "@/components/pwa";
 import { SafePaymentBanner } from "@/components/safe-payment-banner";
+import { AnnouncementBanner } from "@/components/announcement-banner";
 import CustomerTabBar from "./_components/TabBar";
 import { db } from "@/lib/db";
 
@@ -32,9 +33,12 @@ export default async function CustomerLayout({ children }: { children: React.Rea
     db.appConfig.findUnique({ where: { id: "main" } }),
   ]);
   const payeeName = (appConfig?.payment as unknown as { payeeName?: string } | null)?.payeeName || "";
+  const banner = (appConfig?.settings as unknown as { announcementBanner?: { text: string; active: boolean } } | null)?.announcementBanner;
+  const bannerText = banner?.active && banner.text?.trim() ? banner.text.trim().slice(0, 300) : null;
 
   return (
     <>
+      <AnnouncementBanner text={bannerText} />
       <SafePaymentBanner payeeName={payeeName} />
       {children}
       <CustomerTabBar unread={unreadCount} />

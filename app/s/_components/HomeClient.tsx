@@ -13,6 +13,7 @@ import { searchStudents } from "@/lib/actions/students";
 import { clockIn, clockOut } from "@/lib/actions/ops";
 import { recordCashCount } from "@/lib/actions/cash";
 import { advanceStatusBatch } from "@/lib/actions/orders";
+import { setAnnouncementBanner } from "@/lib/actions/admin";
 
 type Order = {
   id: string;
@@ -53,6 +54,7 @@ export default function StaffHomeClient({
   unpaid,
   cash,
   canCount,
+  banner,
 }: {
   staff: { name: string; role: number };
   orders: Order[];
@@ -66,6 +68,7 @@ export default function StaffHomeClient({
   unpaid: { id: string; name: string; total: number; collegeId: string | null; since: number }[];
   cash: Record<string, { expected: number; counted: number | null; diff: number | null }>;
   canCount: boolean;
+  banner: { text: string; active: boolean } | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -87,6 +90,26 @@ export default function StaffHomeClient({
   const [batchIds, setBatchIds] = useState<Set<string>>(new Set());
   const [batchBusy, setBatchBusy] = useState(false);
   const [reg, setReg] = useState({ name: "", phone: "", customerId: "", collegeId: registerColleges[0]?.id || "", kind: "student" as "student" | "faculty", planId: "", method: "cash" as "cash" | "upi" });
+  // Student-facing banner (owner, 2026-11): any staff/owner can post or
+  // clear what every student sees on every /c screen — see
+  // components/announcement-banner.tsx and lib/actions/admin.ts.
+  const [showBanner, setShowBanner] = useState(false);
+  const [bannerText, setBannerText] = useState(banner?.text ?? "");
+  const [bannerBusy, setBannerBusy] = useState(false);
+  const saveBanner = async (active: boolean) => {
+    setBannerBusy(true);
+    try {
+      const r = await setAnnouncementBanner(bannerText, active);
+      if (!r.ok) return toast(r.error || "Failed", true);
+      toast(active ? "Banner posted to all students" : "Banner cleared");
+      setShowBanner(false);
+      router.refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed", true);
+    } finally {
+      setBannerBusy(false);
+    }
+  };
   // BVRIT IDs are generated; St Mary's (and any other campus) are typed by staff.
   const regIsBvrit = (registerColleges.find((c) => c.id === reg.collegeId)?.name ?? "").trim().toUpperCase() === "BVRIT";
   const [regLoading, setRegLoading] = useState(false);
@@ -296,6 +319,29 @@ export default function StaffHomeClient({
           </button>
         )}
       </div>
+
+      {/* Student banner — any staff/owner can post or clear a notice that
+          shows on every student's screen (machine downtime, holiday hours,
+          etc). The card itself always shows the live state so staff don't
+          have to open the editor just to check what's currently posted. */}
+      <button
+        className="card pad mt12"
+        onClick={() => { setBannerText(banner?.text ?? ""); setShowBanner(true); }}
+        style={{ width: "100%", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}
+      >
+        <div className="icon-tile" style={{ background: banner?.active ? "var(--teal-soft)" : "var(--line)", color: banner?.active ? "var(--teal-dark)" : "var(--muted)" }}>
+          <Svg name="bell" size={20} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div className="h-sm">Student banner</div>
+          <div className="muted" style={{ fontSize: "12.5px" }}>
+            {banner?.active && banner.text ? banner.text : "Nothing posted — tap to add a notice for students"}
+          </div>
+        </div>
+        <span className="pill" style={{ background: banner?.active ? "var(--teal-soft)" : "var(--line)", color: banner?.active ? "var(--teal-dark)" : "var(--muted)" }}>
+          {banner?.active ? "Live" : "Off"}
+        </span>
+      </button>
 
       {/* Campus switch — one tap to see St Mary's, BVRIT, or everything
           together, instead of hunting for a filter buried in a list. */}
@@ -549,6 +595,36 @@ export default function StaffHomeClient({
       )}
 
       {/* Register-student sheet */}
+      <Sheet open={showBanner} onClose={() => setShowBanner(false)}>
+        <div className="pad">
+          <h2 style={{ marginBottom: "6px" }}>Student banner</h2>
+          <p className="muted" style={{ fontSize: "13px", marginBottom: "16px" }}>
+            Shown at the top of every screen in the student app — machine downtime, holiday hours, anything students should know right away.
+          </p>
+          <div className="field">
+            <label>Banner text</label>
+            <textarea
+              className="input"
+              rows={3}
+              maxLength={300}
+              placeholder="e.g. Machines down Tuesday 10am–1pm for maintenance"
+              value={bannerText}
+              onChange={(e) => setBannerText(e.target.value)}
+            />
+          </div>
+          <div className="row gap8 mt16">
+            <button className="btn" disabled={bannerBusy || !bannerText.trim()} onClick={() => saveBanner(true)}>
+              {bannerBusy ? "Saving…" : banner?.active ? "Update banner" : "Post to students"}
+            </button>
+            {banner?.active && (
+              <button className="btn sec" disabled={bannerBusy} onClick={() => saveBanner(false)}>
+                Clear banner
+              </button>
+            )}
+          </div>
+        </div>
+      </Sheet>
+
       <Sheet open={showRegister} onClose={() => setShowRegister(false)}>
         <div className="pad">
           <h2 style={{ marginBottom: "6px" }}>Register new student</h2>

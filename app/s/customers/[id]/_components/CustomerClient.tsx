@@ -9,7 +9,7 @@ import { Seg, Sheet, Switch, useToast } from "@/components/chrome";
 import { submitCompensation } from "@/lib/actions/credits";
 import { assignSubscription, upgradeSubscription, cancelSubscription, adjustCycleUsage } from "@/lib/actions/subscription";
 import { issueBag, releaseBagCode, setBagCode, reissueBagSameCode } from "@/lib/actions/bags";
-import { walkInOrder } from "@/lib/actions/orders";
+import { walkInOrder, advanceStatus } from "@/lib/actions/orders";
 import { sellCyclePack } from "@/lib/actions/subscription";
 import { CYCLE_RATES, CYCLE_KG_LIMIT, collegeUsesCycleBasedPricing, collegeExpressFee, expressItemRate } from "@/lib/money";
 import { enqueueIntake, newIdemKey } from "@/lib/offline-queue";
@@ -435,7 +435,12 @@ Currently ${current}. Type the code printed on the bag they are being given.
     }
     setWiLoading(false);
     if (!r.ok) return toast(r.error || "Failed", true);
-    toast(`Walk-in order #${r.id?.slice(-4)} created`);
+    // Counter-flow redesign (owner, 2026-11): a walk-in is counted and
+    // priced at the counter already, so it goes straight to "processing" —
+    // no separate "Start processing" click. Best-effort; a failure here just
+    // leaves the order at "received" for the manual button to pick up.
+    if (r.id) await advanceStatus(r.id).catch(() => {});
+    toast(`Walk-in order #${r.id?.slice(-4)} created — processing started`);
     setShowWalkIn(false);
     setWiQty({});
     router.push(`/s/orders/${r.id}`);

@@ -198,7 +198,12 @@ export default function StaffOrderClient({
         toast(r.error || "Failed", true);
         return;
       }
-      toast("Order accepted");
+      // Counter-flow redesign (owner, 2026-11): accepting IS starting the
+      // wash — staff no longer click a separate "Start processing" step.
+      // Best-effort: if this one call fails the order just sits at
+      // "received" and the old manual button still exists to recover.
+      await advanceStatus(order.id).catch(() => {});
+      toast("Order accepted — processing started");
       setShowAcceptSheet(false);
       router.refresh();
     } catch (e) {

@@ -87,16 +87,30 @@ export default function StaffCustomerClient({ student, displayId, staffRole, pla
 
   // Walk-in order (student at the counter without a booking)
   const serviceKeys = Object.keys(rates);
-  // Wash & Fold is the default service everywhere — Dry Clean happening to be
-  // first in the college's rates object made IT the default instead, which
-  // is wrong for the overwhelming majority of walk-ins (owner, Sep 22).
-  const defaultWiService = serviceKeys.includes("washFold") ? "washFold" : serviceKeys[0] || "washIron";
+  // Owner, 2026-11: scanning a subscriber's QR should jump straight to
+  // THEIR plan's own service(s) — a Bronze/Gold (one bucket) student never
+  // needs to see Dry Clean or the other service in the dropdown, a Silver
+  // (two buckets) student sees just those two — not the full 4-service menu
+  // every walk-in gets. "Other services" (below) is the deliberate escape
+  // hatch for a genuine per-piece add-on alongside the plan.
+  const planBucketServices = (student.subscription?.buckets ?? [])
+    .map((b) => b.service)
+    .filter((svc) => serviceKeys.includes(svc));
   const subHasCycles = !!student.subscription?.active;
+  const hasRestrictedPlanServices = subHasCycles && planBucketServices.length > 0;
+  // Wash & Fold is the default service everywhere else — Dry Clean happening
+  // to be first in the college's rates object made IT the default instead,
+  // which is wrong for the overwhelming majority of walk-ins (owner, Sep 22).
+  const defaultWiService = hasRestrictedPlanServices
+    ? planBucketServices[0]
+    : serviceKeys.includes("washFold") ? "washFold" : serviceKeys[0] || "washIron";
   const [showWalkIn, setShowWalkIn] = useState(false);
+  const [showAllServices, setShowAllServices] = useState(!hasRestrictedPlanServices);
   const [wiService, setWiService] = useState(defaultWiService);
   const [wiQty, setWiQty] = useState<Record<string, number>>({});
   const [wiCycles, setWiCycles] = useState(1);
   const [packSvc, setPackSvc] = useState<"washFold" | "washIron">("washFold");
+  const visibleServiceKeys = showAllServices || !hasRestrictedPlanServices ? serviceKeys : planBucketServices;
   const [packCycles, setPackCycles] = useState(16);
   const [packMethod, setPackMethod] = useState<"cash" | "upi">("cash");
   const [packApplyCredits, setPackApplyCredits] = useState(false);
@@ -886,9 +900,42 @@ Currently ${current}. Type the code printed on the bag they are being given.
           </p>
           <div className="field">
             <label>Service</label>
-            <select className="input" value={wiService} onChange={(e) => { setWiService(e.target.value); setWiQty({}); }}>
-              {serviceKeys.map((k) => <option key={k} value={k}>{rates[k].label}</option>)}
+            <select
+              className="input"
+              value={wiService}
+              onChange={(e) => {
+                const next = e.target.value;
+                setWiService(next);
+                setWiQty({});
+                // Can't burn a cycle on a service the plan doesn't include —
+                // force it off rather than let "other services" silently try
+                // to consume a bucket that isn't there.
+                if (!planBucketServices.includes(next)) setWiUseCycle(false);
+                else if (subHasCycles) setWiUseCycle(true);
+              }}
+            >
+              {visibleServiceKeys.map((k) => <option key={k} value={k}>{rates[k].label}</option>)}
             </select>
+            {hasRestrictedPlanServices && (
+              <button
+                type="button"
+                className="link"
+                style={{ fontSize: 12.5, marginTop: 6, background: "none", border: "none", padding: 0, color: "var(--teal)", cursor: "pointer" }}
+                onClick={() => {
+                  const goingToAll = !showAllServices;
+                  setShowAllServices(goingToAll);
+                  if (!goingToAll) {
+                    // Back to the plan's own service(s) — reset to the first
+                    // bucket service, same as opening the sheet fresh.
+                    setWiService(planBucketServices[0]);
+                    setWiQty({});
+                    setWiUseCycle(true);
+                  }
+                }}
+              >
+                {showAllServices ? "Back to plan services" : "Check other services"}
+              </button>
+            )}
           </div>
           {wiCycleBased ? (
             <div className="between" style={{ padding: "7px 0" }}>
